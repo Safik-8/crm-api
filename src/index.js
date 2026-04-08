@@ -12,6 +12,7 @@ import prisma from "./config/db.js"
 import { errorHandler, notFound } from "./middleware/errorHandler.js"
 
 import authRoutes from "./modules/auth/auth.routes.js"
+import { initializeSystem } from "./config/initSystem.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
 dotenv.config({ quiet: true })

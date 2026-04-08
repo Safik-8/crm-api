@@ -119,6 +119,16 @@ const ROLE_PERMISSIONS = {
 // ══════════════════════════════════════
 export const initializeSystem = async () => {
     try {
+        // Check if SuperAdmin already exists
+        const existingSuperAdmin = await prisma.user.findUnique({
+            where: { email: "superadmin@gmail.com" }
+        })
+
+        if (existingSuperAdmin) {
+            console.log("ℹ️  System already initialized — SuperAdmin exists, skipping initialization")
+            return
+        }
+
         console.log("🔄 First time — initializing system...")
 
         // ── STEP 1: CREATE ROLES ──────────────────────────────

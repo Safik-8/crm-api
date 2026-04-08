@@ -129,9 +129,6 @@ export const loginUserService = async (email, password) => {
     data  : { lastLoginAt: new Date() }
   })
 
-  console.log("accesstoken" , accessToken);
-  console.log("refreshtoken" , refreshToken);
-  
   // ── 13. RETURN — clean structure ───────────────────────
   return {
     accessToken,
