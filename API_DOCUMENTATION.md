@@ -1,11 +1,11 @@
-# StackDot CRM Backend API Documentation
+﻿# StackDot CRM Backend API Documentation
 
 ## Overview
-This is the backend API for StackDot CRM, built with Node.js, Express, and Prisma ORM with PostgreSQL database.
+This is the backend API for StackDot CRM, built with Node.js, Express, and Prisma ORM on PostgreSQL.
 
 ## Prerequisites
-- Node.js (version 18 or higher)
-- PostgreSQL database
+- Node.js 18+ installed
+- PostgreSQL database available
 - npm or yarn package manager
 
 ## Installation
@@ -22,7 +22,7 @@ This is the backend API for StackDot CRM, built with Node.js, Express, and Prism
    ```
 
 3. **Environment Setup**
-   Create a `.env` file in the BACKEND directory with the following variables:
+   Create a `.env` file in the `BACKEND` directory with:
    ```env
    DATABASE_URL="postgresql://username:password@localhost:5432/stackdot_crm?schema=public"
    DIRECT_URL="postgresql://username:password@localhost:5432/stackdot_crm?schema=public"
@@ -31,11 +31,12 @@ This is the backend API for StackDot CRM, built with Node.js, Express, and Prism
    JWT_ACCESS_EXPIRY="15m"
    JWT_REFRESH_EXPIRY="7d"
    PORT=5000
+   CLIENT_URL=http://localhost:3000
    ```
 
 4. **Database Setup**
-   - Ensure PostgreSQL is running
-   - Create a database named `stackdot_crm`
+   - Start PostgreSQL
+   - Create the `stackdot_crm` database
    - Run Prisma migrations:
      ```bash
      npx prisma migrate dev
@@ -52,17 +53,26 @@ This is the backend API for StackDot CRM, built with Node.js, Express, and Prism
 
 ---
 
-## API Endpoints
+## API Base Path
+All endpoints are mounted under the base path:
 
-### Authentication Endpoints
+`/api`
 
-#### 1. Login
-**Endpoint:** `POST /auth/login`
+So the login endpoint is:
 
-**Description:** Authenticate user with email and password. Returns access and refresh tokens as httpOnly cookies.
+`POST /api/auth/login`
+
+---
+
+## Authentication Endpoints
+
+### 1. Login
+**Endpoint:** `POST /api/auth/login`
+
+**Description:** Authenticate a user with email and password. Returns user profile in response and sets `accessToken` and `refreshToken` cookies.
 
 **Request Headers:**
-```
+```http
 Content-Type: application/json
 ```
 
@@ -74,7 +84,7 @@ Content-Type: application/json
 }
 ```
 
-**Response (200 OK):**
+**Success Response (200 OK):**
 ```json
 {
   "success": true,
@@ -122,63 +132,61 @@ Content-Type: application/json
 ```
 
 **Cookies Set:**
-- `accessToken`: JWT token with payload containing userId, email, name, company/branch info, roles, and permissions (valid for 15 minutes)
-- `refreshToken`: JWT token with payload containing userId, email, and companyId (valid for 7 days)
+- `accessToken`: httpOnly cookie valid for 15 minutes
+- `refreshToken`: httpOnly cookie valid for 7 days
 
-**Error Response (401 Unauthorized):**
+**Error Responses:**
+- `401 Unauthorized` when email or password is invalid
+- `400 Validation Error` when required fields are missing
+
+**Example Unauthorized Error:**
 ```json
 {
   "success": false,
   "statusCode": 401,
+  "code": "UNAUTHORIZED",
   "message": "Invalid email or password",
-  "data": null,
+  "details": null,
   "timestamp": "2026-04-08T10:30:25.123Z"
 }
 ```
 
-**Error Response (400 Validation Error):**
+**Example Validation Error:**
 ```json
 {
   "success": false,
   "statusCode": 400,
+  "code": "VALIDATION_ERROR",
   "message": "Validation failed",
-  "data": {
-    "errors": [
-      {
-        "field": "email",
-        "message": "Email is required"
-      },
-      {
-        "field": "password",
-        "message": "Password is required"
-      }
-    ]
-  },
+  "details": [
+    { "field": "email", "message": "Email is required" },
+    { "field": "password", "message": "Password is required" }
+  ],
   "timestamp": "2026-04-08T10:30:25.123Z"
 }
 ```
 
 ---
 
-#### 2. Refresh Token
-**Endpoint:** `POST /auth/refresh`
+### 2. Refresh Token
+**Endpoint:** `POST /api/auth/refresh`
 
-**Description:** Generate a new access token using the refresh token. Can be provided as a cookie or in request body.
+**Description:** Refresh the access token using the current refresh token. The refresh token may be supplied via cookie or request body.
 
 **Request Headers:**
-```
+```http
 Content-Type: application/json
 Cookie: refreshToken=<refresh_token_value>
 ```
 
-**Request Body (Optional - if not using cookies):**
+**Request Body (optional):**
 ```json
 {
   "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
-**Response (200 OK):**
+**Success Response (200 OK):**
 ```json
 {
   "success": true,
@@ -220,28 +228,48 @@ Cookie: refreshToken=<refresh_token_value>
 ```
 
 **Cookies Updated:**
-- `accessToken`: New JWT token (valid for 15 minutes)
+- `accessToken`: refreshed token is set in cookie
+- `refreshToken`: refreshed token is set in cookie
 
-**Error Response (401 Unauthorized):**
+**Error Responses:**
+- `400 Validation Error` when the refresh token is missing from both cookie and body
+- `401 Unauthorized` when the refresh token is invalid or expired
+
+**Example Validation Error:**
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "details": [
+    { "field": "refreshToken", "message": "Refresh token is required" }
+  ],
+  "timestamp": "2026-04-08T10:31:25.123Z"
+}
+```
+
+**Example Unauthorized Error:**
 ```json
 {
   "success": false,
   "statusCode": 401,
-  "message": "Refresh token is invalid or expired",
-  "data": null,
+  "code": "UNAUTHORIZED",
+  "message": "Invalid or expired refresh token",
+  "details": null,
   "timestamp": "2026-04-08T10:31:25.123Z"
 }
 ```
 
 ---
 
-#### 3. Logout
-**Endpoint:** `POST /auth/logout`
+### 3. Logout
+**Endpoint:** `POST /api/auth/logout`
 
-**Description:** Logout user by invalidating the refresh token and clearing cookies.
+**Description:** Logout the current user by invalidating the refresh token and clearing cookies.
 
 **Request Headers:**
-```
+```http
 Content-Type: application/json
 Cookie: refreshToken=<refresh_token_value>
 ```
@@ -251,7 +279,7 @@ Cookie: refreshToken=<refresh_token_value>
 {}
 ```
 
-**Response (200 OK):**
+**Success Response (200 OK):**
 ```json
 {
   "success": true,
@@ -263,40 +291,31 @@ Cookie: refreshToken=<refresh_token_value>
 ```
 
 **Cookies Cleared:**
-- `accessToken`: Cleared
-- `refreshToken`: Cleared
+- `accessToken`
+- `refreshToken`
 
-**Error Response (401 Unauthorized):**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "message": "Refresh token is missing or invalid",
-  "data": null,
-  "timestamp": "2026-04-08T10:32:25.123Z"
-}
-```
+**Error Responses:**
+- This endpoint returns `200 OK` even if the refresh token is missing or already invalidated.
+- There is no required request body validation for logout.
 
 ---
 
-#### 4. Get Current User
-**Endpoint:** `GET /auth/me`
+### 4. Get Current User
+**Endpoint:** `GET /api/auth/me`
 
-**Description:** Fetch the currently authenticated user's profile information. Requires authentication.
+**Description:** Retrieve the current authenticated user's profile. Requires a valid access token cookie.
 
 **Request Headers:**
-```
-Content-Type: application/json
-Authorization: Bearer <access_token>
-Cookie: accessToken=<access_token_value>
+```http
+Authorization: Bearer <access_token_value>
 ```
 
 **Request Body:**
 ```
-(No body required)
+No body required
 ```
 
-**Response (200 OK):**
+**Success Response (200 OK):**
 ```json
 {
   "success": true,
@@ -321,12 +340,6 @@ Cookie: accessToken=<access_token_value>
           "companyId": "company_id_uuid",
           "branchId": "branch_id_uuid",
           "isPrimary": true
-        },
-        {
-          "role": "Manager",
-          "companyId": "company_id_uuid",
-          "branchId": "branch_id_uuid",
-          "isPrimary": false
         }
       ],
       "permissions": {
@@ -335,18 +348,6 @@ Cookie: accessToken=<access_token_value>
           "canCreate": false,
           "canEdit": false,
           "canDelete": false
-        },
-        "users": {
-          "canView": true,
-          "canCreate": true,
-          "canEdit": true,
-          "canDelete": true
-        },
-        "reports": {
-          "canView": true,
-          "canCreate": true,
-          "canEdit": false,
-          "canDelete": false
         }
       }
     }
@@ -355,13 +356,30 @@ Cookie: accessToken=<access_token_value>
 }
 ```
 
-**Error Response (401 Unauthorized):**
+**Error Responses:**
+- `401 Unauthorized` when the access token is missing, invalid, or expired
+- `403 Forbidden` when the user account is inactive or has no assigned roles
+
+**Example Unauthorized Error:**
 ```json
 {
   "success": false,
   "statusCode": 401,
-  "message": "Access token is missing or invalid",
-  "data": null,
+  "code": "UNAUTHORIZED",
+  "message": "Not authenticated",
+  "details": null,
+  "timestamp": "2026-04-08T10:33:25.123Z"
+}
+```
+
+**Example Forbidden Error:**
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "ACCOUNT_INACTIVE",
+  "message": "Your account has been deactivated. Contact admin.",
+  "details": null,
   "timestamp": "2026-04-08T10:33:25.123Z"
 }
 ```
@@ -369,13 +387,12 @@ Cookie: accessToken=<access_token_value>
 ---
 
 ## Response Format
-
-All API responses follow a consistent format:
+All API responses use this structure:
 
 ```json
 {
-  "success": true|false,
-  "statusCode": 200|201|400|401|403|500,
+  "success": true | false,
+  "statusCode": 200 | 201 | 400 | 401 | 403 | 404 | 500,
   "message": "Descriptive message",
   "data": {} | null,
   "timestamp": "ISO 8601 timestamp"
@@ -383,392 +400,47 @@ All API responses follow a consistent format:
 ```
 
 **Response Fields:**
-- `success` (boolean): Indicates if the request was successful
-- `statusCode` (number): HTTP status code
-- `message` (string): Human-readable message about the response
-- `data` (object|null): Response payload (null on error)
-- `timestamp` (string): ISO 8601 formatted timestamp of when response was generated
+- `success`: boolean
+- `statusCode`: HTTP status code
+- `message`: human-readable message
+- `data`: response payload or `null`
+- `timestamp`: ISO 8601 timestamp
 
 ---
 
-## Authentication & Authorization
-
-### Token Management
-
-**Access Token:**
-- Validity: 15 minutes
-- Storage: httpOnly cookie (secure, sameSite: lax)
-- Usage: Automatically sent with requests
-
-**Refresh Token:**
-- Validity: 7 days
-- Storage: httpOnly cookie (secure, sameSite: lax)
-- Usage: Used to obtain new access tokens
-
-### JWT Payload Structure
-
-**Access Token Payload:**
-```json
-{
-  "userId": "user_id_uuid",
-  "email": "user@example.com",
-  "name": "John Doe",
-  "companyId": "company_id_uuid",
-  "branchId": "branch_id_uuid",
-  "primaryRole": "Admin",
-  "roles": [
-    {
-      "role": "Admin",
-      "companyId": "company_id_uuid",
-      "branchId": "branch_id_uuid",
-      "isPrimary": true
-    }
-  ],
-  "permissions": {
-    "COMPANY": { "canView": true, "canCreate": true, "canEdit": true, "canDelete": true },
-    "USER": { "canView": true, "canCreate": true, "canEdit": true, "canDelete": true },
-    "PROSPECT": { "canView": true, "canCreate": true, "canEdit": true, "canDelete": true }
-  },
-  "iat": 1712603425,
-  "exp": 1712604325
-}
-```
-
-**Refresh Token Payload:**
-```json
-{
-  "userId": "user_id_uuid",
-  "email": "user@example.com",
-  "companyId": "company_id_uuid",
-  "iat": 1712603425,
-  "exp": 1713208225
-}
-```
-
-**Payload Fields:**
-- `userId`: Unique identifier for the user
-- `email`: User email address
-- `name`: Full name of the user (access token only)
-- `companyId`: Associated company ID
-- `branchId`: Associated branch ID (access token only)
-- `primaryRole`: User's primary role name (access token only)
-- `roles`: Array of all roles assigned to the user (access token only)
-- `permissions`: Module-based permissions object (access token only)
-- `iat`: Issued at timestamp
-- `exp`: Expiration timestamp
-
-### Authentication Middleware
-
-Protected endpoints require the `authenticate` middleware which:
-1. Extracts access token from cookies
-2. Validates JWT signature and expiry
-3. Retrieves fresh user data from database
-4. Attaches user object to `req.user`
-
-### Authorization
-
-User actions are controlled by permission checks:
-- Permissions are module-based (e.g., "users", "reports", "dashboard")
-- Each permission has four levels: `canView`, `canCreate`, `canEdit`, `canDelete`
-- Permissions are aggregated from all user roles
-- A user can have multiple roles across different companies/branches
+## Authentication Notes
+- The API is mounted at `/api`.
+- The auth routes are defined under `/api/auth/*`.
+- `accessToken` and `refreshToken` are stored in httpOnly cookies.
+- `accessToken` expires after 15 minutes.
+- `refreshToken` expires after 7 days.
+- The `refresh` endpoint returns only the refreshed user profile in the body; new tokens are set in cookies.
+- The `logout` endpoint clears both auth cookies.
 
 ---
 
 ## Error Handling
+When an error occurs, the API returns standard JSON with `success: false`.
 
-The API uses standardized error responses:
-
-**Validation Error (400):**
+**Example:**
 ```json
 {
   "success": false,
   "statusCode": 400,
+  "code": "VALIDATION_ERROR",
   "message": "Validation failed",
-  "data": {
-    "errors": [
-      {
-        "field": "email",
-        "message": "Email is required"
-      }
-    ]
-  },
+  "details": [
+    { "field": "email", "message": "Email is required" }
+  ],
   "timestamp": "2026-04-08T10:30:25.123Z"
 }
 ```
 
-**Unauthorized Error (401):**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "message": "Unauthorized",
-  "data": null,
-  "timestamp": "2026-04-08T10:30:25.123Z"
-}
-```
-
-**Forbidden Error (403):**
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "message": "You do not have permission to perform this action",
-  "data": null,
-  "timestamp": "2026-04-08T10:30:25.123Z"
-}
-```
-
-**Server Error (500):**
-```json
-{
-  "success": false,
-  "statusCode": 500,
-  "message": "Internal server error",
-  "data": null,
-  "timestamp": "2026-04-08T10:30:25.123Z"
-}
-```
-
----
-
-## Status Codes
-
-| Code | Meaning | Description |
-|------|---------|-------------|
-| 200 | OK | Request successful |
-| 201 | Created | Resource created successfully |
-| 400 | Bad Request | Validation or request format error |
-| 401 | Unauthorized | Authentication failed or token expired |
-| 403 | Forbidden | User lacks required permissions |
-| 500 | Server Error | Internal server error |
-
----
-
-## Testing the API
-
-### Using cURL
-
-**Login:**
-```bash
-curl -X POST http://localhost:5000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "password": "securePassword123"
-  }' \
-  -c cookies.txt
-```
-
-**Get Current User (using cookies):**
-```bash
-curl -X GET http://localhost:5000/auth/me \
-  -b cookies.txt
-```
-
-**Refresh Token:**
-```bash
-curl -X POST http://localhost:5000/auth/refresh \
-  -b cookies.txt
-```
-
-**Logout:**
-```bash
-curl -X POST http://localhost:5000/auth/logout \
-  -b cookies.txt
-```
-
-### Using Postman
-
-1. Set request method and URL
-2. For login: Add JSON body with email and password
-3. After login, Postman will automatically manage cookies
-4. For protected endpoints, cookies are automatically included
-
----
-
-## Database Schema
-
-### User Table
-Stores user account information and authentication details.
-
-### RefreshToken Table
-Stores issued refresh tokens with expiry dates for logout functionality.
-
-### Company & Branch Tables
-Store organizational hierarchy information.
-
-### Role & Permission Tables
-Define user roles and their associated permissions across modules.
-
----
-
-## Notes
-
-- All timestamps are in ISO 8601 format (UTC)
-- Tokens are JWT-based and signed with HS256 algorithm
-- Cookies use secure settings: httpOnly, sameSite=lax
-- Passwords are hashed using bcryptjs before storage
-- API uses additive permissions model (permissions from all roles are combined)
-- Last login timestamp is updated on successful authentication
-   ```
-   On first run, the system will automatically initialize roles, permissions, and create an initial SuperAdmin user.
-
-## Initial SuperAdmin Account
-
-When the server starts for the first time, it automatically creates a SuperAdmin user:
-
-- **Email**: `superadmin@stackdot.com`
-- **Password**: `superadmin123`
-- **Company**: null (system-wide access)
-- **Branch**: null (system-wide access)
-
-⚠️ **Important**: Change the default password immediately after first login in production environments.
-
-### Development Mode
-```bash
-npm run dev
-```
-This starts the server with nodemon for auto-reloading.
-
-### Production Mode
-```bash
-npm start
-```
-This starts the server with Node.js.
-
-The server will run on `http://localhost:5000` by default.
-
-## API Documentation
-
-### Base URL
-```
-http://localhost:5000
-```
-
-### Authentication
-Currently, the API uses simple email/password authentication. JWT tokens will be implemented in future updates.
-
-### Endpoints
-
-#### Health Check
-- **GET** `/`
-- **Description**: Check if the API is running
-- **Response**:
-  ```json
-  {
-    "success": true,
-    "message": "StackDot CRM API ✅",
-    "version": "1.0.0",
-    "timestamp": "2026-04-07T12:00:00.000Z"
-  }
-  ```
-
-#### User Login
-- **POST** `/auth/login`
-- **Description**: Authenticate a user and return user details, company, branches, roles, and permissions
-- **Request Body**:
-  ```json
-  {
-    "email": "user@example.com",
-    "password": "password123"
-  }
-  ```
-- **Response (Success)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "user": {
-        "id": 1,
-        "name": "John Doe",
-        "email": "user@example.com"
-      },
-      "company": {
-        "id": 1,
-        "name": "Example Company"
-      },
-      "branches": [
-        {
-          "id": 1,
-          "name": "Main Branch"
-        },
-        {
-          "id": 2,
-          "name": "Secondary Branch"
-        }
-      ],
-      "roles": [
-        "admin",
-        "manager"
-      ],
-      "permissions": [
-        {
-          "id": 1,
-          "name": "read_users",
-          "description": "Can read user data"
-        },
-        {
-          "id": 2,
-          "name": "write_users",
-          "description": "Can modify user data"
-        }
-      ]
-    }
-  }
-  ```
-- **Response (Error)**:
-  ```json
-  {
-    "success": false,
-    "error": {
-      "type": "ValidationError",
-      "message": "Validation failed",
-      "details": [
-        {
-          "field": "email",
-          "message": "Email is required"
-        }
-      ]
-    }
-  }
-  ```
-
-### Error Handling
-The API uses consistent error responses:
-- **ValidationError**: For input validation failures
-- **UnauthorizedError**: For authentication failures
-- **NotFoundError**: When requested resource is not found
-- **Generic errors**: For other server errors
-
-Error response format:
-```json
-{
-  "success": false,
-  "error": {
-    "type": "ErrorType",
-    "message": "Error message",
-    "details": [...] // optional
-  }
-}
-```
-
-## Database Schema
-The application uses Prisma ORM with PostgreSQL. Key models include:
-- **Company**: Company information
-- **Branch**: Branch locations under companies
-- **User**: User accounts with company/branch associations
-- **Role**: User roles
-- **Permission**: Granular permissions
-- **UserRole**: Junction table for user-role assignments with company/branch context
-
-## Development Notes
-- The application uses ES6 modules (`"type": "module"` in package.json)
-- Password hashing is currently disabled (plain text comparison) - implement bcrypt in production
-- CORS is configured to allow all origins - restrict in production
-- Database migrations are handled by Prisma
-
-## Troubleshooting
-- If `npm run dev` fails, ensure all environment variables are set
-- If database connection fails, verify DATABASE_URL and PostgreSQL is running
-- For Prisma issues, try `npx prisma generate` after schema changes
+**Common error codes:**
+- `VALIDATION_ERROR`
+- `UNAUTHORIZED`
+- `NO_ROLE_ASSIGNED`
+- `ACCOUNT_INACTIVE`
+- `NOT_FOUND`
+- `CONFLICT`
+- `SERVER_ERROR`
