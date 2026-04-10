@@ -14,9 +14,9 @@ export const authenticate = async (req, res, next) => {
   try {
     // Extract token from Authorization header
     const authHeader = req.headers.authorization
-    const token = authHeader?.startsWith("Bearer ")
+    const token = (authHeader?.startsWith("Bearer ")
       ? authHeader.split(" ")[1]
-      : null
+      : null) || req.cookies?.accessToken || req.body?.accessToken
 
     if (!token) return next(new UnauthorizedError("No token provided"))
 
@@ -24,6 +24,7 @@ export const authenticate = async (req, res, next) => {
     let payload
     try {
       payload = verifyAccessToken(token)
+      
     } catch (err) {
       return next(
         err.name === "TokenExpiredError"

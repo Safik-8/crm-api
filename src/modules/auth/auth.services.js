@@ -155,7 +155,6 @@ export const loginUserService = async (email, password) => {
 // REFRESH TOKEN SERVICE
 // ══════════════════════════════════════
 export const refreshTokenService = async (refreshToken) => {
-
   // ── 1. VALIDATE ────────────────────────────────────────
   if (!refreshToken) {
     throw new ValidationError("Validation failed", [
@@ -166,9 +165,9 @@ export const refreshTokenService = async (refreshToken) => {
   // ── 2. VERIFY SIGNATURE ────────────────────────────────
   let payload
   try {
-    const { verifyRefreshToken } = await import("../../../utils/tokenUtils.js")
+    const { verifyRefreshToken } = await import("../../utils/tokenUtils.js")
     payload = verifyRefreshToken(refreshToken)
-  } catch {
+  } catch(err) {
     throw new UnauthorizedError("Invalid or expired refresh token")
   }
 

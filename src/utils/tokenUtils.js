@@ -25,7 +25,6 @@ export const generateRefreshToken = (payload) => {
 // ── VERIFY ────────────────────────────────────────────────
 export const verifyAccessToken = (token) => {
   if (!token) throw new Error("Token missing")
-console.log("VERIFY ACCESS SECRET:", process.env.JWT_ACCESS_SECRET)
   try {
     return jwt.verify(token, process.env.JWT_ACCESS_SECRET)
   } catch {

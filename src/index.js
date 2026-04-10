@@ -12,6 +12,8 @@ import prisma from "./config/db.js"
 import { errorHandler, notFound } from "./middleware/errorHandler.js"
 
 import authRoutes from "./modules/auth/auth.routes.js"
+import companyRoutes from "./modules/company/comany.routes.js"
+import branchRoutes  from "./modules/branch/branch.routes.js"
 import { initializeSystem } from "./config/initSystem.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -26,7 +28,7 @@ const PORT = process.env.PORT || 5000
 app.use(helmet())
 
 app.use(cors({
-  origin: "*",
+  origin: "*" || process.env.CLIENT_URL || "http://localhost:5173",
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
@@ -52,8 +54,10 @@ app.get("/", (req, res) => {
 // ══════════════════════════════════════════════════════════
 // ROUTES
 // ══════════════════════════════════════════════════════════
-// app.use("/api/setup", setupRoutes)
+
 app.use("/api", authRoutes);
+app.use("/api/companies", companyRoutes);
+app.use("/api/branches",  branchRoutes);
 
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
