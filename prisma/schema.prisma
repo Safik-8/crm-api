@@ -1,137 +1,137 @@
-generator client {
-  provider = "prisma-client-js"
-}
+  generator client {
+    provider = "prisma-client-js"
+  }
 
-datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
-}
+  datasource db {
+    provider  = "postgresql"
+    url       = env("DATABASE_URL")
+    directUrl = env("DIRECT_URL")
+  }
 
-// ══════════════════════════════════════
-// COMPANY & BRANCH
-// ══════════════════════════════════════
+  // ══════════════════════════════════════
+  // COMPANY & BRANCH
+  // ══════════════════════════════════════
 
-model Company {
-  id        Int      @id @default(autoincrement())
-  name      String
-  code      String   @unique
-  status    String   @default("ACTIVE")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt      @map("updated_at")
+  model Company {
+    id        Int      @id @default(autoincrement())
+    name      String
+    code      String   @unique
+    status    String   @default("ACTIVE")
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt      @map("updated_at")
 
-  branches  Branch[]
-  users     User[]
-  userRoles UserRole[]
- 
+    branches  Branch[]
+    users     User[]
+    userRoles UserRole[]
+  
 
-  @@map("companies")
-}
+    @@map("companies")
+  }
 
-model Branch {
-  id        Int      @id @default(autoincrement())
-  companyId Int      @map("company_id")
-  name      String
-  code      String
-  status    String   @default("ACTIVE")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt      @map("updated_at")
+  model Branch {
+    id        Int      @id @default(autoincrement())
+    companyId Int      @map("company_id")
+    name      String
+    code      String
+    status    String   @default("ACTIVE")
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt      @map("updated_at")
 
-  company   Company  @relation(fields: [companyId], references: [id])
-  users     User[]
-  userRoles UserRole[]
+    company   Company  @relation(fields: [companyId], references: [id])
+    users     User[]
+    userRoles UserRole[]
 
 
-  @@unique([companyId, code])
-  @@index([companyId])
-  @@index([code])
-  @@map("branches")
-}
+    @@unique([companyId, code])
+    @@index([companyId])
+    @@index([code])
+    @@map("branches")
+  }
 
-// ══════════════════════════════════════
-// USERS ROLES & PERMISSIONS
-// ══════════════════════════════════════
+  // ══════════════════════════════════════
+  // USERS ROLES & PERMISSIONS
+  // ══════════════════════════════════════
 
-model User {
-  id          Int       @id @default(autoincrement())
-  companyId   Int?      @map("company_id")
-  branchId    Int?      @map("branch_id")
-  name        String
-  email       String    @unique
-  passwordHash String   @map("password_hash")
-  status      String    @default("ACTIVE")
-  lastLoginAt DateTime? @map("last_login_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt      @map("updated_at")
+  model User {
+    id          Int       @id @default(autoincrement())
+    companyId   Int?      @map("company_id")
+    branchId    Int?      @map("branch_id")
+    name        String
+    email       String    @unique
+    passwordHash String   @map("password_hash")
+    status      String    @default("ACTIVE")
+    lastLoginAt DateTime? @map("last_login_at")
+    createdAt   DateTime  @default(now()) @map("created_at")
+    updatedAt   DateTime  @updatedAt      @map("updated_at")
 
-  company       Company?  @relation(fields: [companyId], references: [id])
-  branch        Branch?   @relation(fields: [branchId],  references: [id])
-  userRoles     UserRole[] @relation("UserToUserRole")
-  assignedRoles UserRole[] @relation("AssignedByToUserRole")
-  refreshTokens RefreshToken[]
+    company       Company?  @relation(fields: [companyId], references: [id])
+    branch        Branch?   @relation(fields: [branchId],  references: [id])
+    userRoles     UserRole[] @relation("UserToUserRole")
+    assignedRoles UserRole[] @relation("AssignedByToUserRole")
+    refreshTokens RefreshToken[]
 
-  @@index([companyId])
-  @@index([branchId])
-  @@map("users")
-}
+    @@index([companyId])
+    @@index([branchId])
+    @@map("users")
+  }
 
-model Role {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  model Role {
+    id          Int      @id @default(autoincrement())
+    name        String   @unique
+    description String?
+    createdAt   DateTime @default(now()) @map("created_at")
 
-  userRoles       UserRole[]
-  rolePermissions Permission[]
+    userRoles       UserRole[]
+    rolePermissions Permission[]
 
-  @@map("roles")
-}
+    @@map("roles")
+  }
 
-model UserRole {
-  id         Int      @id @default(autoincrement())
-  userId     Int      @map("user_id")
-  roleId     Int      @map("role_id")
-  companyId  Int?     @map("company_id")
-  branchId   Int?     @map("branch_id")
-  isPrimary  Boolean  @default(false) @map("is_primary")
-  assignedAt DateTime @default(now()) @map("assigned_at")
-  assignedBy Int?     @map("assigned_by")
+  model UserRole {
+    id         Int      @id @default(autoincrement())
+    userId     Int      @map("user_id")
+    roleId     Int      @map("role_id")
+    companyId  Int?     @map("company_id")
+    branchId   Int?     @map("branch_id")
+    isPrimary  Boolean  @default(false) @map("is_primary")
+    assignedAt DateTime @default(now()) @map("assigned_at")
+    assignedBy Int?     @map("assigned_by")
 
-  user           User     @relation("UserToUserRole",       fields: [userId],     references: [id])
-  role           Role     @relation(fields: [roleId],       references: [id])
-  company        Company? @relation(fields: [companyId],    references: [id])
-  branch         Branch?  @relation(fields: [branchId],     references: [id])
-  assignedByUser User?    @relation("AssignedByToUserRole", fields: [assignedBy], references: [id])
+    user           User     @relation("UserToUserRole",       fields: [userId],     references: [id])
+    role           Role     @relation(fields: [roleId],       references: [id])
+    company        Company? @relation(fields: [companyId],    references: [id])
+    branch         Branch?  @relation(fields: [branchId],     references: [id])
+    assignedByUser User?    @relation("AssignedByToUserRole", fields: [assignedBy], references: [id])
 
-  @@unique([userId, roleId, companyId, branchId])
-  @@map("user_roles")
-}
+    @@unique([userId, roleId, companyId, branchId])
+    @@map("user_roles")
+  }
 
-model Permission {
-  id        Int      @id @default(autoincrement())
-  roleId    Int      @map("role_id")
-  module    String
-  canView   Boolean  @default(false) @map("can_view")
-  canCreate Boolean  @default(false) @map("can_create")
-  canEdit   Boolean  @default(false) @map("can_edit")
-  canDelete Boolean  @default(false) @map("can_delete")
-  createdAt DateTime @default(now()) @map("created_at")
+  model Permission {
+    id        Int      @id @default(autoincrement())
+    roleId    Int      @map("role_id")
+    module    String
+    canView   Boolean  @default(false) @map("can_view")
+    canCreate Boolean  @default(false) @map("can_create")
+    canEdit   Boolean  @default(false) @map("can_edit")
+    canDelete Boolean  @default(false) @map("can_delete")
+    createdAt DateTime @default(now()) @map("created_at")
 
-  role Role @relation(fields: [roleId], references: [id])
+    role Role @relation(fields: [roleId], references: [id])
 
-  @@unique([roleId, module])
-  @@map("permissions")
-}
+    @@unique([roleId, module])
+    @@map("permissions")
+  }
 
-model RefreshToken {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @map("user_id")
-  token     String   @unique
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  model RefreshToken {
+    id        Int      @id @default(autoincrement())
+    userId    Int      @map("user_id")
+    token     String   @unique
+    expiresAt DateTime @map("expires_at")
+    createdAt DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id])
+    user User @relation(fields: [userId], references: [id])
 
-  @@index([userId])
-  @@map("refresh_tokens")
-}
+    @@index([userId])
+    @@map("refresh_tokens")
+  }

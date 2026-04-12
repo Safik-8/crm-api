@@ -125,11 +125,11 @@ export const initializeSystem = async () => {
         })
 
         if (existingSuperAdmin) {
-            console.log("ℹ️  System already initialized — SuperAdmin exists, skipping initialization")
+            console.log("System already initialized — SuperAdmin exists, skipping initialization")
             return
         }
 
-        console.log("🔄 First time — initializing system...")
+        console.log("First time — initializing system...")
 
         // ── STEP 1: CREATE ROLES ──────────────────────────────
         for (const role of ROLES) {
@@ -139,7 +139,7 @@ export const initializeSystem = async () => {
                 create: role
             })
         }
-        console.log("✅ Roles created")
+        console.log("Roles created")
 
         // ── STEP 2: CREATE PERMISSIONS PER ROLE ──────────────
         for (const [roleName, modules] of Object.entries(ROLE_PERMISSIONS)) {
@@ -168,7 +168,7 @@ export const initializeSystem = async () => {
                 })
             }
         }
-        console.log("✅ Permissions seeded")
+        console.log("Permissions seeded")
 
         // ── STEP 3: CREATE INITIAL SUPERADMIN ──────────────
         const superAdminRole = await prisma.role.findUnique({
@@ -208,11 +208,11 @@ export const initializeSystem = async () => {
             }
         })
 
-        console.log("✅ SuperAdmin ensured")
-        console.log("🎉 System initialized successfully!")
+        console.log("SuperAdmin ensured")
+        console.log("System initialized successfully!")
 
     } catch (error) {
-        console.error("❌ System initialization failed:", error)
+        console.error("System initialization failed:", error)
         throw error
     }
 }
