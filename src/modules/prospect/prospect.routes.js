@@ -24,7 +24,7 @@ router.post("/" , hasPermission("PROSPECT" , "canCreate") , createProspect)
 router.get("/" , hasPermission("PROSPECT" , "canView") , getProspects)
 
 // GET /api/prospects/:id
-router.get("/:id" , hasPermission("PROSPECT" , "canView") , getProspectById)
+router.get("/:id"   , hasPermission("PROSPECT" , "canView") , getProspectById)
 
 // PUT /api/prospects/:id
 router.put("/:id" , hasPermission("PROSPECT" , "canUpdate") , updateProspect)
