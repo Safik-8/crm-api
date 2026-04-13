@@ -3,6 +3,7 @@
 import {
   createCompanyService,
   getAllCompaniesService,
+  getCompaniesWithPaginationService,
   getCompanyByIdService,
   updateCompanyService
 } from "./comany.services.js"
@@ -22,6 +23,13 @@ export const getAllCompanies = async (req, res, next) => {
   } catch (err) {
     next(err)
   }
+}
+
+export const getCompaniesWithPagination = async (req, res, next) => {
+  try {
+    const result = await getCompaniesWithPaginationService(req.query)
+    return sendSuccess(res, result, "Companies fetched")
+  } catch (err) { next(err) }
 }
 
 export const getCompanyById = async (req, res, next) => {

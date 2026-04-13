@@ -46,6 +46,72 @@ export const getAllCompaniesService = async () => {
   })
 }
 
+// ══════════════════════════════════════════════════════════
+// GET COMPANIES WITH PAGINATION
+// GET /api/companies
+// ══════════════════════════════════════════════════════════
+
+export const getCompaniesWithPaginationService = async (query) => {
+
+  const {
+    search,
+    status,
+    page  = 1,
+    limit = 10,
+    sort  = "newest"
+  } = query
+
+  // ── WHERE ─────────────────────────────────────────────
+  const where = {}
+
+  if (status) where.status = status
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search.trim(), mode: "insensitive" } },
+      { code: { contains: search.trim(), mode: "insensitive" } }
+    ]
+  }
+
+  // ── ORDER BY ──────────────────────────────────────────
+  const orderBy = sort === "oldest"
+    ? { createdAt: "asc"  }
+    : sort === "name_asc"
+    ? { name    : "asc"   }
+    : sort === "name_desc"
+    ? { name    : "desc"  }
+    : { createdAt: "desc" }  // default newest
+
+  const skip = (Number(page) - 1) * Number(limit)
+
+  const [companies, total] = await Promise.all([
+    prisma.company.findMany({
+      where,
+      orderBy,
+      skip,
+      take   : Number(limit),
+      include: {
+        _count: {
+          select: { branches: true, users: true }
+        }
+      }
+    }),
+    prisma.company.count({ where })
+  ])
+
+  return {
+    companies,
+    pagination: {
+      total,
+      page      : Number(page),
+      limit     : Number(limit),
+      pages     : Math.ceil(total / Number(limit)),
+      hasNext   : Number(page) < Math.ceil(total / Number(limit)),
+      hasPrev   : Number(page) > 1
+    }
+  }
+}
+
 // ══════════════════════════════════════
 // GET SINGLE COMPANY
 // ══════════════════════════════════════
