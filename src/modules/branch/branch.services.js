@@ -288,3 +288,4 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
 
   return safeUser
 }
+

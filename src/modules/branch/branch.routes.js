@@ -8,7 +8,7 @@ import {
     updateBranch,
     assignUserToBranch
 } from "./branch.controllers.js"
-import { authenticate } from "../../middleware/Authenticate.js"
+import { authenticate } from "../../middleware/authenticate.js"
 import { authorize } from "../../middleware/authorize.js"
 import { hasPermission } from "../../middleware/hasPermission.js"
 

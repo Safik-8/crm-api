@@ -23,7 +23,9 @@
     branches  Branch[]
     users     User[]
     userRoles UserRole[]
-  
+
+    prospects  Prospect[]
+    leadSources LeadSource[]  
 
     @@map("companies")
   }
@@ -41,6 +43,8 @@
     users     User[]
     userRoles UserRole[]
 
+    branchSequence BranchSequence?
+    prospects Prospect[]
 
     @@unique([companyId, code])
     @@index([companyId])
@@ -69,6 +73,10 @@
     userRoles     UserRole[] @relation("UserToUserRole")
     assignedRoles UserRole[] @relation("AssignedByToUserRole")
     refreshTokens RefreshToken[]
+
+    assignedProspects Prospect[] @relation("ProspectAssignedTo")
+    createdProspects  Prospect[] @relation("ProspectCreatedBy")
+    stageHistories    StageHistory[]
 
     @@index([companyId])
     @@index([branchId])
@@ -135,3 +143,136 @@
     @@index([userId])
     @@map("refresh_tokens")
   }
+
+  // ══════════════════════════════════════════════════════════
+// SPRINT 2 — ADD TO BOTTOM OF schema.prisma
+// ══════════════════════════════════════════════════════════
+
+// ── BRANCH SEQUENCE ────────────────────────────────────────
+// Generates prospect codes like ACME-MUM-0001
+// Each branch has its own counter independently
+// Atomic SQL increment prevents duplicates under concurrency
+
+model BranchSequence {
+  id        Int @id @default(autoincrement())
+  branchId  Int @unique @map("branch_id")
+  companyId Int @map("company_id")
+  lastSeq   Int @default(0) @map("last_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@map("branch_sequences")
+}
+
+// ── LEAD SOURCE ────────────────────────────────────────────
+// Proper table instead of raw String on Prospect
+// companyId = null means global/system default for all companies
+// Ensures consistent values in reports and dropdowns
+
+model LeadSource {
+  id        Int      @id @default(autoincrement())
+  companyId Int?     @map("company_id")
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company   Company?   @relation(fields: [companyId], references: [id])
+  prospects Prospect[]
+
+  @@unique([companyId, name])
+  @@map("lead_sources")
+}
+
+// ── PROSPECT ───────────────────────────────────────────────
+// Core prospect table
+// currentStage uses enum — DB rejects invalid values
+// leadSourceId is FK — no typo differences
+
+model Prospect {
+  id           Int           @id @default(autoincrement())
+  prospectCode String        @unique @map("prospect_code")
+  name         String
+  mobile       String
+  email        String?
+  education    String?
+  college      String?
+  city         String?
+
+  leadSourceId Int           @map("lead_source_id")
+  currentStage ProspectStage @default(NEW) @map("current_stage")
+
+  // Win fields — both required before moving to WIN stage
+  tokenAmount     Decimal?  @map("token_amount")      @db.Decimal(12, 2)
+  joiningDate     DateTime? @map("joining_date")
+  expectedRevenue Decimal?  @map("expected_revenue")  @db.Decimal(12, 2)
+  winDate         DateTime? @map("win_date")
+
+  // Duplicate tracking (BE-2-03)
+  duplicateAcknowledged Boolean @default(false) @map("duplicate_acknowledged")
+
+  // Archive tracking — unarchive requires managerApprovalId (BE-2-04)
+  archivedAt        DateTime? @map("archived_at")
+  archivedById      Int?      @map("archived_by_id")
+  managerApprovalId Int?      @map("manager_approval_id")
+  unarchivedAt      DateTime? @map("unarchived_at")
+  unarchivedById    Int?      @map("unarchived_by_id")
+
+  assignedToId   Int       @map("assigned_to_id")
+  createdById    Int       @map("created_by_id")
+  companyId      Int       @map("company_id")
+  branchId       Int       @map("branch_id")
+  lastActivityAt DateTime? @map("last_activity_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt      @map("updated_at")
+
+  company    Company    @relation(fields: [companyId],    references: [id])
+  branch     Branch     @relation(fields: [branchId],     references: [id])
+  leadSource LeadSource @relation(fields: [leadSourceId], references: [id])
+  assignedTo User       @relation("ProspectAssignedTo",   fields: [assignedToId], references: [id])
+  createdBy  User       @relation("ProspectCreatedBy",    fields: [createdById],  references: [id])
+
+  stageHistory StageHistory[]
+
+  @@index([companyId])
+  @@index([branchId])
+  @@index([assignedToId])
+  @@index([currentStage])
+  @@index([mobile, companyId])  // used by duplicate check query
+  @@index([createdAt])
+  @@map("prospects")
+}
+
+// ── STAGE HISTORY ──────────────────────────────────────────
+// Every stage change is recorded here — never deleted
+// oldStage is nullable — null means prospect was just created (initial NEW entry)
+
+model StageHistory {
+  id          Int            @id @default(autoincrement())
+  prospectId  Int            @map("prospect_id")
+  oldStage    ProspectStage? @map("old_stage")  // null = initial creation
+  newStage    ProspectStage  @map("new_stage")
+  changedById Int            @map("changed_by_id")
+  changedAt   DateTime       @default(now()) @map("changed_at")
+  note        String?
+
+  prospect  Prospect @relation(fields: [prospectId],  references: [id])
+  changedBy User     @relation(fields: [changedById], references: [id])
+
+  @@index([prospectId])
+  @@map("stage_history")
+}
+
+// ══════════════════════════════════════════════════════════
+// SPRINT 2 ENUM
+// ══════════════════════════════════════════════════════════
+
+enum ProspectStage {
+  NEW
+  ENGAGED
+  STRATEGY_SCHEDULED
+  STRATEGY_COMPLETED
+  TOKEN_DISCUSSION
+  TOKEN_RECEIVED
+  WIN
+  ARCHIVED
+}

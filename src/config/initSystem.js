@@ -119,10 +119,44 @@ const ROLE_PERMISSIONS = {
 // ══════════════════════════════════════
 export const initializeSystem = async () => {
     try {
+
+
+
         // Check if SuperAdmin already exists
         const existingSuperAdmin = await prisma.user.findUnique({
             where: { email: "superadmin@gmail.com" }
         })
+
+        // ── STEP 4: SEED DEFAULT GLOBAL LEAD SOURCES ──────────
+        const defaultLeadSources = [
+            "Cold Call",
+            "Referral",
+            "Website",
+            "Social Media",
+            "Walk In",
+            "Exhibition",
+            "Other"
+        ]
+        for (const name of defaultLeadSources) {
+
+            const existing = await prisma.leadSource.findFirst({
+                where: {
+                    name,
+                    companyId: null
+                }
+            })
+
+            if (!existing) {
+                await prisma.leadSource.create({
+                    data: {
+                        name,
+                        companyId: null,
+                        isActive: true
+                    }
+                })
+            }
+        }
+        console.log("✅ Default lead sources seeded")
 
         if (existingSuperAdmin) {
             console.log("System already initialized — SuperAdmin exists, skipping initialization")
@@ -177,10 +211,10 @@ export const initializeSystem = async () => {
 
         const superAdminUser = await prisma.user.upsert({
             where: { email: "superadmin@gmail.com" },
-            update: {  passwordHash: await hashPassword("superadmin123") },
+            update: { passwordHash: await hashPassword("superadmin123") },
             create: {
                 name: "Super Admin",
-               email: "superadmin@gmail.com",
+                email: "superadmin@gmail.com",
                 passwordHash: await hashPassword("superadmin123"),
                 companyId: null,
                 branchId: null,
@@ -210,6 +244,11 @@ export const initializeSystem = async () => {
 
         console.log("SuperAdmin ensured")
         console.log("System initialized successfully!")
+
+
+        // Add this at the end of initializeSystem() in src/config/initSystem.js
+
+
 
     } catch (error) {
         console.error("System initialization failed:", error)
