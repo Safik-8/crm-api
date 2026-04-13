@@ -6,7 +6,8 @@ import {
     getBranches,
     getBranchById,
     updateBranch,
-    assignUserToBranch
+    assignUserToBranch,
+    getBranchesPaginated
 } from "./branch.controllers.js"
 import { authenticate } from "../../middleware/Authenticate.js"
 import { authorize } from "../../middleware/authorize.js"
@@ -29,6 +30,12 @@ router.get(
     "/",
     hasPermission("BRANCH", "canView"),
     getBranches
+)
+
+router.get(
+    "/paginated", 
+    hasPermission("BRANCH", "canView"),
+    getBranchesPaginated
 )
 
 // GET /api/branches/:id

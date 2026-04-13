@@ -5,7 +5,8 @@ import {
   getBranchesService,
   getBranchByIdService,
   updateBranchService,
-  assignUserToBranchService
+  assignUserToBranchService,
+  getBranchesPaginatedService
 } from "./branch.services.js"
 import { sendSuccess } from "../../utils/response.js"
 
@@ -20,6 +21,13 @@ export const getBranches = async (req, res, next) => {
   try {
     const result = await getBranchesService(req.query, req.user)
     return sendSuccess(res, result, "Branches fetched")
+  } catch (err) { next(err) }
+}
+
+export const getBranchesPaginated = async (req, res, next) => {
+  try {
+    const result = await getBranchesPaginatedService(req.query, req.user)
+    return sendSuccess(res, result, "Branches fetched successfully")
   } catch (err) { next(err) }
 }
 

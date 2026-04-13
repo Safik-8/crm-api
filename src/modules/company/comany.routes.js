@@ -4,6 +4,7 @@ import { Router } from "express"
 import {
     createCompany,
     getAllCompanies,
+    getCompaniesWithPagination,
     getCompanyById,
     updateCompany
 } from "./comany.controllers.js"
@@ -30,6 +31,15 @@ router.get(
     authorize("SUPER_ADMIN"),
     hasPermission("COMPANY", "canView"),
     getAllCompanies
+)
+
+
+// GET /api/companies — with pagination (for table)
+router.get(
+  "/paginated",
+  authorize("SUPER_ADMIN"),
+  hasPermission("COMPANY", "canView"),
+  getCompaniesWithPagination
 )
 
 // GET /api/companies/:id — Super Admin only
