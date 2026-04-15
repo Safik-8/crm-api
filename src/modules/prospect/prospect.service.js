@@ -11,12 +11,8 @@ import {
     BadRequestError
 } from "../../utils/AppError.js"
 
-// ══════════════════════════════════════════════════════════
-// COMPANY ISOLATION GUARD
-// ══════════════════════════════════════════════════════════
-
 const assertCompanyScope = (actor, targetCompanyId) => {
-    // SUPER_ADMIN has no companyId — can access all
+    // "No companyId" is treated as super-admin scope (no tenant restriction).
     if (!actor.companyId) return
 
     if (actor.companyId !== targetCompanyId) {
@@ -24,36 +20,19 @@ const assertCompanyScope = (actor, targetCompanyId) => {
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// ROLE-BASED SCOPE WHERE CLAUSE
-// Built from actor's companyId, branchId, id
-// NOT from primaryRole string
-//
-// How scope is determined:
-//   actor.companyId = null  → SUPER_ADMIN (no company restriction)
-//   actor.companyId set
-//     + actor.branchId = null  → CEO (company wide)
-//     + actor.branchId set
-//         + actor.permissions.PROSPECT.canDelete = true  → BRANCH_ADMIN
-//         + actor.permissions.PROSPECT.canDelete = false
-//             + canCreate = true  → ISE (own only)
-//             + canCreate = false → view only
-// ══════════════════════════════════════════════════════════
+// Data visibility is derived from org fields + permissions (not role name strings),
+// since users can have multiple roles and scopes.
 
 const getScopeWhere = async (actor) => {
 
-    // No companyId → Super Admin level → no restriction
     if (!actor.companyId) return {}
 
     const prospectPerms = actor.permissions?.PROSPECT || {}
 
-    // Has companyId but no branchId → CEO level → company wide
     if (!actor.branchId) {
         return { companyId: actor.companyId }
     }
 
-    // Has both companyId and branchId
-    // Check if can delete → Branch Admin level → full branch access
     if (prospectPerms.canDelete) {
         return {
             companyId: actor.companyId,
@@ -61,7 +40,6 @@ const getScopeWhere = async (actor) => {
         }
     }
 
-    // Cannot delete but can create → ISE level → own prospects only
     if (prospectPerms.canCreate) {
         return {
             companyId: actor.companyId,
@@ -70,9 +48,8 @@ const getScopeWhere = async (actor) => {
         }
     }
 
-    // Can only view → Manager level
-    // Manager sees their branch team prospects
     if (prospectPerms.canView) {
+        // View-only users should still be able to see their branch team's prospects.
         const teamMembers = await prisma.user.findMany({
             where: {
                 branchId: actor.branchId,
@@ -93,9 +70,16 @@ const getScopeWhere = async (actor) => {
     throw new ForbiddenError("You do not have access to prospects")
 }
 
-// ══════════════════════════════════════════════════════════
-// BE-2-01 | CREATE PROSPECT
-// ══════════════════════════════════════════════════════════
+/** `Prospect.tokenAmount` may be Prisma `Decimal` — WIN rule needs numeric value > 0 */
+const prospectHasPositiveTokenAmount = (tokenAmount) => {
+    if (tokenAmount == null) return false
+    const raw =
+        typeof tokenAmount === "object" && tokenAmount !== null && typeof tokenAmount.toString === "function"
+            ? tokenAmount.toString()
+            : tokenAmount
+    const n = Number(raw)
+    return Number.isFinite(n) && n > 0
+}
 
 export const createProspectService = async (data, actor) => {
 
@@ -109,23 +93,59 @@ export const createProspectService = async (data, actor) => {
         leadSourceId,
         assignedToId,
         expectedRevenue,
-        duplicate_acknowledged = false
+        duplicate_acknowledged = false,
+        companyId: bodyCompanyId,
+        branchId: bodyBranchId
     } = data
 
-    // ── VALIDATE MANDATORY FIELDS ─────────────────────────
     const errors = []
     if (!name) errors.push({ field: "name", message: "Name is required" })
     if (!mobile) errors.push({ field: "mobile", message: "Mobile is required" })
     if (!leadSourceId) errors.push({ field: "leadSourceId", message: "Lead source is required" })
+
+    // Tenant users: company + branch always come from the actor (ignore body — prevents spoofing).
+    // Super admin (no companyId on user): must choose target org in the body.
+    // Company-level users without branchId: must send branchId in body (which branch to attach to).
+    let companyId = actor.companyId
+    let branchId = actor.branchId
+
+    if (companyId == null) {
+        if (!bodyCompanyId) errors.push({ field: "companyId", message: "companyId is required when your account has no company" })
+        if (!bodyBranchId) errors.push({ field: "branchId", message: "branchId is required when your account has no company" })
+    } else if (branchId == null) {
+        if (!bodyBranchId) errors.push({ field: "branchId", message: "branchId is required when your account has no branch" })
+    }
+
     if (errors.length > 0) throw new ValidationError("Validation failed", errors)
 
-    // ── AUTO ASSIGN FROM req.user ─────────────────────────
-    const companyId = actor.companyId
-    const branchId = actor.branchId
+    if (companyId == null) {
+        companyId = Number(bodyCompanyId)
+        branchId = Number(bodyBranchId)
+        const branchOk = await prisma.branch.findFirst({
+            where: { id: branchId, companyId },
+            select: { id: true }
+        })
+        if (!branchOk) {
+            throw new ValidationError("Validation failed", [
+                { field: "branchId", message: "Branch not found or does not belong to the given company" }
+            ])
+        }
+    } else if (actor.branchId == null) {
+        branchId = Number(bodyBranchId)
+        const branchOk = await prisma.branch.findFirst({
+            where: { id: branchId, companyId },
+            select: { id: true }
+        })
+        if (!branchOk) {
+            throw new ValidationError("Validation failed", [
+                { field: "branchId", message: "Branch not found or does not belong to your company" }
+            ])
+        }
+    }
+
     const createdById = actor.id
     const finalAssignedToId = assignedToId ? Number(assignedToId) : actor.id
 
-    // ── VALIDATE assignedTo BELONGS TO SAME COMPANY ───────
     if (assignedToId) {
         const assignedUser = await prisma.user.findFirst({
             where: {
@@ -138,11 +158,9 @@ export const createProspectService = async (data, actor) => {
         }
     }
 
-    // ── VALIDATE leadSource BELONGS TO COMPANY OR GLOBAL ──
     const leadSource = await prisma.leadSource.findFirst({
         where: {
             id: Number(leadSourceId),
-
             isActive: true,
             OR: [
                 { companyId: null },
@@ -152,12 +170,11 @@ export const createProspectService = async (data, actor) => {
         select: { id: true },
 
     })
-    console.log("leadso", leadSource);
 
     if (!leadSource) throw new NotFoundError("Lead source")
 
-    // ── BE-2-03 | DUPLICATE DETECTION ─────────────────────
-    // Scoped to same company — no cross-company leakage
+    // Duplicate check is company-scoped (prevents cross-company data leakage).
+    // `duplicate_acknowledged` is a deliberate override: UI can require confirmation then retry.
     const duplicate = await prisma.prospect.findFirst({
         where: { mobile, companyId },
         select: { id: true, prospectCode: true, name: true }
@@ -170,10 +187,8 @@ export const createProspectService = async (data, actor) => {
         )
     }
 
-    // ── BE-2-02 | GENERATE PROSPECT CODE ──────────────────
     const prospectCode = await generateProspectCode(companyId, branchId)
 
-    // ── CREATE PROSPECT + INITIAL STAGE HISTORY ───────────
     const created = await prisma.$transaction(async (tx) => {
 
         const prospect = await tx.prospect.create({
@@ -202,6 +217,7 @@ export const createProspectService = async (data, actor) => {
                 oldStage: null,        // null = initial creation
                 newStage: STAGES.NEW,
                 changedById: createdById,
+                changedAt: new Date(),
                 note: "Prospect created"
             }
         })
@@ -221,10 +237,6 @@ export const createProspectService = async (data, actor) => {
     })
 }
 
-// ══════════════════════════════════════════════════════════
-// BE-2-01 | GET ALL PROSPECTS
-// ══════════════════════════════════════════════════════════
-
 export const getProspectsService = async (query, actor) => {
 
     const {
@@ -239,26 +251,21 @@ export const getProspectsService = async (query, actor) => {
         limit = 10
     } = query
 
-    // Role-based base scope — built from actor fields not role string
     const scopeWhere = await getScopeWhere(actor)
     const where = { ...scopeWhere }
 
-    // ── FILTERS ───────────────────────────────────────────
     if (stage) where.currentStage = stage
     if (lead_source_id) where.leadSourceId = Number(lead_source_id)
     if (assigned_to) where.assignedToId = Number(assigned_to)
 
-    // Branch filter with company isolation
     if (branch_id) {
         const requestedBranchId = Number(branch_id)
 
-        // Actor has a branch — can only filter their own branch
         if (actor.branchId && actor.branchId !== requestedBranchId) {
             throw new ForbiddenError("You cannot access prospects from another branch")
         }
 
-        // Actor has company but no branch (CEO level)
-        // Verify requested branch belongs to same company
+        // CEO-level users can filter by branch, but only inside their company.
         if (actor.companyId && !actor.branchId) {
             const branch = await prisma.branch.findFirst({
                 where: { id: requestedBranchId, companyId: actor.companyId }
@@ -271,14 +278,12 @@ export const getProspectsService = async (query, actor) => {
         where.branchId = requestedBranchId
     }
 
-    // Date range
     if (start_date || end_date) {
         where.createdAt = {}
         if (start_date) where.createdAt.gte = new Date(start_date)
         if (end_date) where.createdAt.lte = new Date(end_date)
     }
 
-    // Search — name OR mobile
     if (search) {
         where.AND = [
             ...(where.AND || []),
@@ -351,10 +356,6 @@ export const getProspectsService = async (query, actor) => {
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// BE-2-01 | GET PROSPECT BY ID
-// ══════════════════════════════════════════════════════════
-
 export const getProspectByIdService = async (id, actor) => {
 
     const scopeWhere = await getScopeWhere(actor)
@@ -378,16 +379,11 @@ export const getProspectByIdService = async (id, actor) => {
 
     if (!prospect) throw new NotFoundError("Prospect")
 
-    // Final company isolation
+    // Final guard: even if scope logic changes, we never allow cross-company reads.
     assertCompanyScope(actor, prospect.companyId)
 
     return prospect
 }
-
-// ══════════════════════════════════════════════════════════
-// BE-2-01 | UPDATE PROSPECT
-// prospectCode is IMMUTABLE — always stripped
-// ══════════════════════════════════════════════════════════
 
 export const updateProspectService = async (id, data, actor) => {
 
@@ -402,13 +398,16 @@ export const updateProspectService = async (id, data, actor) => {
     // Company isolation
     assertCompanyScope(actor, prospect.companyId)
 
-    // ISE level (canCreate, no canDelete) — can only edit own prospects
+    // ISE users can only update prospects assigned to themselves.
     const prospectPerms = actor.permissions?.PROSPECT || {}
     if (prospectPerms.canCreate && !prospectPerms.canDelete) {
         if (prospect.assignedToId !== actor.id) {
             throw new ForbiddenError("You can only edit your own prospects")
         }
     }
+
+    // Validate against the prospect's company (super admin has actor.companyId null).
+    const prospectCompanyId = prospect.companyId
 
     // Validate new leadSource — must belong to same company or global
     if (data.leadSourceId) {
@@ -418,27 +417,28 @@ export const updateProspectService = async (id, data, actor) => {
                 isActive: true,
                 OR: [
                     { companyId: null },
-                    { companyId: actor.companyId }
+                    { companyId: prospectCompanyId }
                 ]
             }
         })
         if (!leadSource) throw new NotFoundError("Lead source")
     }
 
-    // Validate new assignedTo — must be same company
+    // Validate new assignedTo — must be in the prospect's company
     if (data.assignedToId) {
         const assignedUser = await prisma.user.findFirst({
             where: {
                 id: Number(data.assignedToId),
-                companyId: actor.companyId
+                companyId: prospectCompanyId
             }
         })
         if (!assignedUser) {
-            throw new ForbiddenError("Assigned user does not belong to your company")
+            throw new ForbiddenError("Assigned user does not belong to the prospect's company")
         }
     }
 
-    // Strip immutable and protected fields
+    // Hard-stop updates to protected fields even if client sends them.
+    // Stage changes must go through `transitionStageService` to keep history consistent.
     const {
         prospectCode,  // IMMUTABLE — never update
         currentStage,  // use /stage endpoint
@@ -460,15 +460,10 @@ export const updateProspectService = async (id, data, actor) => {
     })
 }
 
-// ══════════════════════════════════════════════════════════
-// BE-2-04 | STAGE TRANSITION
-// ══════════════════════════════════════════════════════════
-
 export const transitionStageService = async (id, data, actor) => {
 
     const { new_stage, note, manager_approval_id } = data
 
-    // ── VALIDATE INPUT ────────────────────────────────────
     const errors = []
     if (!new_stage) errors.push({ field: "new_stage", message: "new_stage is required" })
     if (errors.length > 0) throw new ValidationError("Validation failed", errors)
@@ -479,7 +474,6 @@ export const transitionStageService = async (id, data, actor) => {
         )
     }
 
-    // ── FIND PROSPECT IN SCOPE ────────────────────────────
     const scopeWhere = await getScopeWhere(actor)
 
     const prospect = await prisma.prospect.findFirst({
@@ -493,25 +487,26 @@ export const transitionStageService = async (id, data, actor) => {
 
     const currentStage = prospect.currentStage
 
-    // ── SAME STAGE CHECK ──────────────────────────────────
     if (currentStage === new_stage) {
         throw new BadRequestError("Prospect is already in this stage")
     }
 
-    // ── ARCHIVED UNARCHIVE RULE ───────────────────────────
+    // Rule 3: from ARCHIVED, require a valid manager_approval_id (user in prospect’s company with PROSPECT:canDelete).
+    // All failures → HTTP 400 + "Stage transition not allowed." (no silent bypass of the state machine).
     if (currentStage === STAGES.ARCHIVED) {
-        if (!manager_approval_id) {
-            throw new ForbiddenError(
-                "Cannot unarchive without manager approval. Provide manager_approval_id."
-            )
+        if (manager_approval_id == null || manager_approval_id === "") {
+            throw new BadRequestError("Stage transition not allowed.")
         }
 
-        // Validate approver belongs to same company
-        // and has canDelete permission on PROSPECT (manager level or above)
+        const approverId = Number(manager_approval_id)
+        if (!Number.isInteger(approverId) || approverId < 1) {
+            throw new BadRequestError("Stage transition not allowed.")
+        }
+
         const approver = await prisma.user.findFirst({
             where: {
-                id: Number(manager_approval_id),
-                companyId: actor.companyId
+                id: approverId,
+                companyId: prospect.companyId
             },
             include: {
                 userRoles: {
@@ -525,10 +520,9 @@ export const transitionStageService = async (id, data, actor) => {
         })
 
         if (!approver) {
-            throw new NotFoundError("Approver not found in your company")
+            throw new BadRequestError("Stage transition not allowed.")
         }
 
-        // Check approver has PROSPECT canDelete permission
         const approverCanApprove = approver.userRoles.some(ur =>
             ur.role.rolePermissions.some(rp =>
                 rp.module === "PROSPECT" && rp.canDelete
@@ -536,36 +530,30 @@ export const transitionStageService = async (id, data, actor) => {
         )
 
         if (!approverCanApprove) {
-            throw new ForbiddenError("Approver does not have permission to approve unarchive")
+            throw new BadRequestError("Stage transition not allowed.")
         }
     }
 
-    // ── TRANSITION ALLOWED CHECK ──────────────────────────
-    if (!canTransition(currentStage, new_stage)) {
-        throw new BadRequestError(
-            `Stage transition not allowed. Cannot move from ${currentStage} to ${new_stage}.`
-        )
+    // Rule 1: ALLOWED_TRANSITIONS[ARCHIVED] is empty — leaving ARCHIVED is gated above by manager + approver.
+    // After those pass, allow any valid non-ARCHIVED target.
+    const transitionAllowed =
+        currentStage === STAGES.ARCHIVED
+            ? new_stage !== STAGES.ARCHIVED && isValidStage(new_stage)
+            : canTransition(currentStage, new_stage)
+
+    if (!transitionAllowed) {
+        throw new BadRequestError("Stage transition not allowed.")
     }
 
-    // ── WIN RULE ──────────────────────────────────────────
+    // Rule 2: WIN requires token_amount > 0 and joining_date on the prospect (HTTP 400, same message).
     if (new_stage === STAGES.WIN) {
-        const winErrors = []
-        if (!prospect.tokenAmount || Number(prospect.tokenAmount) <= 0) {
-            winErrors.push({
-                field: "tokenAmount",
-                message: "Token amount must be greater than 0 to mark as Win"
-            })
+        const tokenOk = prospectHasPositiveTokenAmount(prospect.tokenAmount)
+        const dateOk = prospect.joiningDate != null
+        if (!tokenOk || !dateOk) {
+            throw new BadRequestError("Stage transition not allowed.")
         }
-        if (!prospect.joiningDate) {
-            winErrors.push({
-                field: "joiningDate",
-                message: "Joining date must be set to mark as Win"
-            })
-        }
-        if (winErrors.length > 0) throw new ValidationError("Win conditions not met", winErrors)
     }
 
-    // ── UPDATE STAGE + INSERT HISTORY IN TRANSACTION ──────
     const [updatedProspect] = await prisma.$transaction([
 
         prisma.prospect.update({
@@ -587,12 +575,14 @@ export const transitionStageService = async (id, data, actor) => {
             }
         }),
 
+        // Rule 4: stage_history — prospect_id, old_stage, new_stage, changed_by (FK), changed_at
         prisma.stageHistory.create({
             data: {
                 prospectId: Number(id),
                 oldStage: currentStage,
                 newStage: new_stage,
                 changedById: actor.id,
+                changedAt: new Date(),
                 note: note || null
             }
         })
@@ -606,21 +596,4 @@ export const transitionStageService = async (id, data, actor) => {
         changedAt: new Date(),
         changedBy: { id: actor.id, name: actor.name }
     }
-}
-
-// ══════════════════════════════════════════════════════════
-// LEAD SOURCES — GET ALL (for dropdown)
-// ══════════════════════════════════════════════════════════
-
-export const getLeadSourcesService = async (actor) => {
-    return prisma.leadSource.findMany({
-        where: {
-            isActive: true,
-            OR: [
-                { companyId: null },
-                { companyId: actor.companyId }
-            ]
-        },
-        orderBy: { name: "asc" }
-    })
 }

@@ -94,7 +94,7 @@ export class NoRoleError extends AppError {
 }
 
 export class PermissionDeniedError extends AppError {
-  constructor(module, action) {
+  constructor(module, action) {    
     super(
       `You don't have permission to ${action} ${module}`,
       403,

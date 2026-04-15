@@ -3,8 +3,7 @@ import {
     getProspectsService,
     getProspectByIdService,
     updateProspectService,
-    transitionStageService,
-    getLeadSourcesService
+    transitionStageService
 } from "./prospect.service.js"
 import { sendSuccess } from "../../utils/response.js"
 
@@ -40,12 +39,5 @@ export const transitionStage = async (req, res, next) => {
     try {
         const result = await transitionStageService(req.params.id, req.body, req.user)
         return sendSuccess(res, result, "Stage updated successfully")
-    } catch (err) { next(err) }
-}
-
-export const getLeadSources = async (req, res, next) => {
-    try {
-        const leadSources = await getLeadSourcesService(req.user)
-        return sendSuccess(res, { leadSources }, "Lead sources fetched")
     } catch (err) { next(err) }
 }

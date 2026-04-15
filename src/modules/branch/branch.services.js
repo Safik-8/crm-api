@@ -109,7 +109,7 @@ export const getBranchesService = async (query, actor) => {
   })
 
   if (!company) {
-    throw new NotFoundError("Company not found")
+    throw new NotFoundError("Company")
   }
 
   // ── 4. FETCH ALL BRANCHES (NO PAGINATION) ──────────────
@@ -167,7 +167,7 @@ export const getBranchesPaginatedService = async (query, actor) => {
   const company = await prisma.company.findUnique({
     where: { id: scopedCompanyId }
   })
-  if (!company) throw new NotFoundError("Company not found")
+  if (!company) throw new NotFoundError("Company")
 
   // build where
   const where = { companyId: scopedCompanyId }

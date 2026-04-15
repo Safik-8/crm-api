@@ -148,30 +148,6 @@ export const getLeadSourcesService = async (query, actor) => {
 }
 
 // ══════════════════════════════════════════════════════════
-// GET SINGLE LEAD SOURCE
-// ══════════════════════════════════════════════════════════
-
-export const getLeadSourceByIdService = async (id, actor) => {
-
-  const leadSource = await prisma.leadSource.findUnique({
-    where  : { id: Number(id) },
-    select: {
-      id: true,
-      name: true
-    }
-  })
-
-  if (!leadSource) throw new NotFoundError("Lead source")
-
-  assertLeadSourceScope(actor, leadSource)
-
-  return {
-    ...leadSource,
-    type: leadSource.companyId ? "COMPANY" : "GLOBAL"
-  }
-}
-
-// ══════════════════════════════════════════════════════════
 // UPDATE LEAD SOURCE
 // ══════════════════════════════════════════════════════════
 

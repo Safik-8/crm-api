@@ -6,7 +6,7 @@ export const hasPermission = (module, action) => {
   return (req, res, next) => {
     const modulePerms = req.user.permissions[module]
     if (!modulePerms || !modulePerms[action]) {
-      return next(new PermissionDeniedError(action, module))
+      return next(new PermissionDeniedError(module, action))
     }
     next()
   }

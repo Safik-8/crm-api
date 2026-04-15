@@ -4,10 +4,9 @@ import { Router }        from "express"
 import {
   createLeadSource,
   getLeadSources,
-  getLeadSourceById,
   updateLeadSource,
 } from "./leadSource.controller.js"
-import { authenticate }  from "../../middleware/authorize.js"
+import { authenticate }  from "../../middleware/authenticate.js"
 import { authorize }     from "../../middleware/authorize.js"
 
 const router = Router()
@@ -16,9 +15,6 @@ router.use(authenticate)
 
 // GET /api/lead-sources — all authenticated users
 router.get("/",    getLeadSources)
-
-// GET /api/lead-sources/:id
-router.get("/:id", getLeadSourceById)
 
 // POST /api/lead-sources — Super Admin or Branch Admin
 router.post(

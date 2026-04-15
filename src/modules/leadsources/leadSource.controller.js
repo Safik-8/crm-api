@@ -3,7 +3,6 @@
 import {
   createLeadSourceService,
   getLeadSourcesService,
-  getLeadSourceByIdService,
   updateLeadSourceService,
 } from "./leadSource.service.js"
 import { sendSuccess } from "../../utils/response.js"
@@ -22,17 +21,9 @@ export const getLeadSources = async (req, res, next) => {
   } catch (err) { next(err) }
 }
 
-export const getLeadSourceById = async (req, res, next) => {
-  try {
-    const leadSource = await getLeadSourceByIdService(req.params.id, req.user)
-    return sendSuccess(res, { leadSource }, "Lead source fetched")
-  } catch (err) { next(err) }
-}
-
 export const updateLeadSource = async (req, res, next) => {
   try {
     const leadSource = await updateLeadSourceService(req.params.id, req.body, req.user)
     return sendSuccess(res, { leadSource }, "Lead source updated successfully")
   } catch (err) { next(err) }
 }
-

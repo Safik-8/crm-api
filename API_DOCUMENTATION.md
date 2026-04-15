@@ -1,90 +1,229 @@
 ﻿# StackDot CRM Backend API Documentation
 
-## Overview
-This is the backend API for StackDot CRM, built with Node.js, Express, and Prisma ORM on PostgreSQL.
+Base URL prefix: `/api`
 
-## Prerequisites
-- Node.js 18+ installed
-- PostgreSQL database available
-- npm or yarn package manager
-
-## Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd STACKDOT-CRM/BACKEND
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Environment Setup**
-   Create a `.env` file in the `BACKEND` directory with:
-   ```env
-   DATABASE_URL="postgresql://username:password@localhost:5432/stackdot_crm?schema=public"
-   DIRECT_URL="postgresql://username:password@localhost:5432/stackdot_crm?schema=public"
-   JWT_ACCESS_SECRET="your-jwt-access-secret-key"
-   JWT_REFRESH_SECRET="your-jwt-refresh-secret-key"
-   JWT_ACCESS_EXPIRY="15m"
-   JWT_REFRESH_EXPIRY="7d"
-   PORT=5000
-   CLIENT_URL=http://localhost:3000
-   ```
-
-4. **Database Setup**
-   - Start PostgreSQL
-   - Create the `stackdot_crm` database
-   - Run Prisma migrations:
-     ```bash
-     npx prisma migrate dev
-     ```
-   - Generate Prisma client:
-     ```bash
-     npx prisma generate
-     ```
-
-5. **Start the Server**
-   ```bash
-   npm run dev
-   ```
+This documentation reflects the current implementation in:
+- `src/modules/auth/*`
+- `src/modules/company/*`
+- `src/modules/branch/*`
+- `src/modules/leadsources/*`
+- `src/modules/prospect/*`
+- shared responses/errors: `src/utils/response.js`, `src/utils/AppError.js`, `src/middleware/errorHandler.js`
 
 ---
 
-## API Base Path
-All endpoints are mounted under the base path:
+## Table of Contents
 
-`/api`
-
-So the login endpoint is:
-
-`POST /api/auth/login`
+- [Response Formats](#response-formats)
+  - [Success response](#success-response)
+  - [Error response](#error-response)
+  - [Common error codes](#common-error-codes)
+- [1) Authentication](#1-authentication)
+  - [POST `/api/auth/login`](#post-apiauthlogin)
+  - [POST `/api/auth/refresh`](#post-apiauthrefresh)
+  - [POST `/api/auth/logout`](#post-apiauthlogout)
+  - [GET `/api/auth/me`](#get-apiauthme)
+- [2) Company](#2-company)
+  - [POST `/api/companies`](#post-apicompanies)
+  - [GET `/api/companies`](#get-apicompanies)
+  - [GET `/api/companies/paginated`](#get-apicompaniespaginated)
+  - [GET `/api/companies/:id`](#get-apicompaniesid)
+  - [PUT `/api/companies/:id`](#put-apicompaniesid)
+- [3) Branch](#3-branch)
+  - [POST `/api/branches`](#post-apibranches)
+  - [GET `/api/branches`](#get-apibranches)
+  - [GET `/api/branches/paginated`](#get-apibranchespaginated)
+  - [GET `/api/branches/:id`](#get-apibranchesid)
+  - [PUT `/api/branches/:id`](#put-apibranchesid)
+  - [POST `/api/branches/:id/assign-user`](#post-apibranchesidassign-user)
+- [4) Lead Sources](#4-lead-sources)
+  - [GET `/api/lead-sources`](#get-apilead-sources)
+  - [GET `/api/lead-sources/:id`](#get-apilead-sourcesid)
+  - [POST `/api/lead-sources`](#post-apilead-sources)
+  - [PUT `/api/lead-sources/:id`](#put-apilead-sourcesid)
+- [5) Prospects](#5-prospects)
+  - [GET `/api/prospects/lead-sources`](#get-apiprospectslead-sources)
+  - [POST `/api/prospects`](#post-apiprospects)
+  - [GET `/api/prospects/all`](#get-apiprospectsall)
+  - [GET `/api/prospects/:id`](#get-apiprospectsid)
+  - [PUT `/api/prospects/:id`](#put-apiprospectsid)
+  - [POST `/api/prospects/:id/stage`](#post-apiprospectsidstage)
 
 ---
 
-## Authentication Endpoints
+## Response Formats
 
-### 1. Login
-**Endpoint:** `POST /api/auth/login`
+### Success response
 
-**Description:** Authenticate a user with email and password. Returns user profile in response and sets `accessToken` and `refreshToken` cookies.
+All controllers use `sendSuccess(res, data, message, statusCode)`:
 
-**Request Headers:**
-```http
-Content-Type: application/json
-```
-
-**Request Body:**
 ```json
 {
-  "email": "user@example.com",
-  "password": "securePassword123"
+  "success": true,
+  "statusCode": 200,
+  "message": "Success",
+  "data": {},
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Success Response (200 OK):**
+### Error response
+
+Operational errors are thrown as `AppError` (or subclasses) and returned as JSON with `success: false`. Every operational error includes `statusCode`, `code`, `message`, and `timestamp`. The `details` field is present on `AppError` responses and is **`null`** when there are no structured details; **`details` may be omitted** on a few middleware paths (e.g. JWT parse failures).
+
+**Validation (`400`, `VALIDATION_ERROR`)** — `details` is an array of `{ "field", "message" }` (one object per failed rule; multiple fields can appear in one response):
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "details": [
+    { "field": "name", "message": "Name is required" },
+    { "field": "mobile", "message": "Mobile is required" },
+    { "field": "leadSourceId", "message": "Lead source is required" }
+  ],
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+**Not found (`404`, `NOT_FOUND`)** — message text is human-readable; there is no `details` object for the standard `NotFoundError`:
+
+```json
+{
+  "success": false,
+  "statusCode": 404,
+  "code": "NOT_FOUND",
+  "message": "Lead source not found",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+For prospects, a missing/inactive/out-of-scope lead source is still returned this way: the server does not distinguish “wrong id” vs “inactive” vs “other company’s source” in the payload (all resolve to **404** with the same shape).
+
+**Conflict (`409`, `CONFLICT`)** — often includes `details.field` (e.g. duplicate mobile on create prospect):
+
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "code": "CONFLICT",
+  "message": "Mobile already exists for prospect Jane Doe (PR-2026-00042)",
+  "details": { "field": "mobile" },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+Retry the same request with `"duplicate_acknowledged": true` in the body to allow creation when the duplicate is intentional.
+
+**Forbidden (`403`, `FORBIDDEN`)** — generic access or business rule (e.g. assignee not in your company):
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "Assigned user does not belong to your company",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+**Permission / role (`403`)**
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "PERMISSION_DENIED",
+  "message": "You don't have permission to canCreate PROSPECT",
+  "details": { "required": "PROSPECT:canCreate" },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "ROLE_NOT_ALLOWED",
+  "message": "Access denied. Required role: SUPER_ADMIN or BRANCH_ADMIN",
+  "details": { "required": ["SUPER_ADMIN", "BRANCH_ADMIN"] },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+**Unauthorized (`401`)** — `UnauthorizedError` includes `details: null`. JWT middleware responses may omit `details`:
+
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "code": "UNAUTHORIZED",
+  "message": "Invalid email or password",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "code": "TOKEN_EXPIRED",
+  "message": "Token expired. Please login again.",
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+**Bad request (`400`, `BAD_REQUEST`)** — no structured `details` by default:
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "BAD_REQUEST",
+  "message": "Invalid stage. Must be one of: NEW, ENGAGED, ...",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+### Common error codes (quick reference)
+
+- **400 VALIDATION_ERROR**: `details` = array of `{ field, message }`
+- **400 BAD_REQUEST** / **INVALID_JSON** (malformed JSON body)
+- **401 UNAUTHORIZED** / **TOKEN_EXPIRED** / **TOKEN_INVALID**
+- **403 FORBIDDEN** / **ACCOUNT_INACTIVE** / **NO_ROLE_ASSIGNED**
+- **403 PERMISSION_DENIED**: `details = { required: "<MODULE>:<ACTION>" }`
+- **403 ROLE_NOT_ALLOWED**: `details = { required: ["ROLE1", "ROLE2"] }`
+- **404 NOT_FOUND** / **ROUTE_NOT_FOUND**
+- **409 CONFLICT**: often `details = { field: "<field>" }` (may be `null` if not set)
+- **500 SERVER_ERROR**
+
+---
+
+## 1) Authentication
+
+Routes: `src/modules/auth/auth.routes.js`
+
+### POST `/api/auth/login`
+
+Authenticate user and return tokens (also sets httpOnly cookies `accessToken` and `refreshToken`).
+
+**Request body**
+
+```json
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+**Success (200)**
+
 ```json
 {
   "success": true,
@@ -93,73 +232,31 @@ Content-Type: application/json
   "data": {
     "user": {
       "id": 1,
-      "name": "John Doe",
+      "name": "User",
       "email": "user@example.com",
-      "status": "ACTIVE",
       "companyId": 1,
-      "companyName": "Tech Corp",
-      "companyCode": "TC001",
-      "branchId": 1,
-      "branchName": "Main Branch",
-      "branchCode": "BR001",
+      "branchId": 2,
       "primaryRole": "BRANCH_ADMIN",
-      "roles": [
-        {
-          "role": "BRANCH_ADMIN",
-          "companyId": 1,
-          "branchId": 1,
-          "isPrimary": true
-        }
-      ],
-      "permissions": {
-        "COMPANY": {
-          "canView": false,
-          "canCreate": false,
-          "canEdit": false,
-          "canDelete": false
-        },
-        "BRANCH": {
-          "canView": true,
-          "canCreate": false,
-          "canEdit": true,
-          "canDelete": false
-        },
-        "USER": {
-          "canView": true,
-          "canCreate": true,
-          "canEdit": true,
-          "canDelete": true
-        }
-      }
+      "roles": [],
+      "permissions": {}
     },
-    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    "accessToken": "jwt_access_token",
+    "refreshToken": "jwt_refresh_token"
   },
-  "timestamp": "2026-04-08T10:30:25.123Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Cookies Set:**
-- `accessToken`: httpOnly cookie valid for 15 minutes
-- `refreshToken`: httpOnly cookie valid for 7 days
+**Possible errors**
+- **400 VALIDATION_ERROR** (missing email/password)
+- **401 UNAUTHORIZED** (invalid email/password)
+- **403 ACCOUNT_INACTIVE**
+- **403 NO_ROLE_ASSIGNED**
 
-**Error Responses:**
-- `401 Unauthorized` when email or password is invalid
-- `400 Validation Error` when required fields are missing
+**Error response examples**
 
-**Example Unauthorized Error:**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Invalid email or password",
-  "details": null,
-  "timestamp": "2026-04-08T10:30:25.123Z"
-}
-```
+Missing email or password (`400`):
 
-**Example Validation Error:**
 ```json
 {
   "success": false,
@@ -170,31 +267,66 @@ Content-Type: application/json
     { "field": "email", "message": "Email is required" },
     { "field": "password", "message": "Password is required" }
   ],
-  "timestamp": "2026-04-08T10:30:25.123Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+Invalid credentials (`401`):
+
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "code": "UNAUTHORIZED",
+  "message": "Invalid email or password",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+Inactive account (`403`, `ACCOUNT_INACTIVE`):
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "ACCOUNT_INACTIVE",
+  "message": "Your account has been deactivated. Contact admin.",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+No role (`403`, `NO_ROLE_ASSIGNED`):
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "NO_ROLE_ASSIGNED",
+  "message": "No role assigned to this account. Contact admin.",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
 ---
 
-### 2. Refresh Token
-**Endpoint:** `POST /api/auth/refresh`
+### POST `/api/auth/refresh`
 
-**Description:** Refresh the access token using the current refresh token. The refresh token may be supplied via cookie or request body.
+Rotate refresh token and issue a new access token cookie.
 
-**Request Headers:**
-```http
-Content-Type: application/json
-Cookie: refreshToken=<refresh_token_value>
-```
+**Request body**
+- `refreshToken` can be sent in body or cookie `refreshToken`.
 
-**Request Body (optional):**
 ```json
 {
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  "refreshToken": "jwt_refresh_token"
 }
 ```
 
-**Success Response (200 OK):**
+**Success (200)**
+
 ```json
 {
   "success": true,
@@ -203,59 +335,22 @@ Cookie: refreshToken=<refresh_token_value>
   "data": {
     "user": {
       "id": 1,
-      "name": "John Doe",
       "email": "user@example.com",
-      "status": "ACTIVE",
-      "companyId": 1,
-      "companyName": "Tech Corp",
-      "companyCode": "TC001",
-      "branchId": 1,
-      "branchName": "Main Branch",
-      "branchCode": "BR001",
-      "primaryRole": "BRANCH_ADMIN",
-      "roles": [
-        {
-          "role": "BRANCH_ADMIN",
-          "companyId": 1,
-          "branchId": 1,
-          "isPrimary": true
-        }
-      ],
-      "permissions": {
-        "COMPANY": {
-          "canView": false,
-          "canCreate": false,
-          "canEdit": false,
-          "canDelete": false
-        },
-        "BRANCH": {
-          "canView": true,
-          "canCreate": false,
-          "canEdit": true,
-          "canDelete": false
-        },
-        "USER": {
-          "canView": true,
-          "canCreate": true,
-          "canEdit": true,
-          "canDelete": true
-        }
-      }
+      "primaryRole": "BRANCH_ADMIN"
     }
   },
-  "timestamp": "2026-04-08T10:31:25.123Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Cookies Updated:**
-- `accessToken`: refreshed token is set in cookie
-- `refreshToken`: refreshed token is set in cookie
+**Possible errors**
+- **400 VALIDATION_ERROR** (`refreshToken` missing)
+- **401 UNAUTHORIZED** (refresh token invalid/expired/not found)
 
-**Error Responses:**
-- `400 Validation Error` when the refresh token is missing from both cookie and body
-- `401 Unauthorized` when the refresh token is invalid or expired
+**Error response examples**
 
-**Example Validation Error:**
+Missing refresh token (`400`):
+
 ```json
 {
   "success": false,
@@ -265,11 +360,12 @@ Cookie: refreshToken=<refresh_token_value>
   "details": [
     { "field": "refreshToken", "message": "Refresh token is required" }
   ],
-  "timestamp": "2026-04-08T10:31:25.123Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Unauthorized Error:**
+Invalid, expired, or unknown refresh token (`401`):
+
 ```json
 {
   "success": false,
@@ -277,65 +373,51 @@ Cookie: refreshToken=<refresh_token_value>
   "code": "UNAUTHORIZED",
   "message": "Invalid or expired refresh token",
   "details": null,
-  "timestamp": "2026-04-08T10:31:25.123Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 401,
+  "code": "UNAUTHORIZED",
+  "message": "Refresh token not found",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
 ---
 
-### 3. Logout
-**Endpoint:** `POST /api/auth/logout`
+### POST `/api/auth/logout`
 
-**Description:** Logout the current user by invalidating the refresh token and clearing cookies.
+Clears token cookies. If cookie refresh token exists, it’s removed from DB as well.
 
-**Request Headers:**
-```http
-Content-Type: application/json
-Cookie: refreshToken=<refresh_token_value>
-```
+**Request**: no body required
 
-**Request Body:**
-```json
-{}
-```
+**Success (200)**
 
-**Success Response (200 OK):**
 ```json
 {
   "success": true,
   "statusCode": 200,
   "message": "Logged out successfully",
   "data": null,
-  "timestamp": "2026-04-08T10:32:25.123Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Cookies Cleared:**
-- `accessToken`
-- `refreshToken`
-
-**Error Responses:**
-- This endpoint returns `200 OK` even if the refresh token is missing or already invalidated.
-- There is no required request body validation for logout.
-
 ---
 
-### 4. Get Current User
-**Endpoint:** `GET /api/auth/me`
+### GET `/api/auth/me`
 
-**Description:** Retrieve the current authenticated user's profile. Requires a valid access token cookie.
+Get current authenticated user (uses auth middleware).
 
-**Request Headers:**
-```http
-Authorization: Bearer <access_token_value>
-```
+**Auth**: required (`Authorization: Bearer <token>` or cookie token)
 
-**Request Body:**
-```
-No body required
-```
+**Success (200)**
 
-**Success Response (200 OK):**
 ```json
 {
   "success": true,
@@ -344,138 +426,90 @@ No body required
   "data": {
     "user": {
       "id": 1,
-      "name": "John Doe",
       "email": "user@example.com",
-      "status": "ACTIVE",
-      "companyId": 1,
-      "companyName": "Tech Corp",
-      "companyCode": "TC001",
-      "branchId": 1,
-      "branchName": "Main Branch",
-      "branchCode": "BR001",
       "primaryRole": "BRANCH_ADMIN",
-      "roles": [
-        {
-          "role": "BRANCH_ADMIN",
-          "companyId": 1,
-          "branchId": 1,
-          "isPrimary": true
-        }
-      ],
-      "permissions": {
-        "COMPANY": {
-          "canView": false,
-          "canCreate": false,
-          "canEdit": false,
-          "canDelete": false
-        },
-        "BRANCH": {
-          "canView": true,
-          "canCreate": false,
-          "canEdit": true,
-          "canDelete": false
-        },
-        "USER": {
-          "canView": true,
-          "canCreate": true,
-          "canEdit": true,
-          "canDelete": true
-        }
-      }
+      "permissions": {}
     }
   },
-  "timestamp": "2026-04-08T10:33:25.123Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
-- `401 Unauthorized` when the access token is missing, invalid, or expired
-- `403 Forbidden` when the user account is inactive or has no assigned roles
+**Possible errors**
+- **401 UNAUTHORIZED** / **TOKEN_EXPIRED** / **TOKEN_INVALID**
+- **403 ACCOUNT_INACTIVE**
+- **403 NO_ROLE_ASSIGNED**
 
-**Example Unauthorized Error:**
+**Error response examples**
+
+Missing/invalid/expired bearer token (`401`, shapes vary slightly):
+
 ```json
 {
   "success": false,
   "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
-  "details": null,
-  "timestamp": "2026-04-08T10:33:25.123Z"
+  "code": "TOKEN_EXPIRED",
+  "message": "Token expired. Please login again.",
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Forbidden Error:**
 ```json
 {
   "success": false,
-  "statusCode": 403,
-  "code": "ACCOUNT_INACTIVE",
-  "message": "Your account has been deactivated. Contact admin.",
-  "details": null,
-  "timestamp": "2026-04-08T10:33:25.123Z"
+  "statusCode": 401,
+  "code": "TOKEN_INVALID",
+  "message": "Invalid token. Please login again.",
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
+(See login section for `ACCOUNT_INACTIVE` and `NO_ROLE_ASSIGNED` JSON.)
+
 ---
 
-## Company Endpoints
+## 2) Company
 
-### 1. Create Company
-**Endpoint:** `POST /api/companies`
+Routes: `src/modules/company/comany.routes.js`
 
-**Description:** Create a new company. Only SUPER_ADMIN users can create companies.
+All endpoints here require:
+- **Auth**: required
+- **Role**: `SUPER_ADMIN` (`authorize("SUPER_ADMIN")`)
+- **Permission module**: `COMPANY` (`hasPermission(...)`)
 
-**Authentication:** Required (SUPER_ADMIN role)
+### POST `/api/companies`
 
-**Permissions:** `COMPANY:canCreate`
+Create a company.
 
-**Request Headers:**
-```http
-Content-Type: application/json
-Authorization: Bearer <access_token_value>
-```
+**Request body**
 
-**Request Body:**
 ```json
 {
-  "name": "Tech Solutions Inc",
-  "code": "TSI",
+  "name": "StackDot",
+  "code": "STD",
   "status": "ACTIVE"
 }
 ```
 
-**Request Fields:**
-- `name` (string, required): Company name
-- `code` (string, required): Unique company code (will be converted to uppercase)
-- `status` (string, optional): Company status, defaults to "ACTIVE"
+**Success (201)**
 
-**Success Response (201 Created):**
 ```json
 {
   "success": true,
   "statusCode": 201,
   "message": "Company created successfully",
-  "data": {
-    "company": {
-      "id": 1,
-      "name": "Tech Solutions Inc",
-      "code": "TSI",
-      "status": "ACTIVE",
-      "createdAt": "2026-04-09T10:00:00.000Z",
-      "updatedAt": "2026-04-09T10:00:00.000Z"
-    }
-  },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "data": { "company": { "id": 1, "name": "StackDot", "code": "STD", "status": "ACTIVE" } },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
-- `400 Validation Error` when required fields are missing
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks SUPER_ADMIN role or COMPANY:canCreate permission
-- `409 Conflict` when company code already exists
+**Possible errors**
+- **400 VALIDATION_ERROR** (missing `name`/`code`)
+- **409 CONFLICT** (`code` already exists)
+- **403 ROLE_NOT_ALLOWED** / **403 PERMISSION_DENIED**
 
-**Example Validation Error:**
+**Error response examples**
+
 ```json
 {
   "success": false,
@@ -486,11 +520,10 @@ Authorization: Bearer <access_token_value>
     { "field": "name", "message": "Company name is required" },
     { "field": "code", "message": "Company code is required" }
   ],
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Conflict Error:**
 ```json
 {
   "success": false,
@@ -498,187 +531,133 @@ Authorization: Bearer <access_token_value>
   "code": "CONFLICT",
   "message": "Company code already exists",
   "details": { "field": "code" },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "PERMISSION_DENIED",
+  "message": "You don't have permission to canCreate COMPANY",
+  "details": { "required": "COMPANY:canCreate" },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+Wrong role for this route (`403`, `ROLE_NOT_ALLOWED`):
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "ROLE_NOT_ALLOWED",
+  "message": "Access denied. Required role: SUPER_ADMIN",
+  "details": { "required": ["SUPER_ADMIN"] },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
 ---
 
-### 2. Get All Companies
-**Endpoint:** `GET /api/companies`
+### GET `/api/companies`
 
-**Description:** Retrieve all companies. Only SUPER_ADMIN users can view companies.
+Get all companies.
 
-**Authentication:** Required (SUPER_ADMIN role)
+**Success (200)**: controller returns an array in `data`.
 
-**Permissions:** `COMPANY:canView`
-
-**Request Headers:**
-```http
-Authorization: Bearer <access_token_value>
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Companies fetched",
+  "data": [
+    {
+      "id": 1,
+      "name": "StackDot",
+      "code": "STD",
+      "_count": { "branches": 0, "users": 0 }
+    }
+  ],
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
 ```
 
-**Request Body:**
-```
-No body required
+**Possible errors** (all list/detail company routes)
+
+- **401** / **TOKEN_**\* (not logged in or bad token) — see [GET `/api/auth/me`](#get-apiauthme)
+- **403 PERMISSION_DENIED** / **403 ROLE_NOT_ALLOWED** — missing `COMPANY` permission or wrong role
+
+**Error response example** (`403`, missing module permission)
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "PERMISSION_DENIED",
+  "message": "You don't have permission to canView COMPANY",
+  "details": { "required": "COMPANY:canView" },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
 ```
 
-**Success Response (200 OK):**
+---
+
+### GET `/api/companies/paginated`
+
+Paginated companies list (for tables).
+
+**Query params**
+- `page` (default 1)
+- `limit` (default 10)
+- `search` (name/code)
+- `status`
+- `sort` = `newest` (default) | `oldest` | `name_asc` | `name_desc`
+
+**Success (200)**
+
 ```json
 {
   "success": true,
   "statusCode": 200,
   "message": "Companies fetched",
   "data": {
-    "companies": [
-      {
-        "id": 1,
-        "name": "Tech Solutions Inc",
-        "code": "TSI",
-        "status": "ACTIVE",
-        "createdAt": "2026-04-09T10:00:00.000Z",
-        "updatedAt": "2026-04-09T10:00:00.000Z",
-        "_count": {
-          "branches": 3,
-          "users": 15
-        }
-      },
-      {
-        "id": 2,
-        "name": "Global Corp",
-        "code": "GC",
-        "status": "ACTIVE",
-        "createdAt": "2026-04-09T09:00:00.000Z",
-        "updatedAt": "2026-04-09T09:00:00.000Z",
-        "_count": {
-          "branches": 5,
-          "users": 28
-        }
-      }
-    ]
+    "companies": [],
+    "pagination": { "total": 0, "page": 1, "limit": 10, "pages": 0, "hasNext": false, "hasPrev": false }
   },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks SUPER_ADMIN role or COMPANY:canView permission
+**Possible errors**
 
-**Example Unauthorized Error:**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
+- Same auth/permission cases as **GET `/api/companies`**
 
-**Example Forbidden Error:**
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "Access denied",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
+---
 
-### 3. Get Company by ID
-**Endpoint:** `GET /api/companies/:id`
+### GET `/api/companies/:id`
 
-**Description:** Retrieve a specific company by ID. Only SUPER_ADMIN users can view companies.
+Get a company by id (includes branches + counts).
 
-**Authentication:** Required (SUPER_ADMIN role)
+**Success (200)**
 
-**Permissions:** `COMPANY:canView`
-
-**Request Headers:**
-```http
-Authorization: Bearer <access_token_value>
-```
-
-**URL Parameters:**
-- `id` (number, required): Company ID
-
-**Request Body:**
-```
-No body required
-```
-
-**Success Response (200 OK):**
 ```json
 {
   "success": true,
   "statusCode": 200,
   "message": "Company fetched",
-  "data": {
-    "company": {
-      "id": 1,
-      "name": "Tech Solutions Inc",
-      "code": "TSI",
-      "status": "ACTIVE",
-      "createdAt": "2026-04-09T10:00:00.000Z",
-      "updatedAt": "2026-04-09T10:00:00.000Z",
-      "branches": [
-        {
-          "id": 1,
-          "name": "Main Office",
-          "code": "MAIN",
-          "status": "ACTIVE"
-        },
-        {
-          "id": 2,
-          "name": "Downtown Branch",
-          "code": "DT",
-          "status": "ACTIVE"
-        }
-      ],
-      "_count": {
-        "branches": 3,
-        "users": 15
-      }
-    }
-  },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "data": { "company": { "id": 1, "name": "StackDot", "branches": [], "_count": { "branches": 0, "users": 0 } } },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks SUPER_ADMIN role or COMPANY:canView permission
-- `404 Not Found` when company does not exist
+**Possible errors**
+- **404 NOT_FOUND** (company not found)
+- **401** / **TOKEN_**\* / **403 PERMISSION_DENIED** / **403 ROLE_NOT_ALLOWED** — same as **GET `/api/companies`**
 
-**Example Unauthorized Error:**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
+**Error response example**
 
-**Example Forbidden Error:**
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "Access denied",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
-
-**Example Not Found Error:**
 ```json
 {
   "success": false,
@@ -686,92 +665,43 @@ No body required
   "code": "NOT_FOUND",
   "message": "Company not found",
   "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
 ---
 
-### 4. Update Company
-**Endpoint:** `PUT /api/companies/:id`
+### PUT `/api/companies/:id`
 
-**Description:** Update an existing company. Only SUPER_ADMIN users can update companies.
+Update company fields.
 
-**Authentication:** Required (SUPER_ADMIN role)
+**Request body** (any)
 
-**Permissions:** `COMPANY:canEdit`
-
-**Request Headers:**
-```http
-Content-Type: application/json
-Authorization: Bearer <access_token_value>
-```
-
-**URL Parameters:**
-- `id` (number, required): Company ID
-
-**Request Body:**
 ```json
 {
-  "name": "Updated Company Name",
-  "status": "INACTIVE"
+  "name": "StackDot CRM",
+  "status": "ACTIVE"
 }
 ```
 
-**Request Fields:**
-- `name` (string, optional): Updated company name
-- `status` (string, optional): Updated company status ("ACTIVE" or "INACTIVE")
+**Success (200)**
 
-**Success Response (200 OK):**
 ```json
 {
   "success": true,
   "statusCode": 200,
   "message": "Company updated successfully",
-  "data": {
-    "company": {
-      "id": 1,
-      "name": "Updated Company Name",
-      "code": "TSI",
-      "status": "INACTIVE",
-      "createdAt": "2026-04-09T10:00:00.000Z",
-      "updatedAt": "2026-04-09T10:05:00.000Z"
-    }
-  },
-  "timestamp": "2026-04-09T10:05:00.000Z"
+  "data": { "company": { "id": 1, "name": "StackDot CRM", "status": "ACTIVE" } },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks SUPER_ADMIN role or COMPANY:canEdit permission
-- `404 Not Found` when company does not exist
+**Possible errors**
+- **404 NOT_FOUND**
+- **401** / **TOKEN_**\* / **403 PERMISSION_DENIED** / **403 ROLE_NOT_ALLOWED** — same as **GET `/api/companies`**
 
-**Example Unauthorized Error:**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
-  "details": null,
-  "timestamp": "2026-04-09T10:05:00.000Z"
-}
-```
+**Error response example**
 
-**Example Forbidden Error:**
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "Access denied",
-  "details": null,
-  "timestamp": "2026-04-09T10:05:00.000Z"
-}
-```
-
-**Example Not Found Error:**
 ```json
 {
   "success": false,
@@ -779,76 +709,60 @@ Authorization: Bearer <access_token_value>
   "code": "NOT_FOUND",
   "message": "Company not found",
   "details": null,
-  "timestamp": "2026-04-09T10:05:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-## Branch Endpoints
+---
 
-### 1. Create Branch
-**Endpoint:** `POST /api/branches`
+## 3) Branch
 
-**Description:** Create a new branch within a company. SUPER_ADMIN and BRANCH_ADMIN users can create branches.
+Routes: `src/modules/branch/branch.routes.js`
 
-**Authentication:** Required (SUPER_ADMIN or BRANCH_ADMIN role)
+All endpoints here require:
+- **Auth**: required
+- **Permission module**: `BRANCH` (`hasPermission(...)`)
+- Some endpoints also require **roles**: `SUPER_ADMIN` or `BRANCH_ADMIN`
 
-**Permissions:** `BRANCH:canCreate`
+### POST `/api/branches`
 
-**Request Headers:**
-```http
-Content-Type: application/json
-Authorization: Bearer <access_token_value>
-```
+Create branch.
 
-**Request Body:**
+**Role**: `SUPER_ADMIN` or `BRANCH_ADMIN`  
+**Permission**: `BRANCH:canCreate`
+
+**Request body**
+
 ```json
 {
   "companyId": 1,
-  "name": "Downtown Branch",
-  "code": "DT",
+  "name": "Main Branch",
+  "code": "MAIN",
   "status": "ACTIVE"
 }
 ```
 
-**Request Fields:**
-- `companyId` (number, required): ID of the company this branch belongs to
-- `name` (string, required): Branch name
-- `code` (string, required): Unique branch code within the company (will be converted to uppercase)
-- `status` (string, optional): Branch status, defaults to "ACTIVE"
+**Success (201)**
 
-**Success Response (201 Created):**
 ```json
 {
   "success": true,
   "statusCode": 201,
   "message": "Branch created successfully",
-  "data": {
-    "branch": {
-      "id": 2,
-      "companyId": 1,
-      "name": "Downtown Branch",
-      "code": "DT",
-      "status": "ACTIVE",
-      "createdAt": "2026-04-09T10:00:00.000Z",
-      "updatedAt": "2026-04-09T10:00:00.000Z",
-      "company": {
-        "id": 1,
-        "name": "Tech Solutions Inc"
-      }
-    }
-  },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "data": { "branch": { "id": 2, "name": "Main Branch", "code": "MAIN", "companyId": 1 } },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
-- `400 Validation Error` when required fields are missing or company is inactive
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks required role or BRANCH:canCreate permission, or tries to create branch in another company
-- `404 Not Found` when company does not exist
-- `409 Conflict` when branch code already exists in the company
+**Possible errors**
+- **400 VALIDATION_ERROR** (missing companyId/name/code)
+- **404 NOT_FOUND** (company not found)
+- **409 CONFLICT** (branch code exists in company)
+- **403 FORBIDDEN** (trying to create in another company / access denied)
+- **403 ROLE_NOT_ALLOWED** / **403 PERMISSION_DENIED**
 
-**Example Validation Error (Missing Fields):**
+**Error response examples**
+
 ```json
 {
   "success": false,
@@ -856,51 +770,27 @@ Authorization: Bearer <access_token_value>
   "code": "VALIDATION_ERROR",
   "message": "Validation failed",
   "details": [
+    { "field": "companyId", "message": "Company is required" },
     { "field": "name", "message": "Branch name is required" },
-    { "field": "code", "message": "Branch code is required" },
-    { "field": "companyId", "message": "Company ID is required" }
+    { "field": "code", "message": "Branch code is required" }
   ],
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Validation Error (Inactive Company):**
+Company exists but is not active (`400` — message-only validation; `details` may be an empty array):
+
 ```json
 {
   "success": false,
   "statusCode": 400,
   "code": "VALIDATION_ERROR",
   "message": "Company is inactive",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "details": [],
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Unauthorized Error:**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
-
-**Example Forbidden Error:**
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "Access denied",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
-
-**Example Not Found Error:**
 ```json
 {
   "success": false,
@@ -908,11 +798,10 @@ Authorization: Bearer <access_token_value>
   "code": "NOT_FOUND",
   "message": "Company not found",
   "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Conflict Error:**
 ```json
 {
   "success": false,
@@ -920,88 +809,51 @@ Authorization: Bearer <access_token_value>
   "code": "CONFLICT",
   "message": "Branch code already exists in this company",
   "details": { "field": "code" },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "You cannot access data from another company",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
 ---
 
-### 2. Get Branches
-**Endpoint:** `GET /api/branches?company_id={companyId}`
+### GET `/api/branches`
 
-**Description:** Retrieve branches for a specific company. Users can only view branches in their own company unless they are SUPER_ADMIN.
+Get branches by company.
 
-**Authentication:** Required
+**Permission**: `BRANCH:canView`
 
-**Permissions:** `BRANCH:canView`
+**Query params**
+- `company_id` (required for SUPER_ADMIN; ignored/scoped for non-super-admin)
 
-**Request Headers:**
-```http
-Authorization: Bearer <access_token_value>
-```
+**Success (200)**
 
-**Query Parameters:**
-- `company_id` (number, required for SUPER_ADMIN, optional for others): Company ID to filter branches
-
-**Request Body:**
-```
-No body required
-```
-
-**Success Response (200 OK):**
 ```json
 {
   "success": true,
   "statusCode": 200,
   "message": "Branches fetched",
-  "data": {
-    "branches": [
-      {
-        "id": 1,
-        "companyId": 1,
-        "name": "Main Office",
-        "code": "MAIN",
-        "status": "ACTIVE",
-        "createdAt": "2026-04-09T09:00:00.000Z",
-        "updatedAt": "2026-04-09T09:00:00.000Z",
-        "company": {
-          "id": 1,
-          "name": "Tech Solutions Inc"
-        },
-        "_count": {
-          "users": 8
-        }
-      },
-      {
-        "id": 2,
-        "companyId": 1,
-        "name": "Downtown Branch",
-        "code": "DT",
-        "status": "ACTIVE",
-        "createdAt": "2026-04-09T10:00:00.000Z",
-        "updatedAt": "2026-04-09T10:00:00.000Z",
-        "company": {
-          "id": 1,
-          "name": "Tech Solutions Inc"
-        },
-        "_count": {
-          "users": 5
-        }
-      }
-    ],
-    "total": 2
-  },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "data": { "branches": [], "total": 0 },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
-- `400 Validation Error` when company_id is missing for SUPER_ADMIN
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks BRANCH:canView permission or tries to access another company's branches
-- `404 Not Found` when company does not exist
+**Possible errors**
+- **400 VALIDATION_ERROR** (`company_id` required for SUPER_ADMIN)
+- **404 NOT_FOUND** (company not found)
+- **403 FORBIDDEN** (non-super-admin trying other company)
 
-**Example Validation Error:**
+**Error response examples**
+
 ```json
 {
   "success": false,
@@ -1011,35 +863,10 @@ No body required
   "details": [
     { "field": "company_id", "message": "company_id is required" }
   ],
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Unauthorized Error:**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
-
-**Example Forbidden Error:**
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "Access denied",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
-
-**Example Not Found Error:**
 ```json
 {
   "success": false,
@@ -1047,78 +874,10 @@ No body required
   "code": "NOT_FOUND",
   "message": "Company not found",
   "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-### 3. Get Branch by ID
-**Endpoint:** `GET /api/branches/:id`
-
-**Description:** Retrieve a specific branch by ID. Users can only view branches in their own company unless they are SUPER_ADMIN.
-
-**Authentication:** Required
-
-**Permissions:** `BRANCH:canView`
-
-**Request Headers:**
-```http
-Authorization: Bearer <access_token_value>
-```
-
-**URL Parameters:**
-- `id` (number, required): Branch ID
-
-**Request Body:**
-```
-No body required
-```
-
-**Success Response (200 OK):**
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "message": "Branch fetched",
-  "data": {
-    "branch": {
-      "id": 2,
-      "companyId": 1,
-      "name": "Downtown Branch",
-      "code": "DT",
-      "status": "ACTIVE",
-      "createdAt": "2026-04-09T10:00:00.000Z",
-      "updatedAt": "2026-04-09T10:00:00.000Z",
-      "company": {
-        "id": 1,
-        "name": "Tech Solutions Inc"
-      },
-      "_count": {
-        "users": 5
-      }
-    }
-  },
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
-
-**Error Responses:**
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks BRANCH:canView permission or tries to access branch from another company
-- `404 Not Found` when branch does not exist
-
-**Example Unauthorized Error:**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
-}
-```
-
-**Example Forbidden Error:**
 ```json
 {
   "success": false,
@@ -1126,11 +885,64 @@ No body required
   "code": "FORBIDDEN",
   "message": "Access denied",
   "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Not Found Error:**
+---
+
+### GET `/api/branches/paginated`
+
+Paginated branches list.
+
+**Permission**: `BRANCH:canView`
+
+**Possible errors** (same shapes as `GET /api/branches` for `company_id`, missing company, cross-company access)
+
+**Error response examples**
+
+See **GET `/api/branches`** — this route uses the same company scoping and existence checks.
+
+**Query params**
+- `company_id` (required for SUPER_ADMIN; ignored/scoped for non-super-admin)
+- `page`, `limit`
+- `search` (name/code/city)
+- `status`
+
+**Success (200)**
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Branches fetched successfully",
+  "data": {
+    "branches": [],
+    "total": 0,
+    "page": 1,
+    "limit": 10,
+    "totalPages": 0,
+    "hasNext": false,
+    "hasPrev": false
+  },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+---
+
+### GET `/api/branches/:id`
+
+Get branch by id.
+
+**Permission**: `BRANCH:canView`
+
+**Possible errors**
+- **404 NOT_FOUND** (branch not found)
+- **403 FORBIDDEN** (cross-company)
+
+**Error response examples**
+
 ```json
 {
   "success": false,
@@ -1138,95 +950,46 @@ No body required
   "code": "NOT_FOUND",
   "message": "Branch not found",
   "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-### 4. Update Branch
-**Endpoint:** `PUT /api/branches/:id`
-
-**Description:** Update an existing branch. SUPER_ADMIN and BRANCH_ADMIN users can update branches.
-
-**Authentication:** Required (SUPER_ADMIN or BRANCH_ADMIN role)
-
-**Permissions:** `BRANCH:canEdit`
-
-**Request Headers:**
-```http
-Content-Type: application/json
-Authorization: Bearer <access_token_value>
-```
-
-**URL Parameters:**
-- `id` (number, required): Branch ID
-
-**Request Body:**
-```json
-{
-  "name": "Updated Branch Name",
-  "status": "INACTIVE"
-}
-```
-
-**Request Fields:**
-- `name` (string, optional): Updated branch name
-- `status` (string, optional): Updated branch status ("ACTIVE" or "INACTIVE")
-
-**Success Response (200 OK):**
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "message": "Branch updated successfully",
-  "data": {
-    "branch": {
-      "id": 2,
-      "companyId": 1,
-      "name": "Updated Branch Name",
-      "code": "DT",
-      "status": "INACTIVE",
-      "createdAt": "2026-04-09T10:00:00.000Z",
-      "updatedAt": "2026-04-09T10:05:00.000Z",
-      "company": {
-        "id": 1,
-        "name": "Tech Solutions Inc"
-      }
-    }
-  },
-  "timestamp": "2026-04-09T10:05:00.000Z"
-}
-```
-
-**Error Responses:**
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks required role or BRANCH:canEdit permission, or tries to update branch in another company
-- `404 Not Found` when branch does not exist
-
-**Example Unauthorized Error:**
-```json
-{
-  "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
-  "details": null,
-  "timestamp": "2026-04-09T10:05:00.000Z"
-}
-```
-
-**Example Forbidden Error:**
 ```json
 {
   "success": false,
   "statusCode": 403,
   "code": "FORBIDDEN",
-  "message": "Access denied",
+  "message": "You cannot access data from another company",
   "details": null,
-  "timestamp": "2026-04-09T10:05:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Not Found Error:**
+---
+
+### PUT `/api/branches/:id`
+
+Update branch.
+
+**Role**: `SUPER_ADMIN` or `BRANCH_ADMIN`  
+**Permission**: `BRANCH:canEdit`
+
+**Request body**
+
+```json
+{
+  "name": "Main Branch 2",
+  "status": "ACTIVE"
+}
+```
+
+**Possible errors**
+- **404 NOT_FOUND**
+- **403 FORBIDDEN**
+- **403 ROLE_NOT_ALLOWED** / **403 PERMISSION_DENIED**
+
+**Error response examples**
+
 ```json
 {
   "success": false,
@@ -1234,88 +997,64 @@ Authorization: Bearer <access_token_value>
   "code": "NOT_FOUND",
   "message": "Branch not found",
   "details": null,
-  "timestamp": "2026-04-09T10:05:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-### 5. Assign User to Branch
-**Endpoint:** `POST /api/branches/:id/assign-user`
-
-**Description:** Create a new user and assign them to a specific branch. SUPER_ADMIN and BRANCH_ADMIN users can assign users to branches.
-
-**Authentication:** Required (SUPER_ADMIN or BRANCH_ADMIN role)
-
-**Permissions:** `BRANCH:canEdit`
-
-**Request Headers:**
-```http
-Content-Type: application/json
-Authorization: Bearer <access_token_value>
-```
-
-**URL Parameters:**
-- `id` (number, required): Branch ID
-
-**Request Body:**
 ```json
 {
-  "name": "John Doe",
-  "email": "john.doe@company.com",
-  "password": "securePassword123",
-  "roleName": "MANAGER"
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "You cannot access data from another company",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Request Fields:**
-- `name` (string, required): User's full name
-- `email` (string, required): User's email address (must be unique)
-- `password` (string, required): User's password
-- `roleName` (string, required): Role to assign ("BRANCH_ADMIN", "MANAGER", or "ISE")
+---
 
-**Success Response (200 OK):**
+### POST `/api/branches/:id/assign-user`
+
+Create a new user and assign them to this branch with a primary role.
+
+**Role**: `SUPER_ADMIN` or `BRANCH_ADMIN`  
+**Permission**: `BRANCH:canEdit`
+
+**Request body**
+
+```json
+{
+  "name": "Agent A",
+  "email": "agent@example.com",
+  "password": "Pass@123",
+  "roleName": "ISE"
+}
+```
+
+**Success (200)**
+
 ```json
 {
   "success": true,
   "statusCode": 200,
   "message": "User assigned to branch successfully",
-  "data": {
-    "user": {
-      "id": 5,
-      "name": "John Doe",
-      "email": "john.doe@company.com",
-      "status": "ACTIVE",
-      "createdAt": "2026-04-09T10:00:00.000Z",
-      "company": {
-        "id": 1,
-        "name": "Tech Solutions Inc"
-      },
-      "branch": {
-        "id": 2,
-        "name": "Downtown Branch"
-      },
-      "userRoles": [
-        {
-          "isPrimary": true,
-          "role": {
-            "id": 3,
-            "name": "MANAGER"
-          }
-        }
-      ]
-    }
-  },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "data": { "user": { "id": 10, "email": "agent@example.com", "status": "ACTIVE" } },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
-- `400 Validation Error` when required fields are missing or invalid role specified
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when user lacks required role or BRANCH:canEdit permission, tries to assign user to branch in another company, or tries to create role they cannot assign
-- `404 Not Found` when branch or role does not exist
-- `409 Conflict` when email is already registered
+**Possible errors**
+- **400 VALIDATION_ERROR** (missing name/email/password/roleName)
+- **404 NOT_FOUND** (branch not found / role not found)
+- **409 CONFLICT** (email already registered)
+- **403 FORBIDDEN**
+  - cross-company scope
+  - role creation guard: e.g. `BRANCH_ADMIN cannot create user with role CEO`
+- **400 VALIDATION_ERROR** if role cannot be assigned to a branch (only `BRANCH_ADMIN`, `MANAGER`, `ISE`)
 
-**Example Validation Error (Missing Fields):**
+**Error response examples**
+
 ```json
 {
   "success": false,
@@ -1328,11 +1067,54 @@ Authorization: Bearer <access_token_value>
     { "field": "password", "message": "Password is required" },
     { "field": "roleName", "message": "Role is required" }
   ],
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Validation Error (Invalid Role):**
+```json
+{
+  "success": false,
+  "statusCode": 404,
+  "code": "NOT_FOUND",
+  "message": "Branch not found",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 404,
+  "code": "NOT_FOUND",
+  "message": "Role not found",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "code": "CONFLICT",
+  "message": "Email already registered",
+  "details": { "field": "email" },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "BRANCH_ADMIN cannot create user with role CEO",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
 ```json
 {
   "success": false,
@@ -1342,300 +1124,585 @@ Authorization: Bearer <access_token_value>
   "details": [
     { "field": "roleName", "message": "Use BRANCH_ADMIN, MANAGER, or ISE" }
   ],
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Unauthorized Error:**
+---
+
+## 4) Lead Sources
+
+Routes: `src/modules/leadsources/leadSource.routes.js`
+
+All endpoints require **Auth**.
+Some endpoints require `authorize("SUPER_ADMIN", "BRANCH_ADMIN")`.
+
+### GET `/api/lead-sources`
+
+List lead sources.
+
+**Auth**: required
+
+**Query params**
+- `search`
+- `isActive` (`"true"` / `"false"`)
+
+**Success (200)**: returns an array in `data`.
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Lead sources fetched",
+  "data": [
+    { "id": 1, "name": "Instagram" }
+  ],
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+**Possible errors**
+
+- **401** / **TOKEN_**\* — not authenticated (route only uses `authenticate`; there is no `hasPermission` on this handler)
+
+**Error response example**
+
+See [GET `/api/auth/me`](#get-apiauthme) for `401` / `TOKEN_EXPIRED` / `TOKEN_INVALID` shapes.
+
+---
+
+### GET `/api/lead-sources/:id`
+
+Get one lead source.
+
+**Success (200)**
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Lead source fetched",
+  "data": { "leadSource": { "id": 1, "name": "Instagram", "type": "GLOBAL" } },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+**Possible errors**
+- **404 NOT_FOUND** (unknown id)
+- **403 FORBIDDEN** — e.g. non–super-admin cannot read another company’s scoped lead source (`You cannot access lead sources from another company`)
+- **401** / **TOKEN_**\* — not authenticated
+
+**Error response examples**
+
 ```json
 {
   "success": false,
-  "statusCode": 401,
-  "code": "UNAUTHORIZED",
-  "message": "Not authenticated",
+  "statusCode": 404,
+  "code": "NOT_FOUND",
+  "message": "Lead source not found",
   "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Forbidden Error (Cannot Create Role):**
 ```json
 {
   "success": false,
   "statusCode": 403,
   "code": "FORBIDDEN",
-  "message": "BRANCH_ADMIN cannot create user with role SUPER_ADMIN",
+  "message": "You cannot access lead sources from another company",
   "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Not Found Error (Branch):**
+---
+
+### POST `/api/lead-sources`
+
+Create lead source.
+
+**Role**: `SUPER_ADMIN` or `BRANCH_ADMIN`
+
+**Request body**
+
+```json
+{
+  "name": "WhatsApp",
+  "isGlobal": false
+}
+```
+
+**Possible errors**
+- **400 VALIDATION_ERROR** (name missing/empty)
+- **403 ROLE_NOT_ALLOWED**
+- **403 FORBIDDEN** (non-super-admin trying `isGlobal: true`)
+- **409 CONFLICT** (duplicate name in same scope)
+
+**Error response examples**
+
 ```json
 {
   "success": false,
-  "statusCode": 404,
-  "code": "NOT_FOUND",
-  "message": "Branch not found",
-  "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "statusCode": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "details": [
+    { "field": "name", "message": "Lead source name is required" }
+  ],
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Not Found Error (Role):**
 ```json
 {
   "success": false,
-  "statusCode": 404,
-  "code": "NOT_FOUND",
-  "message": "Role not found",
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "Only Super Admin can create global lead sources",
   "details": null,
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example Conflict Error:**
 ```json
 {
   "success": false,
   "statusCode": 409,
   "code": "CONFLICT",
-  "message": "Email already registered",
-  "details": { "field": "email" },
-  "timestamp": "2026-04-09T10:00:00.000Z"
+  "message": "Lead source \"WhatsApp\" already exists",
+  "details": { "field": "name" },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "ROLE_NOT_ALLOWED",
+  "message": "Access denied. Required role: SUPER_ADMIN or BRANCH_ADMIN",
+  "details": { "required": ["SUPER_ADMIN", "BRANCH_ADMIN"] },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
 ---
 
-## User Roles and Permissions Scenarios
+### PUT `/api/lead-sources/:id`
 
-This section explains the different user roles in the system and what actions they can perform regarding companies and branches. The system uses a hierarchical role-based access control (RBAC) with company and branch scoping.
+Update lead source.
 
-### User Roles Hierarchy
+**Role**: `SUPER_ADMIN` or `BRANCH_ADMIN`
 
-1. **SUPER_ADMIN**
-   - System-wide administrator
-   - Can manage all companies and branches across the entire system
-   - Can create new companies
-   - Can view, create, edit all branches in any company
-   - Can assign users to any branch with any allowed role
+**Request body**
 
-2. **CEO**
-   - Company-level executive
-   - Can manage their own company's branches and users
-   - Cannot create new companies
-   - Can view, create, edit branches within their company
-   - Cannot assign users to branches (no BRANCH:canEdit permission)
+```json
+{
+  "name": "Facebook Ads",
+  "isActive": true
+}
+```
 
-3. **BRANCH_ADMIN**
-   - Branch-level administrator
-   - Can manage branches within their company
-   - Cannot create new companies
-   - Can view, create, edit branches within their company
-   - Can assign users to branches within their company (with role restrictions)
-   - Can create users with roles: MANAGER, ISE (but not SUPER_ADMIN, CEO, or BRANCH_ADMIN)
+**Possible errors**
+- **404 NOT_FOUND**
+- **403 FORBIDDEN** (global lead sources modifiable only by SUPER_ADMIN; cross-company blocked)
+- **409 CONFLICT**
 
-4. **MANAGER**
-   - Branch manager
-   - Limited permissions within their branch
-   - Cannot create companies or branches
-   - Cannot assign users to branches
+**Error response examples**
 
-5. **ISE** (Inside Sales Executive)
-   - Sales representative
-   - Limited permissions within their branch
-   - Cannot create companies or branches
-   - Cannot assign users to branches
+```json
+{
+  "success": false,
+  "statusCode": 404,
+  "code": "NOT_FOUND",
+  "message": "Lead source not found",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
 
-### Company Management Scenarios
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "Only Super Admin can modify global lead sources",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
 
-#### Creating a Company
-- **Who can create:** Only SUPER_ADMIN users
-- **Required permissions:** COMPANY:canCreate
-- **Scenario:** A SUPER_ADMIN logs in and creates a new company with unique code
-- **Example:** SUPER_ADMIN creates "Tech Solutions Inc" with code "TSI"
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "You cannot access lead sources from another company",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
 
-#### Viewing Companies
-- **Who can view:** Only SUPER_ADMIN users
-- **Required permissions:** COMPANY:canView
-- **Scenario:** SUPER_ADMIN can list all companies in the system with user/branch counts
-
-#### Updating a Company
-- **Who can update:** Only SUPER_ADMIN users
-- **Required permissions:** COMPANY:canEdit
-- **Scenario:** SUPER_ADMIN can change company name or status (ACTIVE/INACTIVE)
-
-### Branch Management Scenarios
-
-#### Creating a Branch
-- **Who can create:** SUPER_ADMIN or BRANCH_ADMIN users
-- **Required permissions:** BRANCH:canCreate
-- **Company scoping:** Users can only create branches in their own company (unless SUPER_ADMIN)
-- **Scenario:** 
-  - BRANCH_ADMIN in "Tech Solutions Inc" creates a new branch "Downtown Office" with code "DTO"
-  - SUPER_ADMIN can create branches in any company
-
-#### Viewing Branches
-- **Who can view:** Any authenticated user with BRANCH:canView permission
-- **Company scoping:** Non-SUPER_ADMIN users can only view branches in their company
-- **Query parameter:** SUPER_ADMIN must specify `company_id`, others can optionally filter
-- **Scenario:** BRANCH_ADMIN views all branches in their company
-
-#### Updating a Branch
-- **Who can update:** SUPER_ADMIN or BRANCH_ADMIN users
-- **Required permissions:** BRANCH:canEdit
-- **Company scoping:** Users can only update branches in their own company
-- **Scenario:** BRANCH_ADMIN updates branch name or status
-
-#### Assigning Users to Branches
-- **Who can assign:** SUPER_ADMIN or BRANCH_ADMIN users
-- **Required permissions:** BRANCH:canEdit
-- **Role restrictions:** 
-  - SUPER_ADMIN can assign any role (SUPER_ADMIN, CEO, BRANCH_ADMIN, MANAGER, ISE)
-  - BRANCH_ADMIN can only assign MANAGER and ISE roles
-- **Company scoping:** Users can only assign to branches in their company
-- **Process:** Creates a new user account and assigns them to the specified branch with the given role
-- **Email uniqueness:** Email must be unique across the entire system
-- **Scenarios:**
-  - BRANCH_ADMIN creates a new MANAGER user for their branch
-  - SUPER_ADMIN creates a new BRANCH_ADMIN for any branch in any company
-
-### Permission Matrix
-
-| Action | SUPER_ADMIN | CEO | BRANCH_ADMIN | MANAGER | ISE |
-|--------|-------------|-----|--------------|---------|-----|
-| Create Company | ✅ | ❌ | ❌ | ❌ | ❌ |
-| View All Companies | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Update Company | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Create Branch (own company) | ✅ | ❌ | ✅ | ❌ | ❌ |
-| View Branches (own company) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Update Branch (own company) | ✅ | ❌ | ✅ | ❌ | ❌ |
-| Assign Users to Branch | ✅ | ❌ | ✅ (limited roles) | ❌ | ❌ |
-
-### Error Scenarios
-
-- **403 Forbidden (Company Scope):** BRANCH_ADMIN tries to create branch in another company
-- **403 Forbidden (Role Creation):** BRANCH_ADMIN tries to assign SUPER_ADMIN role
-- **409 Conflict (Duplicate Code):** Creating company/branch with existing code
-- **409 Conflict (Duplicate Email):** Assigning user with email that already exists
-- **404 Not Found:** Accessing non-existent company/branch/role
-- **400 Validation:** Missing required fields or invalid role for branch assignment
-
-### Workflow Examples
-
-1. **New Company Setup:**
-   - SUPER_ADMIN creates company "ABC Corp"
-   - SUPER_ADMIN creates branch "Head Office" for ABC Corp
-   - SUPER_ADMIN assigns BRANCH_ADMIN to the head office
-
-2. **Branch Expansion:**
-   - BRANCH_ADMIN creates new branch "Regional Office" in their company
-   - BRANCH_ADMIN assigns MANAGER to the new branch
-   - MANAGER can now operate within their branch scope
-
-3. **User Onboarding:**
-   - BRANCH_ADMIN creates ISE user for their branch
-   - New ISE gets permissions scoped to their branch and role
-
-This documentation is actively maintained and reflects the current implementation in the codebase.
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "code": "CONFLICT",
+  "message": "Lead source \"Facebook Ads\" already exists",
+  "details": { "field": "name" },
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
 
 ---
 
-## Common Error Codes
+## 5) Prospects
 
-**Authentication & Authorization:**
-- `UNAUTHORIZED` (401): Not authenticated
-- `FORBIDDEN` (403): Access denied due to insufficient permissions or roles
-- `ACCOUNT_INACTIVE` (403): User account is deactivated
-- `NO_ROLE_ASSIGNED` (403): User has no assigned roles
-- `PERMISSION_DENIED` (403): Missing specific permission for action
-- `ROLE_NOT_ALLOWED` (403): Access denied due to insufficient role requirements
+Routes: `src/modules/prospect/prospect.routes.js`
 
-**Example UNAUTHORIZED Error:**
+All endpoints require:
+- **Auth**
+- **Module permission**: `PROSPECT` via `hasPermission("PROSPECT", ...)`
+
+### GET `/api/prospects/lead-sources`
+
+Fetch **active** lead sources for a prospect dropdown (global + actor’s `companyId`). Same filtering idea as **`GET /api/lead-sources`**, but requires **`PROSPECT:canView`**.
+
+**Permission**: `PROSPECT:canView`
+
+**Request**: no body.
+
+**Success (200)**: `data` is `{ "leadSources": [ … ] }` (array of lead source records from the prospect helper service).
+
+---
+
+### POST `/api/prospects`
+
+Create a prospect.
+
+**Permission**: `PROSPECT:canCreate`
+
+**Request body**
+
 ```json
 {
-    "success": false,
-    "statusCode": 401,
-    "code": "UNAUTHORIZED",
-    "message": "Not authenticated",
-    "details": null,
-    "timestamp": "2026-04-10T04:38:07.948Z"
+  "name": "John Doe",
+  "mobile": "9999999999",
+  "leadSourceId": 3,
+  "assignedToId": 22,
+  "duplicate_acknowledged": false
 }
 ```
 
-**Example FORBIDDEN Error:**
+**Tenant vs super admin (where the prospect is created)**
+
+- Users with a **company** on their account: `companyId` and `branchId` on the new prospect are always taken from the **authenticated user** (`req.user`). Values sent in the body for `companyId` / `branchId` are **ignored** (prevents spoofing another company).
+- **Super admin** (and any account with **`companyId: null`** on the user): must send **`companyId`** and **`branchId`** in the body so the server knows which company/branch owns the prospect. `branchId` must belong to that `companyId`.
+- **Company-level user without a branch** (`companyId` set, **`branchId: null`** on the user): must send **`branchId`** in the body; it must belong to their company.
+
+Example for **super admin**:
+
 ```json
 {
-    "success": false,
-    "statusCode": 403,
-    "code": "FORBIDDEN",
-    "message": "Access denied",
-    "details": null,
-    "timestamp": "2026-04-10T04:38:07.948Z"
+  "name": "John Doe",
+  "mobile": "9999999999",
+  "leadSourceId": 3,
+  "companyId": 1,
+  "branchId": 2,
+  "assignedToId": 22,
+  "duplicate_acknowledged": false
 }
 ```
 
-**Example ACCOUNT_INACTIVE Error:**
+**Key rules / errors**
+- **400 VALIDATION_ERROR** — missing `name`, `mobile`, and/or `leadSourceId`; or missing `companyId`/`branchId` for users with no company; or missing `branchId` for company users with no branch; or `branchId` not under the resolved company
+- **404 NOT_FOUND** — `leadSourceId` does not exist, is inactive, or is not allowed for your company (global + your company only); response body does not distinguish which case
+- **409 CONFLICT** — same `mobile` already exists in your company unless `"duplicate_acknowledged": true`
+- **403 FORBIDDEN** — `assignedToId` is set but that user is not in your company
+
+**Error response examples**
+
+Missing required fields (`400`):
+
 ```json
 {
-    "success": false,
-    "statusCode": 403,
-    "code": "ACCOUNT_INACTIVE",
-    "message": "Your account has been deactivated. Contact admin.",
-    "details": null,
-    "timestamp": "2026-04-10T04:38:07.948Z"
+  "success": false,
+  "statusCode": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "details": [
+    { "field": "name", "message": "Name is required" },
+    { "field": "mobile", "message": "Mobile is required" },
+    { "field": "leadSourceId", "message": "Lead source is required" }
+  ],
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example NO_ROLE_ASSIGNED Error:**
+Lead source not usable (`404` — wrong id, inactive, or other company’s source all look the same):
+
 ```json
 {
-    "success": false,
-    "statusCode": 403,
-    "code": "NO_ROLE_ASSIGNED",
-    "message": "No role assigned to this account. Contact admin.",
-    "details": null,
-    "timestamp": "2026-04-10T04:38:07.948Z"
+  "success": false,
+  "statusCode": 404,
+  "code": "NOT_FOUND",
+  "message": "Lead source not found",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example PERMISSION_DENIED Error:**
+Duplicate mobile without acknowledgement (`409`):
+
 ```json
 {
-    "success": false,
-    "statusCode": 403,
-    "code": "PERMISSION_DENIED",
-    "message": "You don't have permission to canCreate BRANCH",
-    "details": {
-        "required": "BRANCH:canCreate"
-    },
-    "timestamp": "2026-04-10T04:38:07.948Z"
+  "success": false,
+  "statusCode": 409,
+  "code": "CONFLICT",
+  "message": "Mobile already exists for prospect Jane Doe (PR-2026-00042)",
+  "details": { "field": "mobile" },
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Example ROLE_NOT_ALLOWED Error:**
+Assignee not in company (`403`):
+
 ```json
 {
-    "success": false,
-    "statusCode": 403,
-    "code": "ROLE_NOT_ALLOWED",
-    "message": "Access denied. Required role: SUPER_ADMIN",
-    "details": {
-        "required": [
-            "SUPER_ADMIN"
-        ]
-    },
-    "timestamp": "2026-04-10T04:38:07.948Z"
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "Assigned user does not belong to your company",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
 }
 ```
 
-**Validation & Data:**
-- `VALIDATION_ERROR` (400): Invalid input data
-- `BAD_REQUEST` (400): Malformed request
-- `NOT_FOUND` (404): Resource does not exist
-- `CONFLICT` (409): Resource already exists (duplicate data)
+Other responses on this route: **401** / **TOKEN_**\*; **403 PERMISSION_DENIED** with `details.required: "PROSPECT:canCreate"` if the actor lacks create permission.
 
-**System Errors:**
-- `SERVER_ERROR` (500): Internal server error
-- `ROUTE_NOT_FOUND` (404): Invalid endpoint URL
+---
+
+### GET `/api/prospects/all`
+
+List prospects with filters + pagination.
+
+**Permission**: `PROSPECT:canView`
+
+**Query params**
+- `page`, `limit`
+- `stage`
+- `lead_source_id`
+- `branch_id`
+- `assigned_to`
+- `start_date`, `end_date`
+- `search` (name/mobile)
+
+**Possible errors**
+- **401** / **TOKEN_**\* / **403 PERMISSION_DENIED** (`PROSPECT:canView`)
+- **403 FORBIDDEN** — `getScopeWhere` rejects actors with no prospect access (`You do not have access to prospects`)
+- **403 FORBIDDEN** — `branch_id` filter: branch user cannot query another branch (`You cannot access prospects from another branch`)
+- **403 FORBIDDEN** — company-level user: `branch_id` not in your company (`Branch does not belong to your company`)
+
+**Error response examples**
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "You do not have access to prospects",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "You cannot access prospects from another branch",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "Branch does not belong to your company",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+---
+
+### GET `/api/prospects/:id`
+
+Get prospect by id (includes stage history).
+
+**Permission**: `PROSPECT:canView`
+
+**Possible errors**
+- **404 NOT_FOUND** — id not found or outside your visibility scope
+- **403 FORBIDDEN** — `You cannot access data from another company` (company isolation)
+- **403 FORBIDDEN** — ISE-style scope: `You can only edit your own prospects` (when update permission is create-only)
+- Same **401** / **PERMISSION_DENIED** as other prospect routes
+
+**Error response examples**
+
+```json
+{
+  "success": false,
+  "statusCode": 404,
+  "code": "NOT_FOUND",
+  "message": "Prospect not found",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "You cannot access data from another company",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+---
+
+### PUT `/api/prospects/:id`
+
+Update prospect fields (protected fields are stripped: `prospectCode`, `currentStage`, `companyId`, `branchId`, `createdById`).
+
+**Permission**: `PROSPECT:canEdit`
+
+**Possible errors**
+- **404 NOT_FOUND** — prospect not in scope
+- **403 FORBIDDEN** — cross-company, or ISE-only-own-prospects rule (`You can only edit your own prospects`)
+- **404 NOT_FOUND** — `leadSourceId` in body invalid/inactive/out of scope (`Lead source not found`)
+- **403 FORBIDDEN** — `assignedToId` not in the **prospect’s** company (`Assigned user does not belong to the prospect's company`), including when the actor is super admin (`actor.companyId` is null)
+- **401** / **403 PERMISSION_DENIED** (`PROSPECT:canEdit`)
+
+**Error response examples**
+
+Lead-source / assignee checks use the prospect’s `companyId`, not the actor’s, so super admin updates behave like tenant updates. Prospect not found:
+
+```json
+{
+  "success": false,
+  "statusCode": 404,
+  "code": "NOT_FOUND",
+  "message": "Prospect not found",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "statusCode": 403,
+  "code": "FORBIDDEN",
+  "message": "You can only edit your own prospects",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+---
+
+### POST `/api/prospects/:id/stage`
+
+Transition a prospect stage and write stage history.
+
+**Permission**: `PROSPECT:canEdit`
+
+**Request body**
+
+```json
+{
+  "new_stage": "ENGAGED",
+  "note": "First call done",
+  "manager_approval_id": 5
+}
+```
+
+**Rules**
+- `new_stage` required and must be one of:
+  - `NEW`, `ENGAGED`, `STRATEGY_SCHEDULED`, `STRATEGY_COMPLETED`, `TOKEN_DISCUSSION`, `TOKEN_RECEIVED`, `WIN`, `ARCHIVED`
+- Transition must match the allowed transitions in `src/modules/prospect/stageMachine.js`.
+- If current stage is `ARCHIVED`, `manager_approval_id` is required and must reference a user in the prospect’s company with `PROSPECT:canDelete`. Any violation returns **`400 BAD_REQUEST`** with message **`Stage transition not allowed.`** (same as invalid transition / WIN rules below).
+- For `WIN` stage: `tokenAmount > 0` and `joiningDate` must be set on the prospect; otherwise **`400 BAD_REQUEST`**, message **`Stage transition not allowed.`**
+- Each successful transition inserts **`stage_history`**: `prospect_id`, `old_stage`, `new_stage`, `changed_by_id`, `changed_at` (and optional `note`).
+
+**Possible errors**
+- **400 VALIDATION_ERROR** — missing `new_stage` only
+- **400 BAD_REQUEST** — unknown stage string; same stage; disallowed transition; **WIN** preconditions not met; **unarchive** without valid `manager_approval_id` / approver / permission — message **`Stage transition not allowed.`** where applicable
+- **404 NOT_FOUND** — prospect not in scope
+- **401** / **403 PERMISSION_DENIED** (`PROSPECT:canEdit`)
+
+**Error response examples**
+
+Missing `new_stage` (`400`):
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "details": [
+    { "field": "new_stage", "message": "new_stage is required" }
+  ],
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+Invalid stage (`400`):
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "BAD_REQUEST",
+  "message": "Invalid stage. Must be one of: NEW, ENGAGED, STRATEGY_SCHEDULED, STRATEGY_COMPLETED, TOKEN_DISCUSSION, TOKEN_RECEIVED, WIN, ARCHIVED",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+Disallowed transition (`400`):
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "BAD_REQUEST",
+  "message": "Stage transition not allowed.",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
+WIN preconditions not met, or invalid unarchive from `ARCHIVED` (same shape as disallowed transition):
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "BAD_REQUEST",
+  "message": "Stage transition not allowed.",
+  "details": null,
+  "timestamp": "2026-04-13T00:00:00.000Z"
+}
+```
+
