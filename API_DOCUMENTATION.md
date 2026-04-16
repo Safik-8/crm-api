@@ -7,7 +7,9 @@ This documentation reflects the current implementation in:
 - `src/modules/company/*`
 - `src/modules/branch/*`
 - `src/modules/leadsources/*`
-- `src/modules/prospect/*`
+- `src/modules/pipeline/*`
+- `src/modules/stage/*`
+- `src/modules/lead/*`
 - shared responses/errors: `src/utils/response.js`, `src/utils/AppError.js`, `src/middleware/errorHandler.js`
 
 ---
@@ -41,13 +43,27 @@ This documentation reflects the current implementation in:
   - [GET `/api/lead-sources/:id`](#get-apilead-sourcesid)
   - [POST `/api/lead-sources`](#post-apilead-sources)
   - [PUT `/api/lead-sources/:id`](#put-apilead-sourcesid)
-- [5) Prospects](#5-prospects)
-  - [GET `/api/prospects/lead-sources`](#get-apiprospectslead-sources)
-  - [POST `/api/prospects`](#post-apiprospects)
-  - [GET `/api/prospects/all`](#get-apiprospectsall)
-  - [GET `/api/prospects/:id`](#get-apiprospectsid)
-  - [PUT `/api/prospects/:id`](#put-apiprospectsid)
-  - [POST `/api/prospects/:id/stage`](#post-apiprospectsidstage)
+- [5) Pipelines](#5-pipelines)
+  - [Pipeline stages (how it works)](#pipeline-stages-how-it-works)
+  - [POST `/api/pipelines`](#post-apipipelines)
+  - [GET `/api/pipelines`](#get-apipipelines)
+  - [GET `/api/pipelines/:id`](#get-apipipelinesid)
+  - [PUT `/api/pipelines/:id`](#put-apipipelinesid)
+  - [DELETE `/api/pipelines/:id`](#delete-apipipelinesid)
+  - [POST `/api/pipelines/:id/stages`](#post-apipipelinesidstages)
+  - [PUT `/api/pipelines/:id/stages/order`](#put-apipipelinesidstagesorder)
+- [6) Stages (Master)](#6-stages-master)
+  - [POST `/api/stages`](#post-apistages)
+  - [GET `/api/stages`](#get-apistages)
+  - [PUT `/api/stages/:id`](#put-apistagesid)
+  - [DELETE `/api/stages/:id`](#delete-apistagesid)
+  - [GET `/api/stages/pipeline/:pipelineId`](#get-apistagespipelinepipelineid)
+- [7) Leads + Comments](#7-leads--comments)
+  - [POST `/api/leads`](#post-apileads)
+  - [GET `/api/leads`](#get-apileads)
+  - [PATCH `/api/leads/:id/stage`](#patch-apileadsidstage)
+  - [POST `/api/leads/:id/comments`](#post-apileadsidcomments)
+  - [GET `/api/leads/:id/comments`](#get-apileadsidcomments)
 
 ---
 
@@ -101,16 +117,16 @@ Operational errors are thrown as `AppError` (or subclasses) and returned as JSON
 }
 ```
 
-For prospects, a missing/inactive/out-of-scope lead source is still returned this way: the server does not distinguish “wrong id” vs “inactive” vs “other company’s source” in the payload (all resolve to **404** with the same shape).
+For lead sources, a missing/inactive/out-of-scope record may still return this way: the server may not distinguish “wrong id” vs “inactive” vs “other company’s source” in the payload (all resolve to **404** with the same shape).
 
-**Conflict (`409`, `CONFLICT`)** — often includes `details.field` (e.g. duplicate mobile on create prospect):
+**Conflict (`409`, `CONFLICT`)** — often includes `details.field` (example message):
 
 ```json
 {
   "success": false,
   "statusCode": 409,
   "code": "CONFLICT",
-  "message": "Mobile already exists for prospect Jane Doe (PR-2026-00042)",
+  "message": "Resource already exists",
   "details": { "field": "mobile" },
   "timestamp": "2026-04-13T00:00:00.000Z"
 }
@@ -1357,352 +1373,286 @@ Update lead source.
 
 ---
 
-## 5) Prospects
+## 5) Pipelines
 
-Routes: `src/modules/prospect/prospect.routes.js`
+Routes: `src/modules/pipeline/pipeline.routes.js`
+
+All endpoints require:
+- **Auth** (`authenticate`)
+- **Module permission**: `PIPELINE` via `hasPermission("PIPELINE", ...)`
+
+Important rules implemented:
+- Every pipeline **automatically includes** the global **"Prospect"** stage (mapped in `pipeline_stages` with `order_no = 1`).
+- Stages are global (master) but assigned per pipeline via `pipeline_stages`.
+
+### Pipeline stages (how it works)
+
+There are **two tables/models** involved:
+
+- **`stages` (Stage master)**: global list shared by all pipelines (example: `Prospect`, `Follow Up`, `Qualified`).
+- **`pipeline_stages` (PipelineStage mapping)**: connects one `pipeline_id` to many `stage_id` rows and stores `order_no`.
+
+**Rules**
+
+- **Prospect is mandatory**: every pipeline must contain the **default** stage `Prospect`.
+  - On pipeline creation, the backend automatically assigns `Prospect` with `order_no = 1`.
+  - When assigning stages to a pipeline, the backend always forces `Prospect` to be included (even if the frontend doesn’t send it).
+- **Stages are global, assignment is per pipeline**: creating a stage does not add it to any pipeline until you assign it.
+- **Ordering is per pipeline**: same stage can have different `order_no` in different pipelines.
+
+**Frontend flow (recommended)**
+
+- **Step 1 (show stage list)**: call `GET /api/stages` to show all global stage options (multi-select).
+- **Step 2 (assign + create new + order)**: call `POST /api/pipelines/:id/stages` with:
+  - `stageIds`: existing selected stage ids
+  - `newStages`: any new stage names created from “+ Create New Stage”
+  - `orderedStageIds`: final drag/drop order (must include exactly the same stage ids being assigned)
+- **Step 3 (reuse on screens)**: call `GET /api/stages/pipeline/:pipelineId` to fetch ordered stages for Kanban columns.
+
+### POST `/api/pipelines`
+
+Create a pipeline.
+
+**Permission**: `PIPELINE:canCreate`
+
+**Request body**
+
+```json
+{
+  "name": "Admissions 2026"
+}
+```
+
+**Notes**
+- Branch/Company are resolved from logged-in user:
+  - Branch user → uses `req.user.companyId` + `req.user.branchId`
+  - Company-level user (no branch) → must send `branchId`
+  - Super admin → must send `companyId` + `branchId`
+
+**Success (201)**: `data = { "pipeline": { ... } }`
+
+---
+
+### GET `/api/pipelines`
+
+List pipelines (scoped by company/branch of the logged-in user).
+
+**Permission**: `PIPELINE:canView`
+
+**Success (200)**: `data = { "pipelines": [ ... ] }`
+
+---
+
+### GET `/api/pipelines/:id`
+
+Get pipeline details **including assigned stages + leads**.
+
+**Permission**: `PIPELINE:canView`
+
+**Success (200)**: `data = { "pipeline": { "stages": [ ... ], "leads": [ ... ] } }`
+
+---
+
+### PUT `/api/pipelines/:id`
+
+Update pipeline name.
+
+**Permission**: `PIPELINE:canEdit`
+
+**Body**
+
+```json
+{ "name": "Admissions 2026 - Updated" }
+```
+
+---
+
+### DELETE `/api/pipelines/:id`
+
+Soft delete a pipeline.
+
+**Permission**: `PIPELINE:canDelete`
+
+---
+
+### POST `/api/pipelines/:id/stages`
+
+Assign stages to pipeline (core logic).
+
+**Permission**: `PIPELINE:canEdit`
+
+Rules:
+- Always includes **"Prospect"** stage.
+- Can assign existing stages and/or create new ones.
+- Can save ordering.
+
+**Body**
+
+```json
+{
+  "stageIds": [1, 2],
+  "newStages": [{ "name": "Follow Up" }],
+  "orderedStageIds": [1, 3, 2]
+}
+```
+
+---
+
+### PUT `/api/pipelines/:id/stages/order`
+
+Update order of already-assigned pipeline stages.
+
+**Permission**: `PIPELINE:canEdit`
+
+**Body**
+
+```json
+{ "orderedStageIds": [1, 3, 2] }
+```
+
+---
+
+## 6) Stages (Master)
+
+Routes: `src/modules/stage/stage.routes.js`
 
 All endpoints require:
 - **Auth**
-- **Module permission**: `PROSPECT` via `hasPermission("PROSPECT", ...)`
+- **Module permission**: `STAGE` (except the pipeline stages list uses `PIPELINE:canView`)
 
-### GET `/api/prospects/lead-sources`
+### POST `/api/stages`
 
-Fetch **active** lead sources for a prospect dropdown (global + actor’s `companyId`). Same filtering idea as **`GET /api/lead-sources`**, but requires **`PROSPECT:canView`**.
+Create stage (global).
 
-**Permission**: `PROSPECT:canView`
+**Permission**: `STAGE:canCreate`
 
-**Request**: no body.
+**Body**
 
-**Success (200)**: `data` is `{ "leadSources": [ … ] }` (array of lead source records from the prospect helper service).
+```json
+{ "name": "Follow Up" }
+```
 
 ---
 
-### POST `/api/prospects`
+### GET `/api/stages`
 
-Create a prospect.
+Get all stages (global).
 
-**Permission**: `PROSPECT:canCreate`
-
-**Request body**
-
-```json
-{
-  "name": "John Doe",
-  "mobile": "9999999999",
-  "leadSourceId": 3,
-  "assignedToId": 22,
-  "duplicate_acknowledged": false
-}
-```
-
-**Tenant vs super admin (where the prospect is created)**
-
-- Users with a **company** on their account: `companyId` and `branchId` on the new prospect are always taken from the **authenticated user** (`req.user`). Values sent in the body for `companyId` / `branchId` are **ignored** (prevents spoofing another company).
-- **Super admin** (and any account with **`companyId: null`** on the user): must send **`companyId`** and **`branchId`** in the body so the server knows which company/branch owns the prospect. `branchId` must belong to that `companyId`.
-- **Company-level user without a branch** (`companyId` set, **`branchId: null`** on the user): must send **`branchId`** in the body; it must belong to their company.
-
-Example for **super admin**:
-
-```json
-{
-  "name": "John Doe",
-  "mobile": "9999999999",
-  "leadSourceId": 3,
-  "companyId": 1,
-  "branchId": 2,
-  "assignedToId": 22,
-  "duplicate_acknowledged": false
-}
-```
-
-**Key rules / errors**
-- **400 VALIDATION_ERROR** — missing `name`, `mobile`, and/or `leadSourceId`; or missing `companyId`/`branchId` for users with no company; or missing `branchId` for company users with no branch; or `branchId` not under the resolved company
-- **404 NOT_FOUND** — `leadSourceId` does not exist, is inactive, or is not allowed for your company (global + your company only); response body does not distinguish which case
-- **409 CONFLICT** — same `mobile` already exists in your company unless `"duplicate_acknowledged": true`
-- **403 FORBIDDEN** — `assignedToId` is set but that user is not in your company
-
-**Error response examples**
-
-Missing required fields (`400`):
-
-```json
-{
-  "success": false,
-  "statusCode": 400,
-  "code": "VALIDATION_ERROR",
-  "message": "Validation failed",
-  "details": [
-    { "field": "name", "message": "Name is required" },
-    { "field": "mobile", "message": "Mobile is required" },
-    { "field": "leadSourceId", "message": "Lead source is required" }
-  ],
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-Lead source not usable (`404` — wrong id, inactive, or other company’s source all look the same):
-
-```json
-{
-  "success": false,
-  "statusCode": 404,
-  "code": "NOT_FOUND",
-  "message": "Lead source not found",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-Duplicate mobile without acknowledgement (`409`):
-
-```json
-{
-  "success": false,
-  "statusCode": 409,
-  "code": "CONFLICT",
-  "message": "Mobile already exists for prospect Jane Doe (PR-2026-00042)",
-  "details": { "field": "mobile" },
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-Assignee not in company (`403`):
-
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "Assigned user does not belong to your company",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-Other responses on this route: **401** / **TOKEN_**\*; **403 PERMISSION_DENIED** with `details.required: "PROSPECT:canCreate"` if the actor lacks create permission.
+**Permission**: `STAGE:canView`
 
 ---
 
-### GET `/api/prospects/all`
+### PUT `/api/stages/:id`
 
-List prospects with filters + pagination.
+Rename stage (default stage "Prospect" cannot be renamed).
 
-**Permission**: `PROSPECT:canView`
+**Permission**: `STAGE:canEdit`
 
-**Query params**
+**Body**
+
+```json
+{ "name": "Qualified" }
+```
+
+---
+
+### DELETE `/api/stages/:id`
+
+Soft delete stage (default stage "Prospect" cannot be deleted).
+
+**Permission**: `STAGE:canDelete`
+
+---
+
+### GET `/api/stages/pipeline/:pipelineId`
+
+Reusable frontend endpoint: get **ordered assigned stages** for a pipeline.
+
+**Permission**: `PIPELINE:canView`
+
+**Success (200)**: `data = { "stages": [ { id, name, isDefault, orderNo } ] }`
+
+---
+
+## 7) Leads + Comments
+
+Routes: `src/modules/lead/lead.routes.js`
+
+All endpoints require:
+- **Auth**
+- **LEAD** module permission for lead actions
+- **ACTIVITY** module permission for comments
+
+### POST `/api/leads`
+
+Create lead.
+
+**Permission**: `LEAD:canCreate`
+
+Rule:
+- Lead default stage is always **Prospect**.
+
+**Body**
+
+```json
+{
+  "pipelineId": 1,
+  "name": "Aman",
+  "mobile": "9999999999",
+  "date": "2026-04-16T00:00:00.000Z",
+  "interested_for": "MBA"
+}
+```
+
+---
+
+### GET `/api/leads`
+
+Get leads (supports filters).
+
+**Permission**: `LEAD:canView`
+
+**Query params (optional)**:
+- `pipelineId`
+- `stageId`
 - `page`, `limit`
-- `stage`
-- `lead_source_id`
-- `branch_id`
-- `assigned_to`
-- `start_date`, `end_date`
-- `search` (name/mobile)
 
-**Possible errors**
-- **401** / **TOKEN_**\* / **403 PERMISSION_DENIED** (`PROSPECT:canView`)
-- **403 FORBIDDEN** — `getScopeWhere` rejects actors with no prospect access (`You do not have access to prospects`)
-- **403 FORBIDDEN** — `branch_id` filter: branch user cannot query another branch (`You cannot access prospects from another branch`)
-- **403 FORBIDDEN** — company-level user: `branch_id` not in your company (`Branch does not belong to your company`)
+---
 
-**Error response examples**
+### PATCH `/api/leads/:id/stage`
 
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "You do not have access to prospects",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
+Update lead stage (Kanban move).
+
+**Permission**: `LEAD:canEdit`
+
+Rule:
+- target `stageId` must be assigned to the lead’s pipeline.
+
+**Body**
 
 ```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "You cannot access prospects from another branch",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "Branch does not belong to your company",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
+{ "stageId": 2 }
 ```
 
 ---
 
-### GET `/api/prospects/:id`
+### POST `/api/leads/:id/comments`
 
-Get prospect by id (includes stage history).
+Add comment to lead.
 
-**Permission**: `PROSPECT:canView`
+**Permission**: `ACTIVITY:canCreate`
 
-**Possible errors**
-- **404 NOT_FOUND** — id not found or outside your visibility scope
-- **403 FORBIDDEN** — `You cannot access data from another company` (company isolation)
-- **403 FORBIDDEN** — ISE-style scope: `You can only edit your own prospects` (when update permission is create-only)
-- Same **401** / **PERMISSION_DENIED** as other prospect routes
-
-**Error response examples**
+**Body**
 
 ```json
-{
-  "success": false,
-  "statusCode": 404,
-  "code": "NOT_FOUND",
-  "message": "Prospect not found",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "You cannot access data from another company",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
+{ "comment": "Called the lead, interested." }
 ```
 
 ---
 
-### PUT `/api/prospects/:id`
+### GET `/api/leads/:id/comments`
 
-Update prospect fields (protected fields are stripped: `prospectCode`, `currentStage`, `companyId`, `branchId`, `createdById`).
+Get comments of a lead.
 
-**Permission**: `PROSPECT:canEdit`
-
-**Possible errors**
-- **404 NOT_FOUND** — prospect not in scope
-- **403 FORBIDDEN** — cross-company, or ISE-only-own-prospects rule (`You can only edit your own prospects`)
-- **404 NOT_FOUND** — `leadSourceId` in body invalid/inactive/out of scope (`Lead source not found`)
-- **403 FORBIDDEN** — `assignedToId` not in the **prospect’s** company (`Assigned user does not belong to the prospect's company`), including when the actor is super admin (`actor.companyId` is null)
-- **401** / **403 PERMISSION_DENIED** (`PROSPECT:canEdit`)
-
-**Error response examples**
-
-Lead-source / assignee checks use the prospect’s `companyId`, not the actor’s, so super admin updates behave like tenant updates. Prospect not found:
-
-```json
-{
-  "success": false,
-  "statusCode": 404,
-  "code": "NOT_FOUND",
-  "message": "Prospect not found",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-```json
-{
-  "success": false,
-  "statusCode": 403,
-  "code": "FORBIDDEN",
-  "message": "You can only edit your own prospects",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
----
-
-### POST `/api/prospects/:id/stage`
-
-Transition a prospect stage and write stage history.
-
-**Permission**: `PROSPECT:canEdit`
-
-**Request body**
-
-```json
-{
-  "new_stage": "ENGAGED",
-  "note": "First call done",
-  "manager_approval_id": 5
-}
-```
-
-**Rules**
-- `new_stage` required and must be one of:
-  - `NEW`, `ENGAGED`, `STRATEGY_SCHEDULED`, `STRATEGY_COMPLETED`, `TOKEN_DISCUSSION`, `TOKEN_RECEIVED`, `WIN`, `ARCHIVED`
-- Transition must match the allowed transitions in `src/modules/prospect/stageMachine.js`.
-- If current stage is `ARCHIVED`, `manager_approval_id` is required and must reference a user in the prospect’s company with `PROSPECT:canDelete`. Any violation returns **`400 BAD_REQUEST`** with message **`Stage transition not allowed.`** (same as invalid transition / WIN rules below).
-- For `WIN` stage: `tokenAmount > 0` and `joiningDate` must be set on the prospect; otherwise **`400 BAD_REQUEST`**, message **`Stage transition not allowed.`**
-- Each successful transition inserts **`stage_history`**: `prospect_id`, `old_stage`, `new_stage`, `changed_by_id`, `changed_at` (and optional `note`).
-
-**Possible errors**
-- **400 VALIDATION_ERROR** — missing `new_stage` only
-- **400 BAD_REQUEST** — unknown stage string; same stage; disallowed transition; **WIN** preconditions not met; **unarchive** without valid `manager_approval_id` / approver / permission — message **`Stage transition not allowed.`** where applicable
-- **404 NOT_FOUND** — prospect not in scope
-- **401** / **403 PERMISSION_DENIED** (`PROSPECT:canEdit`)
-
-**Error response examples**
-
-Missing `new_stage` (`400`):
-
-```json
-{
-  "success": false,
-  "statusCode": 400,
-  "code": "VALIDATION_ERROR",
-  "message": "Validation failed",
-  "details": [
-    { "field": "new_stage", "message": "new_stage is required" }
-  ],
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-Invalid stage (`400`):
-
-```json
-{
-  "success": false,
-  "statusCode": 400,
-  "code": "BAD_REQUEST",
-  "message": "Invalid stage. Must be one of: NEW, ENGAGED, STRATEGY_SCHEDULED, STRATEGY_COMPLETED, TOKEN_DISCUSSION, TOKEN_RECEIVED, WIN, ARCHIVED",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-Disallowed transition (`400`):
-
-```json
-{
-  "success": false,
-  "statusCode": 400,
-  "code": "BAD_REQUEST",
-  "message": "Stage transition not allowed.",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
-
-WIN preconditions not met, or invalid unarchive from `ARCHIVED` (same shape as disallowed transition):
-
-```json
-{
-  "success": false,
-  "statusCode": 400,
-  "code": "BAD_REQUEST",
-  "message": "Stage transition not allowed.",
-  "details": null,
-  "timestamp": "2026-04-13T00:00:00.000Z"
-}
-```
+**Permission**: `ACTIVITY:canView`
 

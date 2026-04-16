@@ -25,6 +25,8 @@ const MODULES = [
     "ACTIVITY",
     "TASK",
     "PIPELINE",
+    "STAGE",
+    "LEAD",
     "SESSION",
     "REPORT",
     "AUDIT",
@@ -46,6 +48,8 @@ const ROLE_PERMISSIONS = {
         ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        STAGE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         SESSION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         REPORT: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -61,6 +65,8 @@ const ROLE_PERMISSIONS = {
         ACTIVITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TASK: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         PIPELINE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        STAGE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         SESSION: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
@@ -76,6 +82,8 @@ const ROLE_PERMISSIONS = {
         ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        STAGE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         SESSION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
@@ -91,6 +99,8 @@ const ROLE_PERMISSIONS = {
         ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         PIPELINE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        STAGE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         SESSION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
@@ -106,6 +116,8 @@ const ROLE_PERMISSIONS = {
         ACTIVITY: { canView: true, canCreate: true, canEdit: false, canDelete: false },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         PIPELINE: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        STAGE: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         SESSION: { canView: true, canCreate: true, canEdit: false, canDelete: false },
         REPORT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
@@ -120,12 +132,94 @@ const ROLE_PERMISSIONS = {
 export const initializeSystem = async () => {
     try {
 
-
-
         // Check if SuperAdmin already exists
         const existingSuperAdmin = await prisma.user.findUnique({
             where: { email: "superadmin@gmail.com" }
         })
+
+        // ── STEP 0: ENSURE ROLES + PERMISSIONS (FAST SYNC) ─────
+        // Goal: don't write on every restart — only create/update if missing or changed.
+        const existingRoles = await prisma.role.findMany({ select: { id: true, name: true, description: true } })
+        const roleByName = new Map(existingRoles.map(r => [r.name, r]))
+
+        const rolesToCreate = ROLES.filter(r => !roleByName.has(r.name))
+        if (rolesToCreate.length) {
+            await prisma.role.createMany({ data: rolesToCreate })
+        }
+
+        const rolesToUpdate = ROLES
+            .map(r => {
+                const existing = roleByName.get(r.name)
+                if (!existing) return null
+                if ((existing.description || "") === (r.description || "")) return null
+                return { id: existing.id, description: r.description }
+            })
+            .filter(Boolean)
+        for (const r of rolesToUpdate) {
+            await prisma.role.update({ where: { id: r.id }, data: { description: r.description } })
+        }
+
+        // Refresh roles after any creates/updats (we need role ids)
+        const roles = await prisma.role.findMany({ select: { id: true, name: true } })
+        const roleIdByName = new Map(roles.map(r => [r.name, r.id]))
+
+        // Fetch existing permissions once, then only write diffs
+        const existingPerms = await prisma.permission.findMany({
+            where: { roleId: { in: roles.map(r => r.id) } },
+            select: { id: true, roleId: true, module: true, canView: true, canCreate: true, canEdit: true, canDelete: true }
+        })
+        const permKey = (roleId, module) => `${roleId}:${module}`
+        const permByKey = new Map(existingPerms.map(p => [permKey(p.roleId, p.module), p]))
+
+        const permsToCreate = []
+        const permsToUpdate = []
+
+        for (const [roleName, modules] of Object.entries(ROLE_PERMISSIONS)) {
+            const roleId = roleIdByName.get(roleName)
+            if (!roleId) continue
+
+            for (const [moduleName, perms] of Object.entries(modules)) {
+                const key = permKey(roleId, moduleName)
+                const existing = permByKey.get(key)
+
+                if (!existing) {
+                    permsToCreate.push({
+                        roleId,
+                        module: moduleName,
+                        canView: perms.canView,
+                        canCreate: perms.canCreate,
+                        canEdit: perms.canEdit,
+                        canDelete: perms.canDelete,
+                    })
+                    continue
+                }
+
+                const changed =
+                    existing.canView !== perms.canView ||
+                    existing.canCreate !== perms.canCreate ||
+                    existing.canEdit !== perms.canEdit ||
+                    existing.canDelete !== perms.canDelete
+
+                if (changed) {
+                    permsToUpdate.push({
+                        id: existing.id,
+                        data: {
+                            canView: perms.canView,
+                            canCreate: perms.canCreate,
+                            canEdit: perms.canEdit,
+                            canDelete: perms.canDelete,
+                        }
+                    })
+                }
+            }
+        }
+
+        if (permsToCreate.length) {
+            await prisma.permission.createMany({ data: permsToCreate })
+        }
+        for (const p of permsToUpdate) {
+            await prisma.permission.update({ where: { id: p.id }, data: p.data })
+        }
 
         // ── STEP 4: SEED DEFAULT GLOBAL LEAD SOURCES ──────────
         const defaultLeadSources = [
@@ -137,113 +231,109 @@ export const initializeSystem = async () => {
             "Exhibition",
             "Other"
         ]
-        for (const name of defaultLeadSources) {
+        const existingLeadSources = await prisma.leadSource.findMany({
+            where: { companyId: null, name: { in: defaultLeadSources } },
+            select: { id: true, name: true, isActive: true }
+        })
+        const leadSourceByName = new Map(existingLeadSources.map(ls => [ls.name, ls]))
 
-            const existing = await prisma.leadSource.findFirst({
-                where: {
-                    name,
-                    companyId: null
+        const leadSourcesToCreate = defaultLeadSources
+            .filter(name => !leadSourceByName.has(name))
+            .map(name => ({ name, companyId: null, isActive: true }))
+        if (leadSourcesToCreate.length) {
+            await prisma.leadSource.createMany({ data: leadSourcesToCreate })
+        }
+
+        const leadSourcesToReactivate = existingLeadSources.filter(ls => !ls.isActive)
+        for (const ls of leadSourcesToReactivate) {
+            await prisma.leadSource.update({ where: { id: ls.id }, data: { isActive: true } })
+        }
+
+        const createdLeadSourcesCount = leadSourcesToCreate.length
+        const reactivatedLeadSourcesCount = leadSourcesToReactivate.length
+        if (createdLeadSourcesCount || reactivatedLeadSourcesCount) {
+            console.log(
+                `✅ Default lead sources synced (created: ${createdLeadSourcesCount}, reactivated: ${reactivatedLeadSourcesCount})`
+            )
+        } else {
+            console.log("✅ Default lead sources already present")
+        }
+
+        if (!existingSuperAdmin) {
+            console.log("First time — initializing system...")
+
+            // ── STEP 3: CREATE INITIAL SUPERADMIN ──────────────
+            const superAdminRole = await prisma.role.findUnique({
+                where: { name: "SUPER_ADMIN" }
+            })
+
+            const superAdminUser = await prisma.user.upsert({
+                where: { email: "superadmin@gmail.com" },
+                update: { passwordHash: await hashPassword("superadmin123") },
+                create: {
+                    name: "Super Admin",
+                    email: "superadmin@gmail.com",
+                    passwordHash: await hashPassword("superadmin123"),
+                    companyId: null,
+                    branchId: null,
                 }
             })
 
-            if (!existing) {
-                await prisma.leadSource.create({
+            // ── STEP 4: ASSIGN ROLE (FIXED — NO UPSERT WITH NULL) ─
+            // First, remove any duplicate roles for this user
+            await prisma.userRole.deleteMany({
+                where: {
+                    userId: superAdminUser.id,
+                    roleId: superAdminRole.id,
+                }
+            })
+
+            // Then create single role entry
+            await prisma.userRole.create({
+                data: {
+                    userId: superAdminUser.id,
+                    roleId: superAdminRole.id,
+                    companyId: null,
+                    branchId: null,
+                    isPrimary: true
+                }
+            })
+
+            console.log("SuperAdmin ensured")
+            console.log("System initialized successfully!")
+        } else {
+            console.log("System already initialized — SuperAdmin exists, syncing defaults")
+        }
+
+        const createdById = (await prisma.user.findUnique({ where: { email: "superadmin@gmail.com" }, select: { id: true } }))?.id
+        if (createdById) {
+            const defaultStage = await prisma.stage.findFirst({
+                where: { OR: [{ isDefault: true }, { name: "Prospect" }] },
+                select: { id: true, isDeleted: true, isDefault: true, name: true }
+            })
+            if (!defaultStage) {
+                await prisma.stage.create({
                     data: {
-                        name,
-                        companyId: null,
-                        isActive: true
+                        name: "Prospect",
+                        isDefault: true,
+                        isDeleted: false,
+                        createdById
                     }
                 })
-            }
-        }
-        console.log("✅ Default lead sources seeded")
-
-        if (existingSuperAdmin) {
-            console.log("System already initialized — SuperAdmin exists, skipping initialization")
-            return
-        }
-
-        console.log("First time — initializing system...")
-
-        // ── STEP 1: CREATE ROLES ──────────────────────────────
-        for (const role of ROLES) {
-            await prisma.role.upsert({
-                where: { name: role.name },
-                update: {},
-                create: role
-            })
-        }
-        console.log("Roles created")
-
-        // ── STEP 2: CREATE PERMISSIONS PER ROLE ──────────────
-        for (const [roleName, modules] of Object.entries(ROLE_PERMISSIONS)) {
-
-            const role = await prisma.role.findUnique({
-                where: { name: roleName }
-            })
-
-            for (const [moduleName, perms] of Object.entries(modules)) {
-                await prisma.permission.upsert({
-                    where: {
-                        roleId_module: {
-                            roleId: role.id,
-                            module: moduleName
-                        }
-                    },
-                    update: perms,
-                    create: {
-                        roleId: role.id,
-                        module: moduleName,
-                        canView: perms.canView,
-                        canCreate: perms.canCreate,
-                        canEdit: perms.canEdit,
-                        canDelete: perms.canDelete,
+                console.log("✅ Default stage seeded: Prospect")
+            } else if (defaultStage.isDeleted || !defaultStage.isDefault || defaultStage.name !== "Prospect") {
+                await prisma.stage.update({
+                    where: { id: defaultStage.id },
+                    data: {
+                        name: "Prospect",
+                        isDefault: true,
+                        isDeleted: false,
+                        updatedById: createdById
                     }
                 })
+                console.log("✅ Default stage synced: Prospect")
             }
         }
-        console.log("Permissions seeded")
-
-        // ── STEP 3: CREATE INITIAL SUPERADMIN ──────────────
-        const superAdminRole = await prisma.role.findUnique({
-            where: { name: "SUPER_ADMIN" }
-        })
-
-        const superAdminUser = await prisma.user.upsert({
-            where: { email: "superadmin@gmail.com" },
-            update: { passwordHash: await hashPassword("superadmin123") },
-            create: {
-                name: "Super Admin",
-                email: "superadmin@gmail.com",
-                passwordHash: await hashPassword("superadmin123"),
-                companyId: null,
-                branchId: null,
-            }
-        })
-
-
-        // ── STEP 4: ASSIGN ROLE (FIXED — NO UPSERT WITH NULL) ─
-        // First, remove any duplicate roles for this user
-        await prisma.userRole.deleteMany({
-            where: {
-                userId: superAdminUser.id,
-                roleId: superAdminRole.id,
-            }
-        })
-
-        // Then create single role entry
-        await prisma.userRole.create({
-            data: {
-                userId: superAdminUser.id,
-                roleId: superAdminRole.id,
-                companyId: null,
-                branchId: null,
-                isPrimary: true
-            }
-        })
-
-        console.log("SuperAdmin ensured")
-        console.log("System initialized successfully!")
 
 
         // Add this at the end of initializeSystem() in src/config/initSystem.js

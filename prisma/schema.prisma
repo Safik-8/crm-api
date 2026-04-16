@@ -23,8 +23,7 @@
     branches  Branch[]
     users     User[]
     userRoles UserRole[]
-
-    prospects  Prospect[]
+    pipelines Pipeline[]
     leadSources LeadSource[]  
 
     @@map("companies")
@@ -42,9 +41,7 @@
     company   Company  @relation(fields: [companyId], references: [id])
     users     User[]
     userRoles UserRole[]
-
-    branchSequence BranchSequence?
-    prospects Prospect[]
+    pipelines Pipeline[]
 
     @@unique([companyId, code])
     @@index([companyId])
@@ -73,10 +70,8 @@
     userRoles     UserRole[] @relation("UserToUserRole")
     assignedRoles UserRole[] @relation("AssignedByToUserRole")
     refreshTokens RefreshToken[]
-
-    assignedProspects Prospect[] @relation("ProspectAssignedTo")
-    createdProspects  Prospect[] @relation("ProspectCreatedBy")
-    stageHistories    StageHistory[]
+    createdLeads  Lead[]     @relation("UserCreatedLeads")
+    leadComments  LeadComment[]
 
     @@index([companyId])
     @@index([branchId])
@@ -148,21 +143,6 @@
 // SPRINT 2 — ADD TO BOTTOM OF schema.prisma
 // ══════════════════════════════════════════════════════════
 
-// ── BRANCH SEQUENCE ────────────────────────────────────────
-// Generates prospect codes like ACME-MUM-0001
-// Each branch has its own counter independently
-// Atomic SQL increment prevents duplicates under concurrency
-
-model BranchSequence {
-  id        Int @id @default(autoincrement())
-  branchId  Int @unique @map("branch_id")
-  companyId Int @map("company_id")
-  lastSeq   Int @default(0) @map("last_seq")
-
-  branch Branch @relation(fields: [branchId], references: [id])
-
-  @@map("branch_sequences")
-}
 
 // ── LEAD SOURCE ────────────────────────────────────────────
 // Proper table instead of raw String on Prospect
@@ -174,105 +154,130 @@ model LeadSource {
   companyId Int?     @map("company_id")
   name      String
   isActive  Boolean  @default(true) @map("is_active")
+  deletedAt DateTime? @map("deleted_at")
   createdAt DateTime @default(now()) @map("created_at")
 
   company   Company?   @relation(fields: [companyId], references: [id])
-  prospects Prospect[]
 
   @@unique([companyId, name])
   @@map("lead_sources")
 }
 
-// ── PROSPECT ───────────────────────────────────────────────
-// Core prospect table
-// currentStage uses enum — DB rejects invalid values
-// leadSourceId is FK — no typo differences
+// ══════════════════════════════════════
+// PIPELINE MANAGEMENT
+// ══════════════════════════════════════
 
-model Prospect {
-  id           Int           @id @default(autoincrement())
-  prospectCode String        @unique @map("prospect_code")
-  name         String
-  mobile       String
-  email        String?
-  education    String?
-  college      String?
-  city         String?
+// Pipeline belongs to a branch
+// One branch can have multiple pipelines
 
-  leadSourceId Int           @map("lead_source_id")
-  currentStage ProspectStage @default(NEW) @map("current_stage")
+model Pipeline {
+  id          Int      @id @default(autoincrement())
+  branchId    Int      @map("branch_id")
+  companyId   Int      @map("company_id")
+  name        String
+  isDeleted   Boolean  @default(false) @map("is_deleted")
+  createdById Int      @map("created_by")
+  updatedById Int?     @map("updated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
 
-  // Win fields — both required before moving to WIN stage
-  tokenAmount     Decimal?  @map("token_amount")      @db.Decimal(12, 2)
-  joiningDate     DateTime? @map("joining_date")
-  expectedRevenue Decimal?  @map("expected_revenue")  @db.Decimal(12, 2)
-  winDate         DateTime? @map("win_date")
+  branch   Branch          @relation(fields: [branchId],  references: [id])
+  company  Company         @relation(fields: [companyId], references: [id])
+  stages   PipelineStage[]
+  leads    Lead[]
 
-  // Duplicate tracking (BE-2-03)
-  duplicateAcknowledged Boolean @default(false) @map("duplicate_acknowledged")
-
-  // Archive tracking — unarchive requires managerApprovalId (BE-2-04)
-  archivedAt        DateTime? @map("archived_at")
-  archivedById      Int?      @map("archived_by_id")
-  managerApprovalId Int?      @map("manager_approval_id")
-  unarchivedAt      DateTime? @map("unarchived_at")
-  unarchivedById    Int?      @map("unarchived_by_id")
-
-  assignedToId   Int       @map("assigned_to_id")
-  createdById    Int       @map("created_by_id")
-  companyId      Int       @map("company_id")
-  branchId       Int       @map("branch_id")
-  lastActivityAt DateTime? @map("last_activity_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt      @map("updated_at")
-
-  company    Company    @relation(fields: [companyId],    references: [id])
-  branch     Branch     @relation(fields: [branchId],     references: [id])
-  leadSource LeadSource @relation(fields: [leadSourceId], references: [id])
-  assignedTo User       @relation("ProspectAssignedTo",   fields: [assignedToId], references: [id])
-  createdBy  User       @relation("ProspectCreatedBy",    fields: [createdById],  references: [id])
-
-  stageHistory StageHistory[]
-
-  @@index([companyId])
   @@index([branchId])
-  @@index([assignedToId])
-  @@index([currentStage])
-  @@index([mobile, companyId])  // used by duplicate check query
-  @@index([createdAt])
-  @@map("prospects")
+  @@index([companyId])
+  @@map("pipelines")
 }
 
-// ── STAGE HISTORY ──────────────────────────────────────────
-// Every stage change is recorded here — never deleted
-// oldStage is nullable — null means prospect was just created (initial NEW entry)
+// ══════════════════════════════════════
+// STAGE MASTER
+// Global stages shared across all pipelines
+// is_default = true means "Prospect" stage
+// ══════════════════════════════════════
 
-model StageHistory {
-  id          Int            @id @default(autoincrement())
-  prospectId  Int            @map("prospect_id")
-  oldStage    ProspectStage? @map("old_stage")  // null = initial creation
-  newStage    ProspectStage  @map("new_stage")
-  changedById Int            @map("changed_by_id")
-  changedAt   DateTime       @default(now()) @map("changed_at")
-  note        String?
+model Stage {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  isDefault   Boolean  @default(false) @map("is_default")
+  isDeleted   Boolean  @default(false) @map("is_deleted")
+  createdById Int      @map("created_by")
+  updatedById Int?     @map("updated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
 
-  prospect  Prospect @relation(fields: [prospectId],  references: [id])
-  changedBy User     @relation(fields: [changedById], references: [id])
+  pipelineStages PipelineStage[]
+  leads          Lead[]
 
-  @@index([prospectId])
-  @@map("stage_history")
+  @@map("stages")
 }
 
-// ══════════════════════════════════════════════════════════
-// SPRINT 2 ENUM
-// ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════
+// PIPELINE STAGES MAPPING
+// Links stages to pipelines with order
+// ══════════════════════════════════════
 
-enum ProspectStage {
-  NEW
-  ENGAGED
-  STRATEGY_SCHEDULED
-  STRATEGY_COMPLETED
-  TOKEN_DISCUSSION
-  TOKEN_RECEIVED
-  WIN
-  ARCHIVED
+model PipelineStage {
+  id         Int @id @default(autoincrement())
+  pipelineId Int @map("pipeline_id")
+  stageId    Int @map("stage_id")
+  orderNo    Int @map("order_no")
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id])
+  stage    Stage    @relation(fields: [stageId],    references: [id])
+
+  @@unique([pipelineId, stageId])
+  @@index([pipelineId])
+  @@map("pipeline_stages")
+}
+
+// ══════════════════════════════════════
+// LEAD
+// ══════════════════════════════════════
+
+model Lead {
+  id            Int      @id @default(autoincrement())
+  pipelineId    Int      @map("pipeline_id")
+  stageId       Int      @map("stage_id")
+  name          String
+  mobile        String
+  date          DateTime
+  interestedFor String?  @map("interested_for")
+  isDeleted     Boolean  @default(false) @map("is_deleted")
+  createdById   Int      @map("created_by")
+  updatedById   Int?     @map("updated_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  pipeline Pipeline      @relation(fields: [pipelineId], references: [id])
+  stage    Stage         @relation(fields: [stageId],    references: [id])
+  createdBy User         @relation("UserCreatedLeads", fields: [createdById], references: [id])
+  comments  LeadComment[]
+
+  @@index([pipelineId])
+  @@index([stageId])
+  @@map("leads")
+}
+
+// ══════════════════════════════════════
+// LEAD COMMENT
+// ══════════════════════════════════════
+
+model LeadComment {
+  id          Int      @id @default(autoincrement())
+  leadId      Int      @map("lead_id")
+  userId      Int      @map("user_id")
+  comment     String
+  isDeleted   Boolean  @default(false) @map("is_deleted")
+  createdById Int      @map("created_by")
+  updatedById Int?     @map("updated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  lead Lead @relation(fields: [leadId],  references: [id])
+  user User @relation(fields: [userId],  references: [id])
+
+  @@index([leadId])
+  @@map("lead_comments")
 }

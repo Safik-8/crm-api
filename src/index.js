@@ -14,8 +14,10 @@ import { errorHandler, notFound } from "./middleware/errorHandler.js"
 import authRoutes from "./modules/auth/auth.routes.js"
 import companyRoutes from "./modules/company/comany.routes.js"
 import branchRoutes  from "./modules/branch/branch.routes.js"
-import prospectRoutes from "./modules/prospect/prospect.routes.js"
 import leadSourceRoutes from "./modules/leadsources/leadSource.routes.js"
+import pipelineRoutes from "./modules/pipeline/pipeline.routes.js"
+import stageRoutes from "./modules/stage/stage.routes.js"
+import leadRoutes from "./modules/lead/lead.routes.js"
 import { initializeSystem } from "./config/initSystem.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -60,8 +62,10 @@ app.get("/", (req, res) => {
 app.use("/api", authRoutes);
 app.use("/api/companies", companyRoutes);
 app.use("/api/branches",  branchRoutes);
-app.use("/api/prospects", prospectRoutes);
 app.use("/api/lead-sources", leadSourceRoutes);
+app.use("/api/pipelines", pipelineRoutes);
+app.use("/api/stages", stageRoutes);
+app.use("/api/leads", leadRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════
