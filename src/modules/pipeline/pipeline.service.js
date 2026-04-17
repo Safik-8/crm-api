@@ -119,10 +119,54 @@ export const listPipelinesService = async (query, actor) => {
     where.branchId = Number(query.branchId)
   }
 
-  return prisma.pipeline.findMany({
+  const pipelines = await prisma.pipeline.findMany({
     where,
-    orderBy: { createdAt: "desc" }
+    orderBy: { createdAt: "desc" },
+    include: {
+      stages: {
+        orderBy: { orderNo: "asc" },
+        include: { stage: true }
+      }
+    }
   })
+
+  const pipelineIds = pipelines.map(p => p.id)
+  if (!pipelineIds.length) return []
+
+  const leadCounts = await prisma.lead.groupBy({
+    by: ["pipelineId", "stageId"],
+    where: {
+      isDeleted: false,
+      pipelineId: { in: pipelineIds }
+    },
+    _count: { _all: true }
+  })
+
+  const countsByPipelineId = new Map()
+  const countsByPipelineStageKey = new Map()
+  for (const row of leadCounts) {
+    const key = `${row.pipelineId}:${row.stageId}`
+    const count = row._count?._all ?? 0
+    countsByPipelineStageKey.set(key, count)
+    countsByPipelineId.set(row.pipelineId, (countsByPipelineId.get(row.pipelineId) ?? 0) + count)
+  }
+
+  return pipelines.map(p => ({
+    id: p.id,
+    name: p.name,
+    branchId: p.branchId,
+    companyId: p.companyId,
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+    leadCount: countsByPipelineId.get(p.id) ?? 0,
+    stages: p.stages.map(ps => ({
+      id: ps.stage.id,
+      name: ps.stage.name,
+      isDefault: ps.stage.isDefault,
+      orderNo: ps.orderNo,
+      leadCount: countsByPipelineStageKey.get(`${p.id}:${ps.stageId}`) ?? 0
+    }))
+  }))
 }
 
 export const getPipelineDetailsService = async (id, actor) => {
