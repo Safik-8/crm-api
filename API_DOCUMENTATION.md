@@ -10,6 +10,7 @@ This documentation reflects the current implementation in:
 - `src/modules/pipeline/*`
 - `src/modules/stage/*`
 - `src/modules/lead/*`
+- `src/modules/daily_branch_reports/*`
 - shared responses/errors: `src/utils/response.js`, `src/utils/AppError.js`, `src/middleware/errorHandler.js`
 
 ---
@@ -64,6 +65,9 @@ This documentation reflects the current implementation in:
   - [PATCH `/api/leads/:id/stage`](#patch-apileadsidstage)
   - [POST `/api/leads/:id/comments`](#post-apileadsidcomments)
   - [GET `/api/leads/:id/comments`](#get-apileadsidcomments)
+- [8) Daily Branch Reports](#8-daily-branch-reports)
+  - [POST `/api/daily-branch-reports/submit`](#post-apidaily-branch-reportssubmit)
+  - [GET `/api/daily-branch-reports/get-reports`](#get-apidaily-branch-reportsget-reports)
 
 ---
 
@@ -1655,4 +1659,178 @@ Add comment to lead.
 Get comments of a lead.
 
 **Permission**: `ACTIVITY:canView`
+
+---
+
+## 8) Daily Branch Reports
+
+Routes: `src/modules/daily_branch_reports/dailyBranchReport.routes.js`
+
+All endpoints require:
+- **Auth**
+- **Role authorization** (via `authorize(...)` middleware in the route). These endpoints currently use role-gates (not `hasPermission("<MODULE>", "<action>")`).
+
+### POST `/api/daily-branch-reports/submit`
+
+Submit daily performance numbers for the authenticated user’s branch for a given date.
+
+**Authorization**: role must include `ISE`
+
+**What this endpoint does**
+- Takes daily numeric counters for a single day.
+- Stores the report under your `branchId` (from token) and your `userId` (createdBy).
+- If you submit again for the same date, it **updates** your existing report (no duplicates).
+
+**How it works (important)**
+- Backend reads `branchId` from `req.user.branchId` (it is not taken from request body).
+- It upserts on a composite key:
+  - `branchId + reportDate + createdById`
+- It sets `updatedById` on updates.
+
+**Request body (all required)**
+
+```json
+{
+  "reportDate": "2026-04-27",
+  "callsReceived": 20,
+  "qualifiedLeads": 5,
+  "counsellingDone": 3,
+  "counsellingBooked": 2,
+  "officeVisits": 1,
+  "closures": 1,
+  "revenue": 50000,
+  "followupsDone": 10,
+  "pendingFollowups": 4,
+  "seminarTasks": 2,
+  "joiningFormalities": 1
+}
+```
+
+Notes:
+- `reportDate` should be an ISO date (e.g. `YYYY-MM-DD`) or ISO datetime string.
+- Current validation uses “required” checks that treat `0` as missing, so sending `0` will throw a `VALIDATION_ERROR`. Use positive values.
+
+**Success (201)**
+
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "message": "Form filled successfully",
+  "data": {},
+  "timestamp": "2026-04-27T00:00:00.000Z"
+}
+```
+
+**Error cases**
+- `400 VALIDATION_ERROR`: missing/empty required fields (`details` array contains `field` + `message`)
+- `400 BAD_REQUEST`: e.g. no branch on user token (`"Branch is required"`)
+- `401 UNAUTHORIZED`: missing/invalid token
+- `403 ROLE_NOT_ALLOWED`: not an ISE user (blocked by `authorize("ISE")`)
+
+Example validation error (400):
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "details": [
+    { "field": "reportDate", "message": "Report date is required" },
+    { "field": "callsReceived", "message": "Calls received is required" }
+  ],
+  "timestamp": "2026-04-27T00:00:00.000Z"
+}
+```
+
+---
+
+### GET `/api/daily-branch-reports/get-reports`
+
+Fetch daily report analytics for the authenticated user’s branch, aggregated across **ISE users** in that branch for a date range.
+
+**Authorization**: role must include `BRANCH_ADMIN`
+
+**What this endpoint returns**
+- `range`: normalized date range (start at 00:00:00.000, end at 23:59:59.999)
+- `totals`: sum of all numeric fields across all matching reports
+- `reportsCount`: how many report rows were included
+- `topMetric`, `topOrder`: the applied ranking settings
+- `topPerformers`: list of ISE users ranked by selected metric, with each user’s summed totals
+
+**How it works (important)**
+- Backend reads `branchId` from `req.user.branchId`.
+- Only includes reports where:
+  - `branchId` matches your branch
+  - `isDeleted = false`
+  - `reportDate` falls within the computed range
+  - `createdById` belongs to users who have the `ISE` role in your branch
+
+**Query params (optional)**
+- `startDate`: date/datetime (defaults to today)
+- `endDate`: date/datetime (defaults to today)
+- `sortBy`: metric used to rank top performers (defaults to `revenue`)
+  - Allowed: `callsReceived`, `qualifiedLeads`, `counsellingDone`, `counsellingBooked`, `officeVisits`, `closures`, `revenue`, `followupsDone`, `pendingFollowups`, `seminarTasks`, `joiningFormalities`
+- `order`: `asc` or `desc` (defaults to `desc`)
+- `top`: number of top performers to return (defaults to 5, min 1, max 50)
+
+Example:
+- `/api/daily-branch-reports/get-reports?startDate=2026-04-01&endDate=2026-04-27&sortBy=revenue&order=desc&top=5`
+
+**Success (200)**
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Daily branch reports fetched successfully",
+  "data": {
+    "range": {
+      "startDate": "2026-04-01T00:00:00.000Z",
+      "endDate": "2026-04-27T23:59:59.999Z"
+    },
+    "totals": {
+      "callsReceived": 120,
+      "qualifiedLeads": 40,
+      "counsellingDone": 22,
+      "counsellingBooked": 15,
+      "officeVisits": 12,
+      "closures": 7,
+      "revenue": 250000,
+      "followupsDone": 90,
+      "pendingFollowups": 18,
+      "seminarTasks": 9,
+      "joiningFormalities": 6
+    },
+    "reportsCount": 24,
+    "topMetric": "revenue",
+    "topOrder": "desc",
+    "topPerformers": [
+      {
+        "user": { "id": 10, "name": "Aman", "email": "aman@example.com" },
+        "totals": {
+          "callsReceived": 30,
+          "qualifiedLeads": 10,
+          "counsellingDone": 6,
+          "counsellingBooked": 4,
+          "officeVisits": 3,
+          "closures": 2,
+          "revenue": 100000,
+          "followupsDone": 18,
+          "pendingFollowups": 5,
+          "seminarTasks": 2,
+          "joiningFormalities": 1
+        }
+      }
+    ]
+  },
+  "timestamp": "2026-04-27T00:00:00.000Z"
+}
+```
+
+**Error cases**
+- `400 BAD_REQUEST`: invalid `startDate`/`endDate` or missing branch
+- `401 UNAUTHORIZED`: missing/invalid token
+- `403 ROLE_NOT_ALLOWED`: not a branch admin (blocked by `authorize("BRANCH_ADMIN")`)
 

@@ -19,6 +19,7 @@ import pipelineRoutes from "./modules/pipeline/pipeline.routes.js"
 import stageRoutes from "./modules/stage/stage.routes.js"
 import leadRoutes from "./modules/lead/lead.routes.js"
 import { initializeSystem } from "./config/initSystem.js"
+import dailyBranchReportRoutes from "./modules/daily_branch_reports/dailyBranchReport.routes.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
 dotenv.config({ quiet: true })
@@ -66,6 +67,7 @@ app.use("/api/lead-sources", leadSourceRoutes);
 app.use("/api/pipelines", pipelineRoutes);
 app.use("/api/stages", stageRoutes);
 app.use("/api/leads", leadRoutes);
+app.use("/api/daily-branch-reports", dailyBranchReportRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════

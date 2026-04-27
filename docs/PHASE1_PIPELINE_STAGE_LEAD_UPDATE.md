@@ -8,6 +8,9 @@ All routes below require **Authentication**:
 - Header: **`Authorization: Bearer <accessToken>`**
 - Permissions are enforced via `hasPermission("<MODULE>", "<action>")`
 
+Note:
+- Some newer routes may use **role authorization** via `authorize("ROLE")` instead of `hasPermission(...)`. See **Daily Branch Reports** below.
+
 ---
 
 ## Standard response formats
@@ -248,6 +251,150 @@ Some endpoints derive `companyId`/`branchId` from the authenticated user. For **
 | Field | Type | Required | Notes |
 |------|------|----------|------|
 | `comment` | string | ✅ Yes | Trimmed; cannot be empty. |
+
+### Daily Branch Reports (`/api/daily-branch-reports`)
+
+These endpoints are used to submit and view **daily ISE performance reports**.
+
+Important:
+- Uses **role authorization** (`authorize("ISE")`, `authorize("BRANCH_ADMIN")`) instead of module permissions.
+- Branch is derived from the logged-in user (`req.user.branchId`).
+
+#### POST `/api/daily-branch-reports/submit`
+
+Who can access:
+- Role: `ISE`
+
+What it does:
+- Creates or updates the current user’s daily report for the given date.
+- Guarantees **one report per day per user per branch** (it upserts on `branchId + reportDate + createdById`).
+
+Request body fields:
+
+| Field | Type | Required | Notes |
+|------|------|----------|------|
+| `reportDate` | string (date/datetime) | ✅ Yes | Use `YYYY-MM-DD` or ISO datetime. |
+| `callsReceived` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `qualifiedLeads` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `counsellingDone` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `counsellingBooked` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `officeVisits` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `closures` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `revenue` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `followupsDone` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `pendingFollowups` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `seminarTasks` | number | ✅ Yes | `0` is treated as missing in current validation. |
+| `joiningFormalities` | number | ✅ Yes | `0` is treated as missing in current validation. |
+
+Request example:
+
+```json
+{
+  "reportDate": "2026-04-27",
+  "callsReceived": 20,
+  "qualifiedLeads": 5,
+  "counsellingDone": 3,
+  "counsellingBooked": 2,
+  "officeVisits": 1,
+  "closures": 1,
+  "revenue": 50000,
+  "followupsDone": 10,
+  "pendingFollowups": 4,
+  "seminarTasks": 2,
+  "joiningFormalities": 1
+}
+```
+
+Success (201):
+
+```json
+{
+  "success": true,
+  "statusCode": 201,
+  "message": "Form filled successfully",
+  "data": {},
+  "timestamp": "2026-04-27T00:00:00.000Z"
+}
+```
+
+Validation error (400) example:
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "details": [
+    { "field": "reportDate", "message": "Report date is required" }
+  ],
+  "timestamp": "2026-04-27T00:00:00.000Z"
+}
+```
+
+#### GET `/api/daily-branch-reports/get-reports`
+
+Who can access:
+- Role: `BRANCH_ADMIN`
+
+What it returns:
+- Branch totals (sum) for all ISE reports in the range
+- Count of reports
+- Top performers (ISE users) ranked by a metric
+
+Query params (optional):
+- `startDate`, `endDate`: date/datetime (defaults to today)
+- `sortBy`: `callsReceived | qualifiedLeads | counsellingDone | counsellingBooked | officeVisits | closures | revenue | followupsDone | pendingFollowups | seminarTasks | joiningFormalities` (default `revenue`)
+- `order`: `asc | desc` (default `desc`)
+- `top`: number (default 5, min 1, max 50)
+
+Success (200) (shape):
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Daily branch reports fetched successfully",
+  "data": {
+    "range": { "startDate": "ISO", "endDate": "ISO" },
+    "totals": {
+      "callsReceived": 0,
+      "qualifiedLeads": 0,
+      "counsellingDone": 0,
+      "counsellingBooked": 0,
+      "officeVisits": 0,
+      "closures": 0,
+      "revenue": 0,
+      "followupsDone": 0,
+      "pendingFollowups": 0,
+      "seminarTasks": 0,
+      "joiningFormalities": 0
+    },
+    "reportsCount": 0,
+    "topMetric": "revenue",
+    "topOrder": "desc",
+    "topPerformers": [
+      {
+        "user": { "id": 1, "name": "User", "email": "user@example.com" },
+        "totals": {
+          "callsReceived": 0,
+          "qualifiedLeads": 0,
+          "counsellingDone": 0,
+          "counsellingBooked": 0,
+          "officeVisits": 0,
+          "closures": 0,
+          "revenue": 0,
+          "followupsDone": 0,
+          "pendingFollowups": 0,
+          "seminarTasks": 0,
+          "joiningFormalities": 0
+        }
+      }
+    ]
+  },
+  "timestamp": "2026-04-27T00:00:00.000Z"
+}
+```
 
 ### Pipelines (`/api/pipelines`)
 

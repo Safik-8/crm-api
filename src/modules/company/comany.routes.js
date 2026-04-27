@@ -8,7 +8,7 @@ import {
     getCompanyById,
     updateCompany
 } from "./comany.controllers.js"
-import { authenticate } from "../../middleware/authenticate.js"
+import { authenticate } from "../../middleware/Authenticate.js"
 import { authorize } from "../../middleware/authorize.js"
 import { hasPermission } from "../../middleware/hasPermission.js"
 

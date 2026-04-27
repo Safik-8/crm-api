@@ -61,7 +61,7 @@ export const authenticate = async (req, res, next) => {
           permissionsMap[rp.module] = {
             canView  : false,
             canCreate: false,
-            canEdit  : false,
+            canEdit  :  false,
             canDelete: false
           }
         }
