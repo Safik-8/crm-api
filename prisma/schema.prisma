@@ -74,7 +74,6 @@ model User {
   createdLeads              Lead[]              @relation("UserCreatedLeads")
   leadComments              LeadComment[]
   createdDailyBranchReports DailyBranchReport[] @relation("UserCreatedDailyBranchReports")
-  updatedDailyBranchReports DailyBranchReport[] @relation("UserUpdatedDailyBranchReports")
 
   @@index([companyId])
   @@index([branchId])
@@ -308,13 +307,11 @@ model DailyBranchReport {
 
   isDeleted   Boolean  @default(false) @map("is_deleted")
   createdById Int      @map("created_by")
-  updatedById Int?     @map("updated_by")
   createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  // updatedAt removed: daily reports are submit-once (no updates)
 
   branch    Branch @relation(fields: [branchId], references: [id])
   createdBy User   @relation("UserCreatedDailyBranchReports", fields: [createdById], references: [id])
-  updatedBy User?  @relation("UserUpdatedDailyBranchReports", fields: [updatedById], references: [id])
 
   // multiple users can submit for same branch+date, but each user only once
   @@unique([branchId, reportDate, createdById])

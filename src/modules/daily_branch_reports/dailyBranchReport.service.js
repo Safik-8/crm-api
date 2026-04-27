@@ -1,5 +1,5 @@
 import prisma from "../../config/db.js"
-import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
+import { BadRequestError, ConflictError, ValidationError } from "../../utils/AppError.js"
 
 
 export const submitDailyBranchReportService = async (data, user) => {
@@ -26,24 +26,15 @@ export const submitDailyBranchReportService = async (data, user) => {
   if (errors.length) throw new ValidationError("Validation failed", errors);
 
  
-  // one report per user per branch per day (multiple users allowed)
-  await prisma.dailyBranchReport.upsert({
+  // Submit-once: one report per user per branch per day (multiple users allowed)
+  const existing = await prisma.dailyBranchReport.findUnique({
     where: { branchId_reportDate_createdById: { branchId, reportDate, createdById: user.id } },
-    update: {
-      callsReceived,
-      qualifiedLeads,
-      counsellingDone,
-      counsellingBooked,
-      officeVisits,
-      closures,
-      revenue,
-      followupsDone,
-      pendingFollowups,
-      seminarTasks,
-      joiningFormalities,
-      updatedById: user.id
-    },
-    create: {
+    select: { id: true }
+  })
+  if (existing) throw new ConflictError("Daily report already submitted for this date")
+
+  await prisma.dailyBranchReport.create({
+    data: {
       branchId,
       reportDate,
       callsReceived,
@@ -64,10 +55,11 @@ export const submitDailyBranchReportService = async (data, user) => {
 }
 
 export const getDailyBranchReportsService = async (query , user) => {
-   
-  const branchId = user.branchId;
-  if (!branchId) throw new BadRequestError("Branch is required");
+  // Branch admin/manager dashboard must be scoped by authenticated user's branchId
+  const branchId = Number(user?.branchId)
+  if (!Number.isInteger(branchId) || branchId < 1) throw new BadRequestError("Branch is required")
 
+  // Default: today (server time). If startDate/endDate provided, use that range.
   const startDate = query?.startDate ? new Date(query.startDate) : new Date()
   const endDate = query?.endDate ? new Date(query.endDate) : new Date()
 
@@ -78,18 +70,48 @@ export const getDailyBranchReportsService = async (query , user) => {
   startDate.setHours(0, 0, 0, 0)
   endDate.setHours(23, 59, 59, 999)
 
-  const baseWhere = { branchId, isDeleted: false, reportDate: { gte: startDate, lte: endDate } }
+console.log(startDate, endDate);
 
-  // Limit report calculations to ISE users of this branch
-  const iseUserRoles = await prisma.userRole.findMany({
-    where: {
-      branchId,
-      role: { name: "ISE" }
-    },
-    select: { userId: true }
-  })
-  const iseUserIds = iseUserRoles.map(r => r.userId)
-  const where = iseUserIds.length ? { ...baseWhere, createdById: { in: iseUserIds } } : { ...baseWhere, createdById: { in: [-1] } }
+  
+  // Match reports for this branch.
+  // Primary key in table is `daily_branch_reports.branch_id`.
+  // If some historical rows have wrong branch_id, we still include them when the creator user is in this branch.
+  const baseWhere = {
+    isDeleted: false,
+    reportDate: { gte: startDate, lte: endDate },
+    OR: [
+      { branchId },
+      { createdBy: { branchId } }
+    ]
+  }
+
+  const METRICS = [
+    "callsReceived",
+    "qualifiedLeads",
+    "counsellingDone",
+    "counsellingBooked",
+    "officeVisits",
+    "closures",
+    "revenue",
+    "followupsDone",
+    "pendingFollowups",
+    "seminarTasks",
+    "joiningFormalities"
+  ]
+
+  const emptyTotals = {
+    callsReceived: 0,
+    qualifiedLeads: 0,
+    counsellingDone: 0,
+    counsellingBooked: 0,
+    officeVisits: 0,
+    closures: 0,
+    revenue: 0,
+    followupsDone: 0,
+    pendingFollowups: 0,
+    seminarTasks: 0,
+    joiningFormalities: 0
+  }
 
   const normalizeSums = (sum) => ({
     callsReceived: sum?.callsReceived ?? 0,
@@ -105,83 +127,62 @@ export const getDailyBranchReportsService = async (query , user) => {
     joiningFormalities: sum?.joiningFormalities ?? 0
   })
 
-  // 1) SUM of all ISE data in range (branch totals)
+  // Branch admin dashboard: show branch data only.
+  // Reports are submitted by ISE users and already include createdById, so we avoid extra role joins here.
+  const where = baseWhere
+  const reportsCount = await prisma.dailyBranchReport.count({ where })
+
+  if (!reportsCount) {
+    return {
+      range: { startDate, endDate },
+      reportsCount: 0,
+      cards: METRICS.map(m => ({ metric: m, total: 0, topPerformers: [] }))
+    }
+  }
+
+  // 1) Totals of all ISE reports in range (branch totals)
   const totalsAgg = await prisma.dailyBranchReport.aggregate({
     where,
-    _sum: {
-      callsReceived: true,
-      qualifiedLeads: true,
-      counsellingDone: true,
-      counsellingBooked: true,
-      officeVisits: true,
-      closures: true,
-      revenue: true,
-      followupsDone: true,
-      pendingFollowups: true,
-      seminarTasks: true,
-      joiningFormalities: true
-    },
+    _sum: METRICS.reduce((acc, k) => ((acc[k] = true), acc), {}),
     _count: { _all: true }
   })
+  const totals = normalizeSums(totalsAgg._sum)
 
-  // 2) Top performance ISE details (group by ISE user)
-  // query.sortBy: callsReceived | qualifiedLeads | closures | revenue | ...
-  const sortBy = String(query?.sortBy || "revenue")
-  const allowedSort = new Set([
-    "callsReceived",
-    "qualifiedLeads",
-    "counsellingDone",
-    "counsellingBooked",
-    "officeVisits",
-    "closures", 
-    "revenue",
-    "followupsDone",
-    "pendingFollowups",
-    "seminarTasks",
-    "joiningFormalities"
-  ])
-  const metric = allowedSort.has(sortBy) ? sortBy : "revenue"
-  const order = String(query?.order || "desc").toLowerCase() === "asc" ? "asc" : "desc"
-  const top = Math.min(Math.max(Number(query?.top || 5) || 5, 1), 50)
+  // 2) Per-metric top performers (DESC, return ALL)
+  const metricGroupeds = await Promise.all(
+    METRICS.map((m) =>
+      prisma.dailyBranchReport.groupBy({
+        by: ["createdById"],
+        where,
+        _sum: { [m]: true },
+        orderBy: { _sum: { [m]: "desc" } }
+      })
+    )
+  )
 
-  const grouped = await prisma.dailyBranchReport.groupBy({
-    by: ["createdById"],
-    where,
-    _sum: {
-      callsReceived: true,
-      qualifiedLeads: true,
-      counsellingDone: true,
-      counsellingBooked: true,
-      officeVisits: true,
-      closures: true,
-      revenue: true,
-      followupsDone: true,
-      pendingFollowups: true,
-      seminarTasks: true,
-      joiningFormalities: true
-    },
-    orderBy: { _sum: { [metric]: order } },
-    take: top
-  })
-
-  const userIds = grouped.map(g => g.createdById)
-  const users = await prisma.user.findMany({
-    where: { id: { in: userIds } },
-    select: { id: true, name: true, email: true }
-  })
+  const allUserIds = Array.from(new Set(metricGroupeds.flat().map(r => r.createdById)))
+  const users = allUserIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: allUserIds } },
+        select: { id: true, name: true, email: true }
+      })
+    : []
   const userById = new Map(users.map(u => [u.id, u]))
 
-  const topPerformers = grouped.map(g => ({
-    user: userById.get(g.createdById) || { id: g.createdById },
-    totals: normalizeSums(g._sum)
-  }))
+  const cards = METRICS.map((m, idx) => {
+    const rows = metricGroupeds[idx] || []
+    return {
+      metric: m,
+      total: totals[m],
+      topPerformers: rows.map(r => ({
+        user: userById.get(r.createdById) || { id: r.createdById }
+      }))
+    }
+  })
 
   return {
     range: { startDate, endDate },
-    totals: normalizeSums(totalsAgg._sum),
     reportsCount: totalsAgg._count?._all || 0,
-    topMetric: metric,
-    topOrder: order,
-    topPerformers
+    cards
   }
 }

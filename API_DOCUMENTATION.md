@@ -1679,13 +1679,13 @@ Submit daily performance numbers for the authenticated user’s branch for a giv
 **What this endpoint does**
 - Takes daily numeric counters for a single day.
 - Stores the report under your `branchId` (from token) and your `userId` (createdBy).
-- If you submit again for the same date, it **updates** your existing report (no duplicates).
+- You can submit **only once** per date. If you submit again for the same date, it returns **409 CONFLICT**.
 
 **How it works (important)**
 - Backend reads `branchId` from `req.user.branchId` (it is not taken from request body).
-- It upserts on a composite key:
+- It enforces uniqueness on:
   - `branchId + reportDate + createdById`
-- It sets `updatedById` on updates.
+- Implementation is **create-only** (no update / no upsert).
 
 **Request body (all required)**
 
@@ -1726,6 +1726,7 @@ Notes:
 - `400 VALIDATION_ERROR`: missing/empty required fields (`details` array contains `field` + `message`)
 - `400 BAD_REQUEST`: e.g. no branch on user token (`"Branch is required"`)
 - `401 UNAUTHORIZED`: missing/invalid token
+- `409 CONFLICT`: daily report already submitted for this date
 - `403 ROLE_NOT_ALLOWED`: not an ISE user (blocked by `authorize("ISE")`)
 
 Example validation error (400):
@@ -1748,35 +1749,36 @@ Example validation error (400):
 
 ### GET `/api/daily-branch-reports/get-reports`
 
-Fetch daily report analytics for the authenticated user’s branch, aggregated across **ISE users** in that branch for a date range.
+Fetch daily report dashboard analytics for the authenticated user’s branch for a date range (default: today).
 
 **Authorization**: role must include `BRANCH_ADMIN`
 
 **What this endpoint returns**
 - `range`: normalized date range (start at 00:00:00.000, end at 23:59:59.999)
-- `totals`: sum of all numeric fields across all matching reports
 - `reportsCount`: how many report rows were included
-- `topMetric`, `topOrder`: the applied ranking settings
-- `topPerformers`: list of ISE users ranked by selected metric, with each user’s summed totals
+- `cards`: one card per metric (11 cards). Each card includes:
+  - `metric`: metric key
+  - `total`: sum of that metric across all matching reports
+  - `topPerformers`: list of users in **DESC** order for that metric (users only; no per-user value in response)
 
 **How it works (important)**
 - Backend reads `branchId` from `req.user.branchId`.
-- Only includes reports where:
-  - `branchId` matches your branch
+- Includes reports where:
   - `isDeleted = false`
   - `reportDate` falls within the computed range
-  - `createdById` belongs to users who have the `ISE` role in your branch
+  - and (to handle older data inconsistencies) either:
+    - `daily_branch_reports.branch_id = req.user.branchId`, OR
+    - the creator user’s `users.branch_id = req.user.branchId`
 
 **Query params (optional)**
 - `startDate`: date/datetime (defaults to today)
 - `endDate`: date/datetime (defaults to today)
-- `sortBy`: metric used to rank top performers (defaults to `revenue`)
-  - Allowed: `callsReceived`, `qualifiedLeads`, `counsellingDone`, `counsellingBooked`, `officeVisits`, `closures`, `revenue`, `followupsDone`, `pendingFollowups`, `seminarTasks`, `joiningFormalities`
-- `order`: `asc` or `desc` (defaults to `desc`)
-- `top`: number of top performers to return (defaults to 5, min 1, max 50)
+
+Metrics returned (11):
+`callsReceived`, `qualifiedLeads`, `counsellingDone`, `counsellingBooked`, `officeVisits`, `closures`, `revenue`, `followupsDone`, `pendingFollowups`, `seminarTasks`, `joiningFormalities`
 
 Example:
-- `/api/daily-branch-reports/get-reports?startDate=2026-04-01&endDate=2026-04-27&sortBy=revenue&order=desc&top=5`
+- `/api/daily-branch-reports/get-reports?startDate=2026-04-01&endDate=2026-04-27`
 
 **Success (200)**
 
@@ -1790,38 +1792,21 @@ Example:
       "startDate": "2026-04-01T00:00:00.000Z",
       "endDate": "2026-04-27T23:59:59.999Z"
     },
-    "totals": {
-      "callsReceived": 120,
-      "qualifiedLeads": 40,
-      "counsellingDone": 22,
-      "counsellingBooked": 15,
-      "officeVisits": 12,
-      "closures": 7,
-      "revenue": 250000,
-      "followupsDone": 90,
-      "pendingFollowups": 18,
-      "seminarTasks": 9,
-      "joiningFormalities": 6
-    },
     "reportsCount": 24,
-    "topMetric": "revenue",
-    "topOrder": "desc",
-    "topPerformers": [
+    "cards": [
       {
-        "user": { "id": 10, "name": "Aman", "email": "aman@example.com" },
-        "totals": {
-          "callsReceived": 30,
-          "qualifiedLeads": 10,
-          "counsellingDone": 6,
-          "counsellingBooked": 4,
-          "officeVisits": 3,
-          "closures": 2,
-          "revenue": 100000,
-          "followupsDone": 18,
-          "pendingFollowups": 5,
-          "seminarTasks": 2,
-          "joiningFormalities": 1
-        }
+        "metric": "callsReceived",
+        "total": 135,
+        "topPerformers": [
+          { "user": { "id": 23, "name": "ise", "email": "ise@gmail.com" } }
+        ]
+      },
+      {
+        "metric": "joiningFormalities",
+        "total": 1,
+        "topPerformers": [
+          { "user": { "id": 23, "name": "ise", "email": "ise@gmail.com" } }
+        ]
       }
     ]
   },
