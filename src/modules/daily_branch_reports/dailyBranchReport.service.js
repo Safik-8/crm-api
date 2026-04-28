@@ -5,30 +5,63 @@ import { BadRequestError, ConflictError, ValidationError } from "../../utils/App
 export const submitDailyBranchReportService = async (data, user) => {
   const { reportDate, callsReceived, qualifiedLeads, counsellingDone, counsellingBooked, officeVisits, closures, revenue, followupsDone, pendingFollowups, seminarTasks, joiningFormalities } = data;
 
-  const branchId = user.branchId;
-  if (!branchId) throw new BadRequestError("Branch is required");
+  const branchId = Number(user?.branchId)
+  if (!Number.isInteger(branchId) || branchId < 1) throw new BadRequestError("Branch is required")
 
-  if (!reportDate || !callsReceived || !qualifiedLeads || !counsellingDone || !counsellingBooked || !officeVisits || !closures || !revenue || !followupsDone || !pendingFollowups || !seminarTasks || !joiningFormalities ) {
+  const parseReportDateToUtcMidnight = (value) => {
+    if (!value) return null
+    if (value instanceof Date) {
+      const d = new Date(value.getTime())
+      d.setUTCHours(0, 0, 0, 0)
+      return d
+    }
+    const s = String(value).trim()
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+    if (!m) return null
+    const year = Number(m[1])
+    const month = Number(m[2])
+    const day = Number(m[3])
+    const d = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0))
+    if (Number.isNaN(d.getTime())) return null
+    if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null
+    return d
   }
+
+  const requireNumber = (field, value, errors) => {
+    if (value === undefined || value === null || value === "") {
+      errors.push({ field, message: `${field} is required` })
+      return null
+    }
+    const n = typeof value === "number" ? value : Number(value)
+    if (!Number.isFinite(n)) {
+      errors.push({ field, message: `${field} must be a number` })
+      return null
+    }
+    return n
+  }
+
+  const parsedReportDate = parseReportDateToUtcMidnight(reportDate)
   const errors = [];
-  if (!reportDate) errors.push({ field: "reportDate", message: "Report date is required" });
-  if (!callsReceived) errors.push({ field: "callsReceived", message: "Calls received is required" });
-  if (!qualifiedLeads) errors.push({ field: "qualifiedLeads", message: "Qualified leads is required" });
-  if (!counsellingDone) errors.push({ field: "counsellingDone", message: "Counselling done is required" });
-  if (!counsellingBooked) errors.push({ field: "counsellingBooked", message: "Counselling booked is required" });
-  if (!officeVisits) errors.push({ field: "officeVisits", message: "Office visits is required" });
-  if (!closures) errors.push({ field: "closures", message: "Closures is required" });
-  if (!revenue) errors.push({ field: "revenue", message: "Revenue is required" });
-  if (!followupsDone) errors.push({ field: "followupsDone", message: "Followups done is required" });
-  if (!pendingFollowups) errors.push({ field: "pendingFollowups", message: "Pending followups is required" });
-  if (!seminarTasks) errors.push({ field: "seminarTasks", message: "Seminar tasks is required" });
-  if (!joiningFormalities) errors.push({ field: "joiningFormalities", message: "Joining formalities is required" });
+  if (!parsedReportDate) errors.push({ field: "reportDate", message: "Invalid reportDate. Expected YYYY-MM-DD." })
+
+  const callsReceivedNum = requireNumber("callsReceived", callsReceived, errors)
+  const qualifiedLeadsNum = requireNumber("qualifiedLeads", qualifiedLeads, errors)
+  const counsellingDoneNum = requireNumber("counsellingDone", counsellingDone, errors)
+  const counsellingBookedNum = requireNumber("counsellingBooked", counsellingBooked, errors)
+  const officeVisitsNum = requireNumber("officeVisits", officeVisits, errors)
+  const closuresNum = requireNumber("closures", closures, errors)
+  const revenueNum = requireNumber("revenue", revenue, errors)
+  const followupsDoneNum = requireNumber("followupsDone", followupsDone, errors)
+  const pendingFollowupsNum = requireNumber("pendingFollowups", pendingFollowups, errors)
+  const seminarTasksNum = requireNumber("seminarTasks", seminarTasks, errors)
+  const joiningFormalitiesNum = requireNumber("joiningFormalities", joiningFormalities, errors)
+
   if (errors.length) throw new ValidationError("Validation failed", errors);
 
  
   // Submit-once: one report per user per branch per day (multiple users allowed)
   const existing = await prisma.dailyBranchReport.findUnique({
-    where: { branchId_reportDate_createdById: { branchId, reportDate, createdById: user.id } },
+    where: { branchId_reportDate_createdById: { branchId, reportDate: parsedReportDate, createdById: user.id } },
     select: { id: true }
   })
   if (existing) throw new ConflictError("Daily report already submitted for this date")
@@ -36,18 +69,18 @@ export const submitDailyBranchReportService = async (data, user) => {
   await prisma.dailyBranchReport.create({
     data: {
       branchId,
-      reportDate,
-      callsReceived,
-      qualifiedLeads,
-      counsellingDone,
-      counsellingBooked,
-      officeVisits,
-      closures,
-      revenue,
-      followupsDone,
-      pendingFollowups,
-      seminarTasks,
-      joiningFormalities,
+      reportDate: parsedReportDate,
+      callsReceived: callsReceivedNum,
+      qualifiedLeads: qualifiedLeadsNum,
+      counsellingDone: counsellingDoneNum,
+      counsellingBooked: counsellingBookedNum,
+      officeVisits: officeVisitsNum,
+      closures: closuresNum,
+      revenue: revenueNum,
+      followupsDone: followupsDoneNum,
+      pendingFollowups: pendingFollowupsNum,
+      seminarTasks: seminarTasksNum,
+      joiningFormalities: joiningFormalitiesNum,
       createdById: user.id
     }
   })
