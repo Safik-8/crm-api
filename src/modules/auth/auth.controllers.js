@@ -53,9 +53,16 @@ export const login = async (req, res, next) => {
 // ══════════════════════════════════════
 export const refresh = async (req, res, next) => {
     try {
+        const authHeader = req.headers?.authorization || req.headers?.Authorization
+        const bearerToken =
+            typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")
+                ? authHeader.slice(7).trim()
+                : undefined
+
         const refreshToken =
             req.cookies?.refreshToken ||
-            req.body?.refreshToken
+            req.body?.refreshToken ||
+            bearerToken
 
         const result = await refreshTokenService(refreshToken)
 
