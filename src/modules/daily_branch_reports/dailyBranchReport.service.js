@@ -103,8 +103,6 @@ export const getDailyBranchReportsService = async (query , user) => {
   startDate.setHours(0, 0, 0, 0)
   endDate.setHours(23, 59, 59, 999)
 
-console.log(startDate, endDate);
-
   
   // Match reports for this branch.
   // Primary key in table is `daily_branch_reports.branch_id`.
@@ -208,7 +206,10 @@ console.log(startDate, endDate);
       metric: m,
       total: totals[m],
       topPerformers: rows.map(r => ({
-        user: userById.get(r.createdById) || { id: r.createdById }
+        user: {
+          ...(userById.get(r.createdById) || { id: r.createdById }),
+          total: r?._sum?.[m] ?? 0
+        }
       }))
     }
   })
