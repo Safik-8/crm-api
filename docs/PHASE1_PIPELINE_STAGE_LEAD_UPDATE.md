@@ -280,11 +280,8 @@ Request body fields:
 | `counsellingBooked` | number | ✅ Yes | `0` is treated as missing in current validation. |
 | `officeVisits` | number | ✅ Yes | `0` is treated as missing in current validation. |
 | `closures` | number | ✅ Yes | `0` is treated as missing in current validation. |
-| `revenue` | number | ✅ Yes | `0` is treated as missing in current validation. |
 | `followupsDone` | number | ✅ Yes | `0` is treated as missing in current validation. |
 | `pendingFollowups` | number | ✅ Yes | `0` is treated as missing in current validation. |
-| `seminarTasks` | number | ✅ Yes | `0` is treated as missing in current validation. |
-| `joiningFormalities` | number | ✅ Yes | `0` is treated as missing in current validation. |
 
 Request example:
 
@@ -297,11 +294,8 @@ Request example:
   "counsellingBooked": 2,
   "officeVisits": 1,
   "closures": 1,
-  "revenue": 50000,
   "followupsDone": 10,
-  "pendingFollowups": 4,
-  "seminarTasks": 2,
-  "joiningFormalities": 1
+  "pendingFollowups": 4
 }
 ```
 
@@ -344,7 +338,7 @@ What it returns:
 
 Query params (optional):
 - `startDate`, `endDate`: date/datetime (defaults to today)
-- `sortBy`: `callsReceived | qualifiedLeads | counsellingDone | counsellingBooked | officeVisits | closures | revenue | followupsDone | pendingFollowups | seminarTasks | joiningFormalities` (default `revenue`)
+- `sortBy`: `callsReceived | qualifiedLeads | counsellingDone | counsellingBooked | officeVisits | closures | followupsDone | pendingFollowups` (default `pendingFollowups`)
 - `order`: `asc | desc` (default `desc`)
 - `top`: number (default 5, min 1, max 50)
 
@@ -364,14 +358,11 @@ Success (200) (shape):
       "counsellingBooked": 0,
       "officeVisits": 0,
       "closures": 0,
-      "revenue": 0,
       "followupsDone": 0,
-      "pendingFollowups": 0,
-      "seminarTasks": 0,
-      "joiningFormalities": 0
+      "pendingFollowups": 0
     },
     "reportsCount": 0,
-    "topMetric": "revenue",
+    "topMetric": "pendingFollowups",
     "topOrder": "desc",
     "topPerformers": [
       {
@@ -383,11 +374,8 @@ Success (200) (shape):
           "counsellingBooked": 0,
           "officeVisits": 0,
           "closures": 0,
-          "revenue": 0,
           "followupsDone": 0,
-          "pendingFollowups": 0,
-          "seminarTasks": 0,
-          "joiningFormalities": 0
+          "pendingFollowups": 0
         }
       }
     ]

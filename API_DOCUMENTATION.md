@@ -1698,11 +1698,8 @@ Submit daily performance numbers for the authenticated user’s branch for a giv
   "counsellingBooked": 2,
   "officeVisits": 1,
   "closures": 1,
-  "revenue": 50000,
   "followupsDone": 10,
-  "pendingFollowups": 4,
-  "seminarTasks": 2,
-  "joiningFormalities": 1
+  "pendingFollowups": 4
 }
 ```
 
@@ -1774,8 +1771,8 @@ Fetch daily report dashboard analytics for the authenticated user’s branch for
 - `startDate`: date/datetime (defaults to today)
 - `endDate`: date/datetime (defaults to today)
 
-Metrics returned (11):
-`callsReceived`, `qualifiedLeads`, `counsellingDone`, `counsellingBooked`, `officeVisits`, `closures`, `revenue`, `followupsDone`, `pendingFollowups`, `seminarTasks`, `joiningFormalities`
+Metrics returned (8):
+`callsReceived`, `qualifiedLeads`, `counsellingDone`, `counsellingBooked`, `officeVisits`, `closures`, `followupsDone`, `pendingFollowups`
 
 Example:
 - `/api/daily-branch-reports/get-reports?startDate=2026-04-01&endDate=2026-04-27`
@@ -1802,7 +1799,7 @@ Example:
         ]
       },
       {
-        "metric": "joiningFormalities",
+        "metric": "pendingFollowups",
         "total": 1,
         "topPerformers": [
           { "user": { "id": 23, "name": "ise", "email": "ise@gmail.com" } }

@@ -115,7 +115,7 @@ const ROLE_PERMISSIONS = {
         PROSPECT: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         ACTIVITY: { canView: true, canCreate: true, canEdit: false, canDelete: false },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        PIPELINE: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        PIPELINE: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         STAGE: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         SESSION: { canView: true, canCreate: true, canEdit: false, canDelete: false },
