@@ -3,7 +3,7 @@ import { BadRequestError, ConflictError, ValidationError } from "../../utils/App
 
 
 export const submitDailyBranchReportService = async (data, user) => {
-  const { reportDate, callsReceived, qualifiedLeads, counsellingDone, counsellingBooked, officeVisits, closures, revenue, followupsDone, pendingFollowups, seminarTasks, joiningFormalities } = data;
+  const { reportDate, callsReceived, qualifiedLeads, counsellingDone, counsellingBooked, officeVisits, closures, followupsDone, pendingFollowups } = data;
 
   const branchId = Number(user?.branchId)
   if (!Number.isInteger(branchId) || branchId < 1) throw new BadRequestError("Branch is required")
@@ -50,11 +50,8 @@ export const submitDailyBranchReportService = async (data, user) => {
   const counsellingBookedNum = requireNumber("counsellingBooked", counsellingBooked, errors)
   const officeVisitsNum = requireNumber("officeVisits", officeVisits, errors)
   const closuresNum = requireNumber("closures", closures, errors)
-  const revenueNum = requireNumber("revenue", revenue, errors)
   const followupsDoneNum = requireNumber("followupsDone", followupsDone, errors)
   const pendingFollowupsNum = requireNumber("pendingFollowups", pendingFollowups, errors)
-  const seminarTasksNum = requireNumber("seminarTasks", seminarTasks, errors)
-  const joiningFormalitiesNum = requireNumber("joiningFormalities", joiningFormalities, errors)
 
   if (errors.length) throw new ValidationError("Validation failed", errors);
 
@@ -76,11 +73,8 @@ export const submitDailyBranchReportService = async (data, user) => {
       counsellingBooked: counsellingBookedNum,
       officeVisits: officeVisitsNum,
       closures: closuresNum,
-      revenue: revenueNum,
       followupsDone: followupsDoneNum,
       pendingFollowups: pendingFollowupsNum,
-      seminarTasks: seminarTasksNum,
-      joiningFormalities: joiningFormalitiesNum,
       createdById: user.id
     }
   })
@@ -123,11 +117,8 @@ export const getDailyBranchReportsService = async (query , user) => {
     "counsellingBooked",
     "officeVisits",
     "closures",
-    "revenue",
     "followupsDone",
-    "pendingFollowups",
-    "seminarTasks",
-    "joiningFormalities"
+    "pendingFollowups"
   ]
 
   const emptyTotals = {
@@ -137,11 +128,8 @@ export const getDailyBranchReportsService = async (query , user) => {
     counsellingBooked: 0,
     officeVisits: 0,
     closures: 0,
-    revenue: 0,
     followupsDone: 0,
-    pendingFollowups: 0,
-    seminarTasks: 0,
-    joiningFormalities: 0
+    pendingFollowups: 0
   }
 
   const normalizeSums = (sum) => ({
@@ -151,11 +139,8 @@ export const getDailyBranchReportsService = async (query , user) => {
     counsellingBooked: sum?.counsellingBooked ?? 0,
     officeVisits: sum?.officeVisits ?? 0,
     closures: sum?.closures ?? 0,
-    revenue: sum?.revenue ?? 0,
     followupsDone: sum?.followupsDone ?? 0,
-    pendingFollowups: sum?.pendingFollowups ?? 0,
-    seminarTasks: sum?.seminarTasks ?? 0,
-    joiningFormalities: sum?.joiningFormalities ?? 0
+    pendingFollowups: sum?.pendingFollowups ?? 0
   })
 
   // Branch admin dashboard: show branch data only.

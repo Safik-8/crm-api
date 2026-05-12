@@ -299,11 +299,8 @@ model DailyBranchReport {
   counsellingBooked  Int     @default(0) @map("counselling_booked")
   officeVisits       Int     @default(0) @map("office_visits")
   closures           Int     @default(0) @map("closures")
-  revenue            Decimal @default(0) @map("revenue")
   followupsDone      Int     @default(0) @map("followups_done")
   pendingFollowups   Int     @default(0) @map("pending_followups")
-  seminarTasks       Int     @default(0) @map("seminar_tasks")
-  joiningFormalities Int     @default(0) @map("joining_formalities")
 
   isDeleted   Boolean  @default(false) @map("is_deleted")
   createdById Int      @map("created_by")
