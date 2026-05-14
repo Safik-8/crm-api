@@ -2,85 +2,61 @@
 
 ## Overview
 
-A new pipeline-stage assignment validation has been added to the backend.
-It ensures that a stage can only be removed from a pipeline when that stage contains no active leads in that pipeline.
-
-This is not a global stage deletion rule — it applies only to removing stage assignments from a specific pipeline.
+A stage is now soft-deleted globally (`isDeleted = true`) only when it has no associated lead data anywhere in the system.
+This means the stage can only be removed from the global stage master if no active leads reference it in any pipeline.
 
 ## What changed
 
-- The endpoint `POST /api/pipelines/:id/stages` now checks stage removal before updating pipeline stage assignments.
-- If the frontend removes a stage from a pipeline, the backend will verify whether any non-deleted leads still belong to that stage in the same pipeline.
-- If any leads exist in the removed stage, the request fails with a `400 Bad Request`.
-- This prevents accidental removal of stages that still contain lead data.
+- `DELETE /api/stages/:id` now performs a global validation before soft-deleting a stage.
+- The backend checks all non-deleted leads for the target `stageId`.
+- If any lead exists with that stage, the delete request is rejected.
+- Only when the stage is empty across all pipelines will it be soft-deleted.
 
 ## Why this change exists
 
-Previously, a pipeline could be updated to remove assigned stages without checking if the stage still contained leads.
-That could break lead workflow, produce orphaned stage references, or hide leads in the wrong pipeline state.
+Previously, stages could be soft-deleted even when leads still existed that referenced them.
+That could leave leads attached to deleted stages and cause missing or inconsistent stage data across reports and UI.
 
-With this change, pipeline stage topology remains safe:
-- stages can be reordered freely
-- new stages can be created and added
-- existing stages can only be removed when empty
+With this change:
+- global stage deletion is safe
+- a stage is only soft-deleted when it is truly unused by any lead
+- active leads will always continue to have a valid stage value
 
 ## Backend behavior
 
-When `POST /api/pipelines/:id/stages` is called:
+When `DELETE /api/stages/:id` is called:
 
-1. The backend builds the final pipeline stage set from:
-   - existing stage IDs
-   - newly created stage names
-   - ordered stage IDs
-2. It determines which stages are being removed from the current pipeline assignment.
-3. For each removed stage, it checks whether any leads exist in that stage for the target pipeline.
-4. If any leads exist, the update is rejected with:
+1. The backend verifies the stage exists and is not already deleted.
+2. It rejects requests for default stages like `Prospect`.
+3. It counts all non-deleted leads where `stageId = :id`.
+4. If any leads exist, the request fails with:
    - `400 Bad Request`
-   - message: `Cannot remove stage(s) from pipeline while they contain leads`
-5. If removed stages are empty, the pipeline stage assignment updates succeed.
+   - message: `Stage cannot be deleted because it contains leads`
+5. If no leads exist, the stage is soft-deleted by setting `isDeleted = true`.
 
 ## Frontend usage
 
 ### Endpoint
 
-`POST /api/pipelines/:id/stages`
-
-### Request body example
-
-```json
-{
-  "stageIds": [1, 2, 3],
-  "newStages": [
-    { "name": "Negotiation" }
-  ],
-  "orderedStageIds": [1, 4, 2, 3]
-}
-```
+`DELETE /api/stages/:id`
 
 ### What the frontend should do
 
-- Fetch the current pipeline stage list and display it.
-- Allow the user to add new stages, remove stages, and reorder stages.
-- Build the final stage list using the selected stage IDs and the ordered result.
-- If the user removes a stage, the frontend must be ready to handle a validation error.
+- Confirm with the user before deleting a stage.
+- Call the delete endpoint with the stage ID.
+- If the backend returns `400`, show a clear message:
+  - `This stage cannot be deleted because it still has leads.`
+- If the delete succeeds, remove the stage from the global stage dropdown and pipeline stage lists.
 
-### Recommended UI behavior
+### Example error handling
 
-- When a user deletes a stage from the pipeline and submits the update:
-  - send the new stage configuration to `POST /api/pipelines/:id/stages`
-- If the backend returns a `400` with the delete-stage error:
-  - show a message like: `Cannot remove stage because it still contains leads.`
-  - keep the removed stage visible or highlight it so the user can re-add or move leads first.
-
-### Error handling
-
-If stage removal is blocked, the frontend should:
-- read the returned error message
-- explain to the user that the stage still contains leads
-- guide the user to move or clear those leads before removing the stage
+If the backend response is a `400` error:
+- `error.message = "Stage cannot be deleted because it contains leads"`
+- show a friendly message to users like:
+  - `Cannot delete this stage because it is still used by leads. Move or delete the leads first.`
 
 ## Notes
 
-- `Prospect` and `Closure` are default stages and are still required for pipelines.
-- This rule applies only to stage removal inside a specific pipeline.
-- It does not allow deleting a global stage from the entire system.
+- This rule is global, not pipeline-specific.
+- The stage must be empty across all pipelines.
+- Default stages (`Prospect`, `Closure`) are still protected and cannot be deleted.

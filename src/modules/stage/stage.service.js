@@ -69,6 +69,13 @@ export const deleteStageService = async (id, actor) => {
   if (!stage || stage.isDeleted) throw new NotFoundError("Stage")
   if (stage.isDefault) throw new BadRequestError("Default stage cannot be deleted")
 
+  const leadCount = await prisma.lead.count({
+    where: { stageId, isDeleted: false }
+  })
+  if (leadCount > 0) {
+    throw new BadRequestError("Stage cannot be deleted because it contains leads")
+  }
+
   return prisma.stage.update({
     where: { id: stageId },
     data: { isDeleted: true, updatedById: actor.id }

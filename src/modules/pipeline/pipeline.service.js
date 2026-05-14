@@ -327,27 +327,6 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
       ordered = [prospect.id, ...rest, closure.id]
     }
 
-    const existingPipelineStages = await tx.pipelineStage.findMany({
-      where: { pipelineId: pid },
-      select: { stageId: true }
-    })
-    const existingStageIds = existingPipelineStages.map(ps => ps.stageId)
-    const finalStageSet = new Set(finalStageIds)
-    const removedStageIds = existingStageIds.filter(id => !finalStageSet.has(id))
-
-    if (removedStageIds.length) {
-      const leadsInRemovedStages = await tx.lead.count({
-        where: {
-          pipelineId: pid,
-          stageId: { in: removedStageIds },
-          isDeleted: false
-        }
-      })
-      if (leadsInRemovedStages > 0) {
-        throw new BadRequestError("Cannot remove stage(s) from pipeline while they contain leads")
-      }
-    }
-
     await tx.pipelineStage.deleteMany({ where: { pipelineId: pid } })
     await tx.pipelineStage.createMany({
       data: ordered.map((stageId, idx) => ({
