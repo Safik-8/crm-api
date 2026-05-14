@@ -75,6 +75,18 @@ export const deleteStageService = async (id, actor) => {
   })
 }
 
+const normalizePipelineStagesOrder = (stages) => {
+  if (!Array.isArray(stages)) return stages
+  const prospect = stages.find(s => s.stage.name === "Prospect")
+  const closure = stages.find(s => s.stage.name === "Closure")
+  const middle = stages.filter(s => s.stage.name !== "Prospect" && s.stage.name !== "Closure")
+  const ordered = []
+  if (prospect) ordered.push(prospect)
+  ordered.push(...middle)
+  if (closure) ordered.push(closure)
+  return ordered
+}
+
 export const getStagesForPipelineService = async (pipelineId, actor) => {
   const pid = Number(pipelineId)
   if (!Number.isInteger(pid) || pid < 1) throw new BadRequestError("Invalid pipeline id")
@@ -95,7 +107,7 @@ export const getStagesForPipelineService = async (pipelineId, actor) => {
     include: { stage: true }
   })
 
-  return pipelineStages.map(ps => ({
+  return normalizePipelineStagesOrder(pipelineStages).map(ps => ({
     id: ps.stage.id,
     name: ps.stage.name,
     isDefault: ps.stage.isDefault,

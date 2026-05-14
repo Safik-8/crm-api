@@ -45,34 +45,50 @@ const assertPipelineScope = (actor, pipeline) => {
   if (actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
 }
 
-const ensureProspectStage = async (tx, actorId) => {
-  const existing = await tx.stage.findFirst({
-    where: { OR: [{ isDefault: true }, { name: "Prospect" }] }
-  })
-  if (existing) {
-    if (existing.isDeleted) {
-      return tx.stage.update({
-        where: { id: existing.id },
-        data: { isDeleted: false, isDefault: true, updatedById: actorId }
+const normalizePipelineStagesOrder = (stages) => {
+  if (!Array.isArray(stages)) return stages
+  const prospect = stages.find(s => s.name === "Prospect")
+  const closure = stages.find(s => s.name === "Closure")
+  const middle = stages.filter(s => s.name !== "Prospect" && s.name !== "Closure")
+  const ordered = []
+  if (prospect) ordered.push(prospect)
+  ordered.push(...middle)
+  if (closure) ordered.push(closure)
+  return ordered
+}
+
+const ensureDefaultStages = async (tx, actorId) => {
+  const stageNames = ["Prospect", "Closure"]
+  const stages = {}
+
+  for (const name of stageNames) {
+    let stage = await tx.stage.findUnique({
+      where: { name },
+      select: { id: true, isDefault: true, isDeleted: true }
+    })
+
+    if (stage) {
+      if (stage.isDeleted || !stage.isDefault) {
+        stage = await tx.stage.update({
+          where: { id: stage.id },
+          data: { isDeleted: false, isDefault: true, updatedById: actorId }
+        })
+      }
+    } else {
+      stage = await tx.stage.create({
+        data: {
+          name,
+          isDefault: true,
+          isDeleted: false,
+          createdById: actorId
+        }
       })
     }
-    if (!existing.isDefault) {
-      return tx.stage.update({
-        where: { id: existing.id },
-        data: { isDefault: true, updatedById: actorId }
-      })
-    }
-    return existing
+
+    stages[name] = stage
   }
 
-  return tx.stage.create({
-    data: {
-      name: "Prospect",
-      isDefault: true,
-      isDeleted: false,
-      createdById: actorId
-    }
-  })
+  return stages
 }
 
 export const createPipelineService = async (data, actor) => {
@@ -81,7 +97,7 @@ export const createPipelineService = async (data, actor) => {
 
   const { companyId, branchId } = await resolveOrgContext(data, actor)
 
-  // Rule: Every pipeline MUST have "Prospect" stage assigned.
+  // Rule: Every pipeline MUST have Prospect first and Closure last.
   return prisma.$transaction(async (tx) => {
     const pipeline = await tx.pipeline.create({
       data: {
@@ -93,16 +109,13 @@ export const createPipelineService = async (data, actor) => {
       }
     })
 
-    const prospect = await ensureProspectStage(tx, actor.id)
+    const { Prospect: prospect, Closure: closure } = await ensureDefaultStages(tx, actor.id)
 
-    await tx.pipelineStage.upsert({
-      where: { pipelineId_stageId: { pipelineId: pipeline.id, stageId: prospect.id } },
-      update: { orderNo: 1 },
-      create: {
-        pipelineId: pipeline.id,
-        stageId: prospect.id,
-        orderNo: 1
-      }
+    await tx.pipelineStage.createMany({
+      data: [
+        { pipelineId: pipeline.id, stageId: prospect.id, orderNo: 1 },
+        { pipelineId: pipeline.id, stageId: closure.id, orderNo: 2 }
+      ]
     })
 
     return pipeline
@@ -114,6 +127,18 @@ export const listPipelinesService = async (query, actor) => {
 
   if (actor.companyId) where.companyId = actor.companyId
   if (actor.branchId) where.branchId = actor.branchId
+
+  if (query?.name) {
+    const search = normalizeName(query.name)
+    if (search) {
+      where.name = { contains: search, mode: "insensitive" }
+    }
+  }
+
+  const iseId = Number(query?.iseId ?? query?.ise)
+  if (Number.isInteger(iseId) && iseId > 0) {
+    where.createdById = iseId
+  }
 
   if (!actor.branchId && query?.branchId) {
     where.branchId = Number(query.branchId)
@@ -159,7 +184,7 @@ export const listPipelinesService = async (query, actor) => {
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     leadCount: countsByPipelineId.get(p.id) ?? 0,
-    stages: p.stages.map(ps => ({
+    stages: normalizePipelineStagesOrder(p.stages).map(ps => ({
       id: ps.stage.id,
       name: ps.stage.name,
       isDefault: ps.stage.isDefault,
@@ -191,7 +216,7 @@ export const getPipelineDetailsService = async (id, actor) => {
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
-  const stages = pipeline.stages.map(ps => ({
+  const stages = normalizePipelineStagesOrder(pipeline.stages).map(ps => ({
     id: ps.stage.id,
     name: ps.stage.name,
     isDefault: ps.stage.isDefault,
@@ -254,7 +279,7 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
   const orderedStageIds = Array.isArray(data?.orderedStageIds) ? data.orderedStageIds.map(Number).filter(n => Number.isInteger(n) && n > 0) : null
 
   return prisma.$transaction(async (tx) => {
-    const prospect = await ensureProspectStage(tx, actor.id)
+    const { Prospect: prospect, Closure: closure } = await ensureDefaultStages(tx, actor.id)
 
     const createdStageIds = []
     for (const s of newStages) {
@@ -282,7 +307,7 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
       }
     }
 
-    const set = new Set([prospect.id, ...incomingStageIds, ...createdStageIds])
+    const set = new Set([prospect.id, closure.id, ...incomingStageIds, ...createdStageIds])
     const finalStageIds = [...set]
 
     let ordered = finalStageIds
@@ -293,16 +318,18 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
         finalStageIds.every(id => orderedSet.has(id))
 
       if (!same) throw new BadRequestError("orderedStageIds must contain the same stage ids being assigned")
+      if (orderedStageIds[0] !== prospect.id) throw new BadRequestError("Prospect stage must come first")
+      if (orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
+
       ordered = orderedStageIds
     } else {
-      // default order: Prospect first, then rest by name
-      const stages = await tx.stage.findMany({ where: { id: { in: finalStageIds } }, select: { id: true, name: true, isDefault: true } })
-      const prospectId = prospect.id
+      // default order: Prospect first, closure last, then other stages by name
+      const stages = await tx.stage.findMany({ where: { id: { in: finalStageIds } }, select: { id: true, name: true } })
       const rest = stages
-        .filter(s => s.id !== prospectId)
+        .filter(s => s.id !== prospect.id && s.id !== closure.id)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(s => s.id)
-      ordered = [prospectId, ...rest]
+      ordered = [prospect.id, ...rest, closure.id]
     }
 
     await tx.pipelineStage.deleteMany({ where: { pipelineId: pid } })
@@ -355,8 +382,12 @@ export const updatePipelineStageOrderService = async (pipelineId, data, actor) =
     if (!same) throw new BadRequestError("orderedStageIds must match existing pipeline stages")
 
     // Prospect must remain included; if not present, it's invalid
-    const prospect = await tx.stage.findFirst({ where: { isDefault: true, isDeleted: false }, select: { id: true } })
+    const prospect = await tx.stage.findUnique({ where: { name: "Prospect" }, select: { id: true } })
+    const closure = await tx.stage.findUnique({ where: { name: "Closure" }, select: { id: true } })
     if (prospect && !orderedSet.has(prospect.id)) throw new BadRequestError("Prospect stage must be included")
+    if (closure && !orderedSet.has(closure.id)) throw new BadRequestError("Closure stage must be included")
+    if (prospect && orderedStageIds[0] !== prospect.id) throw new BadRequestError("Prospect stage must come first")
+    if (closure && orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
 
     for (let i = 0; i < orderedStageIds.length; i++) {
       const stageId = orderedStageIds[i]

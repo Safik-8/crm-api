@@ -29,11 +29,11 @@ export const createLeadService = async (data, actor) => {
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
-  const prospectStage = await prisma.stage.findFirst({
-    where: { isDefault: true, isDeleted: false },
-    select: { id: true }
+  const prospectStage = await prisma.stage.findUnique({
+    where: { name: "Prospect" },
+    select: { id: true, isDeleted: true }
   })
-  if (!prospectStage) throw new BadRequestError('Default stage "Prospect" is missing. Re-run server init.')
+  if (!prospectStage || prospectStage.isDeleted) throw new BadRequestError('Default stage "Prospect" is missing. Re-run server init.')
 
   const mapping = await prisma.pipelineStage.findUnique({
     where: { pipelineId_stageId: { pipelineId, stageId: prospectStage.id } },
