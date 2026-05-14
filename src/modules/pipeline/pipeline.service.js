@@ -128,16 +128,11 @@ export const listPipelinesService = async (query, actor) => {
   if (actor.companyId) where.companyId = actor.companyId
   if (actor.branchId) where.branchId = actor.branchId
 
-  if (query?.name) {
-    const search = normalizeName(query.name)
+  if (query?.leadName) {
+    const search = normalizeName(query.leadName)
     if (search) {
-      where.name = { contains: search, mode: "insensitive" }
+      where.leads = { some: { name: { contains: search, mode: "insensitive" }, isDeleted: false } }
     }
-  }
-
-  const iseId = Number(query?.iseId ?? query?.ise)
-  if (Number.isInteger(iseId) && iseId > 0) {
-    where.createdById = iseId
   }
 
   if (!actor.branchId && query?.branchId) {
@@ -330,6 +325,27 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(s => s.id)
       ordered = [prospect.id, ...rest, closure.id]
+    }
+
+    const existingPipelineStages = await tx.pipelineStage.findMany({
+      where: { pipelineId: pid },
+      select: { stageId: true }
+    })
+    const existingStageIds = existingPipelineStages.map(ps => ps.stageId)
+    const finalStageSet = new Set(finalStageIds)
+    const removedStageIds = existingStageIds.filter(id => !finalStageSet.has(id))
+
+    if (removedStageIds.length) {
+      const leadsInRemovedStages = await tx.lead.count({
+        where: {
+          pipelineId: pid,
+          stageId: { in: removedStageIds },
+          isDeleted: false
+        }
+      })
+      if (leadsInRemovedStages > 0) {
+        throw new BadRequestError("Cannot remove stage(s) from pipeline while they contain leads")
+      }
     }
 
     await tx.pipelineStage.deleteMany({ where: { pipelineId: pid } })

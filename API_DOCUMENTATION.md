@@ -1443,25 +1443,6 @@ List pipelines (scoped by company/branch of the logged-in user).
 
 **Permission**: `PIPELINE:canView`
 
-**Query parameters**
-
-- `name` (string, optional)
-  - search by pipeline name using case-insensitive partial matching.
-  - example: `GET /api/pipelines?name=admissions`
-- `iseId` (integer, optional)
-  - filter pipelines created by a specific ISE user.
-  - use the ISE dropdown key value pair from your front-end user list: `{ key: user.id, value: user.name }`.
-- `ise` (integer, optional)
-  - alias for `iseId`.
-- `branchId` (integer, optional)
-  - allowed for company-level users and super admins.
-
-**Notes**
-
-- The pipeline list is always scoped to the logged-in user's company/branch.
-- If a branch-level user is logged in, they only see pipelines for their branch.
-- The response includes pipeline stages ordered with `Prospect` first and `Closure` last.
-
 **Success (200)**: `data = { "pipelines": [ ... ] }`
 
 ---
