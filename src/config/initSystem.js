@@ -12,6 +12,7 @@ const ROLES = [
     { name: "BRANCH_ADMIN", description: "Full branch access" },
     { name: "MANAGER", description: "Team view and approvals" },
     { name: "ISE", description: "Own prospects only" },
+    { name: "SALES_TEAM", description: "Sales team access with ISE permissions" },
 ]
 
 // ══════════════════════════════════════
@@ -109,6 +110,23 @@ const ROLE_PERMISSIONS = {
     },
 
     ISE: {
+        COMPANY: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        BRANCH: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        USER: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        PROSPECT: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        ACTIVITY: { canView: true, canCreate: true, canEdit: false, canDelete: false },
+        TASK: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        PIPELINE: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        STAGE: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        SESSION: { canView: true, canCreate: true, canEdit: false, canDelete: false },
+        REPORT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        TARGET: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+    },
+
+    SALES_TEAM: {
         COMPANY: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         BRANCH: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         USER: { canView: false, canCreate: false, canEdit: false, canDelete: false },
