@@ -252,9 +252,24 @@ export const getLeadCommentsService = async (leadId, actor) => {
 //   • Interested At — optional, text, max 200 chars
 //   • Assign To   — optional, must match an active branch user's name
 //
-// Extra / unknown columns in the sheet → whole-file error (rejected upfront)
-// Each row that fails → added to `failed[]` with clear messages
-// Each row that passes → inserted via createLeadService (identical to form)
+// ══════════════════════════════════════════════════════════════════
+// BULK IMPORT LEADS FROM EXCEL  — ALL OR NOTHING
+//
+// Allowed columns (exactly these 5, no more, no less required ones):
+//   Name* | Phone Number* | Date* | Interested At | Assign To
+//
+// Two-pass approach:
+//   PASS 1 — Validate every row. Collect ALL errors across ALL rows.
+//            If even one row fails → return all errors, insert NOTHING.
+//   PASS 2 — Only runs when every row is valid. Insert all rows.
+//
+// Validation per row:
+//   • Name        — required, text only, max 100 chars
+//   • Phone Number— required, digits only (spaces/dashes stripped),
+//                   7–15 digits, not already in DB, not duplicate in file
+//   • Date        — required, stored as UTC midnight (YYYY-MM-DD 00:00:00)
+//   • Interested At — optional, text, max 200 chars
+//   • Assign To   — optional, must match an active branch user's name
 // ══════════════════════════════════════════════════════════════════
 export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor) => {
   if (!fileBuffer) throw new BadRequestError("No file provided")
@@ -418,25 +433,26 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
   // Store as a Set for O(1) lookup
   const existingMobiles = new Set(existingLeads.map((l) => l.mobile))
 
-  // ── 8. Process each row ────────────────────────────────────────
-  const succeeded  = []
-  const failed     = []
-  // Track mobiles seen within this Excel file to catch in-file duplicates
-  const seenInFile = new Set()
+  // ── 8. PASS 1 — Validate ALL rows first, collect every error ──────
+  // Nothing is written to the DB in this pass.
+  // If even one row has an error, the entire import is aborted.
+  const validatedRows = []   // rows that passed — ready to insert
+  const validationErrors = [] // rows that failed — returned to frontend
+  const seenInFile = new Set() // catch duplicate mobiles within the file
 
   for (let i = 0; i < rows.length; i++) {
     const row    = rows[i]
     const rowNum = i + 2  // row 1 = header → first data row = 2
     const rowErrors = []
 
-    // ── Extract raw values ──────────────────────────────────
+    // ── Extract raw values ────────────────────────────────────
     const rawName       = normalize(row[colName])
     const rawMobile     = normalize(row[colMobile])
     const rawDate       = row[colDate]
     const rawInterested = colInterested ? normalize(row[colInterested]) : ""
     const rawAssignTo   = colAssignTo   ? normalize(row[colAssignTo])   : ""
 
-    // ── Validate Name ───────────────────────────────────────
+    // ── Validate Name ─────────────────────────────────────────
     if (!rawName) {
       rowErrors.push("Name is required")
     } else if (rawName.length > 100) {
@@ -445,8 +461,7 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
       rowErrors.push("Name must not contain numbers")
     }
 
-    // ── Validate Phone Number ───────────────────────────────
-    // Strip spaces, dashes, parentheses then check digits only
+    // ── Validate Phone Number ─────────────────────────────────
     const mobileClean = String(rawMobile).replace(/[\s\-().+]/g, "")
     if (!rawMobile) {
       rowErrors.push("Phone Number is required")
@@ -454,23 +469,18 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
       rowErrors.push(`Phone Number must contain digits only — got "${rawMobile}"`)
     } else if (mobileClean.length < 7 || mobileClean.length > 15) {
       rowErrors.push(`Phone Number must be 7–15 digits — got ${mobileClean.length} digit(s)`)
-    }
-
-    // ── Duplicate mobile check ──────────────────────────────
-    // Check 1: already exists in the database
-    if (mobileClean && existingMobiles.has(mobileClean)) {
+    } else if (existingMobiles.has(mobileClean)) {
+      // Already in the database
       rowErrors.push(`Phone Number "${mobileClean}" is already registered in the system`)
-    }
-    // Check 2: duplicate within this Excel file (same number appears twice)
-    else if (mobileClean && seenInFile.has(mobileClean)) {
+    } else if (seenInFile.has(mobileClean)) {
+      // Duplicate within this Excel file
       rowErrors.push(`Phone Number "${mobileClean}" appears more than once in this Excel file`)
-    }
-    // If valid and not duplicate, mark as seen for subsequent rows
-    else if (mobileClean && /^\d+$/.test(mobileClean)) {
+    } else {
+      // Valid and unique — track it for subsequent rows
       seenInFile.add(mobileClean)
     }
 
-    // ── Validate Date ───────────────────────────────────────
+    // ── Validate Date ─────────────────────────────────────────
     let parsedDate = null
     if (!rawDate && rawDate !== 0) {
       rowErrors.push("Date is required")
@@ -484,14 +494,12 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
       }
     }
 
-    // ── Validate Interested At (optional) ───────────────────
+    // ── Validate Interested At (optional) ─────────────────────
     if (rawInterested && rawInterested.length > 200) {
       rowErrors.push("Interested At must be 200 characters or less")
     }
 
-    // ── Validate Assign To (optional) ───────────────────────
-    // Name must match an ACTIVE user in the logged-in user's branch (DB verified above).
-    // Matching is case-insensitive. If the name is present but not found → row fails.
+    // ── Validate Assign To (optional) ─────────────────────────
     let assignedToId = null
     if (rawAssignTo) {
       const matchedUser = findUserByName(rawAssignTo)
@@ -505,27 +513,46 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
       }
     }
 
-    // ── If any row errors, skip this row ────────────────────
     if (rowErrors.length > 0) {
-      failed.push({
+      // Row failed — record errors, do NOT add to validatedRows
+      validationErrors.push({
         row:    rowNum,
         data:   { name: rawName, mobile: rawMobile },
         errors: rowErrors
       })
-      continue
+    } else {
+      // Row passed — store the cleaned payload for PASS 2
+      validatedRows.push({
+        rowNum,
+        payload: {
+          pipelineId:    pid,
+          name:          rawName,
+          mobile:        mobileClean,
+          date:          parsedDate.toISOString(),
+          interestedFor: rawInterested || undefined,
+          assignedToId
+        }
+      })
     }
+  }
 
-    // ── Build payload — same shape as the form POST ─────────
-    const payload = {
-      pipelineId:    pid,
-      name:          rawName,
-      mobile:        mobileClean,          // store cleaned digits only
-      date:          parsedDate.toISOString(), // UTC midnight ISO string
-      interestedFor: rawInterested || undefined,
-      assignedToId:  assignedToId
+  // ── If ANY row failed validation — abort entirely, insert nothing ──
+  if (validationErrors.length > 0) {
+    return {
+      total:     rows.length,
+      created:   0,
+      skipped:   validationErrors.length,
+      succeeded: [],
+      failed:    validationErrors,
+      message:   `Import aborted — ${validationErrors.length} row(s) have errors. Fix all errors and re-upload. No data was saved.`
     }
+  }
 
-    // ── Insert via createLeadService (identical to form submit) ─
+  // ── 9. PASS 2 — All rows valid, insert all into DB ────────────
+  const succeeded = []
+  const insertErrors = []
+
+  for (const { rowNum, payload } of validatedRows) {
     try {
       const lead = await createLeadService(payload, actor)
       succeeded.push({
@@ -539,9 +566,9 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
       const messages = err.errors
         ? err.errors.map((e) => e.message)
         : [err.message ?? "Unknown error"]
-      failed.push({
+      insertErrors.push({
         row:    rowNum,
-        data:   { name: rawName, mobile: rawMobile },
+        data:   { name: payload.name, mobile: payload.mobile },
         errors: messages
       })
     }
@@ -550,8 +577,8 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
   return {
     total:     rows.length,
     created:   succeeded.length,
-    skipped:   failed.length,
+    skipped:   insertErrors.length,
     succeeded,
-    failed
+    failed:    insertErrors
   }
 }
