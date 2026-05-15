@@ -621,3 +621,191 @@ Frontend shows summary + table of failed rows (if any)
        ↓
 User fixes failed rows in Excel and re-uploads if needed
 ```
+
+---
+
+---
+
+# Excel Import — Validation Rules (Updated)
+
+This section documents all validation rules enforced by the backend on the uploaded Excel file. Every error is returned to the frontend with a clear message so the user knows exactly what to fix.
+
+---
+
+## File-Level Validation
+
+These checks run before any row is processed. If any of these fail, the **entire upload is rejected** with a `400` response — no rows are inserted.
+
+| Check | Error Message Returned |
+|---|---|
+| No file sent | `"No file uploaded. Send the Excel file as form-data field named 'file'."` |
+| File is not a valid `.xlsx` / `.xls` | `"Failed to parse Excel file. Make sure it is a valid .xlsx / .xls file."` |
+| File has no data rows (empty sheet) | `"Excel file is empty or has no data rows"` |
+| Sheet contains **unknown / extra columns** | `"Excel contains unknown column(s): \"XYZ\". Allowed columns are: Name, Phone Number, Date, Interested At, Assign To."` |
+| Required column `Name` is missing | `"Excel is missing required column \"Name\""` |
+| Required column `Phone Number` is missing | `"Excel is missing required column \"Phone Number\""` |
+| Required column `Date` is missing | `"Excel is missing required column \"Date\""` |
+| `pipelineId` missing or not a valid number | `"pipelineId is required"` |
+| Pipeline not found or deleted | `"Pipeline not found"` |
+
+> **No extra columns allowed.** If the sheet has any column that is not one of the 5 allowed ones (`Name`, `Phone Number`, `Date`, `Interested At`, `Assign To`), the whole file is rejected immediately. The user must remove those columns before re-uploading.
+
+---
+
+## Row-Level Validation
+
+These checks run on each individual row. A row that fails is **skipped** (not inserted) and added to the `failed[]` array in the response. All other valid rows are still saved — a bad row does not stop the rest.
+
+### Name
+
+| Rule | Error Message |
+|---|---|
+| Empty / blank | `"Name is required"` |
+| Contains digits | `"Name must not contain numbers"` |
+| More than 100 characters | `"Name must be 100 characters or less"` |
+
+### Phone Number
+
+| Rule | Error Message |
+|---|---|
+| Empty / blank | `"Phone Number is required"` |
+| Contains letters or non-numeric characters (after stripping spaces, dashes, `+`, `()`) | `"Phone Number must contain digits only — got \"9876abc\""` |
+| Less than 7 digits | `"Phone Number must be 7–15 digits — got 4 digit(s)"` |
+| More than 15 digits | `"Phone Number must be 7–15 digits — got 16 digit(s)"` |
+
+> Phone numbers are **cleaned before storing** — spaces, dashes, `+`, and parentheses are stripped. Only the raw digits are saved to the database. So `+91 98765-43210` is stored as `919876543210`.
+
+### Date
+
+| Rule | Error Message |
+|---|---|
+| Empty / blank | `"Date is required"` |
+| Unrecognised format | `"Date \"32/13/2026\" is not a valid date. Use formats: YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, or a native Excel date cell."` |
+
+**Accepted date formats:**
+
+| Format | Example |
+|---|---|
+| `YYYY-MM-DD` | `2026-05-15` |
+| `DD-MM-YYYY` | `15-05-2026` |
+| `DD/MM/YYYY` | `15/05/2026` |
+| `YYYY/MM/DD` | `2026/05/15` |
+| `DD-MMM-YYYY` | `15-May-2026` |
+| Native Excel date cell | *(formatted as a date in Excel)* |
+
+> **How dates are stored in the database:** All dates are stored as **UTC midnight** (`2026-05-15T00:00:00.000Z`). This means no matter what timezone the server or client is in, the date value in the DB is always clean and consistent — just the date, no time component.
+
+### Interested At (optional)
+
+| Rule | Error Message |
+|---|---|
+| More than 200 characters | `"Interested At must be 200 characters or less"` |
+
+If left blank, it is stored as `NULL` in the database — same as leaving it empty on the form.
+
+### Assign To (optional)
+
+| Rule | Error Message |
+|---|---|
+| Name does not match any active user in the branch | `"Assign To: user \"John\" not found in this branch"` |
+
+- Matching is **case-insensitive** — `"arjun mehta"` matches `"Arjun Mehta"`.
+- The user must be **active** (`status = "ACTIVE"`) and belong to the **same branch** as the logged-in user.
+- If left blank, the lead is created as **Unassigned** (`assigned_to = NULL`).
+
+---
+
+## What the Failed Row Response Looks Like
+
+When rows fail, the response still returns `200` (the request itself succeeded — some rows just had errors). The `failed[]` array contains one entry per bad row:
+
+```json
+{
+  "success": true,
+  "message": "Import complete. 2 lead(s) created, 3 skipped.",
+  "data": {
+    "total": 5,
+    "created": 2,
+    "skipped": 3,
+    "succeeded": [
+      { "row": 2, "leadId": 101, "name": "Rahul Verma", "mobile": "9876543210", "date": "2026-05-15T00:00:00.000Z" },
+      { "row": 3, "leadId": 102, "name": "Priya Nair",  "mobile": "9123456780", "date": "2026-05-16T00:00:00.000Z" }
+    ],
+    "failed": [
+      {
+        "row": 4,
+        "data": { "name": "John123", "mobile": "abc" },
+        "errors": [
+          "Name must not contain numbers",
+          "Phone Number must contain digits only — got \"abc\""
+        ]
+      },
+      {
+        "row": 5,
+        "data": { "name": "", "mobile": "9000000001" },
+        "errors": ["Name is required"]
+      },
+      {
+        "row": 6,
+        "data": { "name": "Amit Shah", "mobile": "9111111111" },
+        "errors": ["Date \"32/13/2026\" is not a valid date. Use formats: YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, or a native Excel date cell."]
+      }
+    ]
+  }
+}
+```
+
+Key points for the frontend:
+- `row` is the **actual Excel row number** (row 2 = first data row after the header). Show this to the user so they can find the exact row in their file.
+- `errors` is an **array** — a single row can have multiple errors at once (e.g. both name and phone are wrong).
+- `data` contains the raw values from that row so the user can see what was in the cell.
+
+---
+
+## How to Display Errors to the User
+
+Show a table of failed rows after the import completes:
+
+```jsx
+{importResult?.failed?.length > 0 && (
+  <table>
+    <thead>
+      <tr>
+        <th>Excel Row #</th>
+        <th>Name</th>
+        <th>Mobile</th>
+        <th>Error(s)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {importResult.failed.map((f) => (
+        <tr key={f.row}>
+          <td>{f.row}</td>
+          <td>{f.data.name || "—"}</td>
+          <td>{f.data.mobile || "—"}</td>
+          <td>
+            <ul>
+              {f.errors.map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+)}
+```
+
+---
+
+## Updated Common Mistakes Table
+
+| Mistake | What Happens | Fix |
+|---|---|---|
+| Sheet has extra columns (e.g. `Email`, `Notes`) | Whole file rejected — `400` with column names listed | Remove extra columns, keep only the 5 allowed ones |
+| Phone number has letters (`98abc`) | That row skipped | Use digits only |
+| Phone number too short (e.g. `123`) | That row skipped | Must be 7–15 digits |
+| Name has numbers (`John2`) | That row skipped | Names must be text only |
+| Date in wrong format (`May 15`) | That row skipped | Use `YYYY-MM-DD`, `DD-MM-YYYY`, or a native Excel date cell |
+| `Assign To` name has a typo | That row skipped | Name must exactly match an active branch user |
+| `Interested At` is very long | That row skipped | Keep it under 200 characters |
+| File over 5 MB | Whole file rejected — `400` | Split into smaller files or remove unused rows/columns |

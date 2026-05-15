@@ -238,22 +238,31 @@ export const getLeadCommentsService = async (leadId, actor) => {
 }
 
 
-// ══════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 // BULK IMPORT LEADS FROM EXCEL
-// Each row is converted into the exact same payload shape as the
-// single-lead form and passed through createLeadService — so every
-// validation rule, scope check, and DB write is 100% identical.
 //
-// Expected columns (case-insensitive):
-//   name | phone number | date | interested at | assign to
-// ══════════════════════════════════════
+// Allowed columns (exactly these 5, no more, no less required ones):
+//   Name* | Phone Number* | Date* | Interested At | Assign To
+//
+// Validation per row:
+//   • Name        — required, text only, max 100 chars
+//   • Phone Number— required, digits only (spaces/dashes stripped),
+//                   must be 7–15 digits
+//   • Date        — required, stored as UTC midnight (YYYY-MM-DD 00:00:00)
+//   • Interested At — optional, text, max 200 chars
+//   • Assign To   — optional, must match an active branch user's name
+//
+// Extra / unknown columns in the sheet → whole-file error (rejected upfront)
+// Each row that fails → added to `failed[]` with clear messages
+// Each row that passes → inserted via createLeadService (identical to form)
+// ══════════════════════════════════════════════════════════════════
 export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor) => {
   if (!fileBuffer) throw new BadRequestError("No file provided")
 
   const pid = Number(pipelineId)
   if (!Number.isInteger(pid) || pid < 1) throw new BadRequestError("pipelineId is required")
 
-  // ── 1. Parse Excel ────────────────────────────────────────
+  // ── 1. Parse Excel ─────────────────────────────────────────────
   let rows
   try {
     const workbook = XLSX.read(fileBuffer, { type: "buffer", cellDates: true })
@@ -265,14 +274,20 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
 
   if (!rows || rows.length === 0) throw new BadRequestError("Excel file is empty or has no data rows")
 
-  // ── 2. Map flexible column headers to fixed field names ───
-  const HEADER_MAP = {
-    name:         ["name"],
-    mobile:       ["phone number", "phonenumber", "phone", "mobile"],
-    date:         ["date"],
-    interestedFor:["interested at", "interestedat", "interested_at", "interested for"],
-    assignTo:     ["assign to", "assignto", "assigned to", "assignedto"]
-  }
+  // ── 2. Define allowed columns & their aliases ──────────────────
+  // Each entry: { key, aliases, required }
+  const ALLOWED_COLUMNS = [
+    { key: "name",         aliases: ["name"],                                                              required: true  },
+    { key: "mobile",       aliases: ["phone number", "phonenumber", "phone", "mobile"],                    required: true  },
+    { key: "date",         aliases: ["date"],                                                              required: true  },
+    { key: "interestedFor",aliases: ["interested at", "interestedat", "interested_at", "interested for"],  required: false },
+    { key: "assignTo",     aliases: ["assign to", "assignto", "assigned to", "assignedto"],                required: false }
+  ]
+
+  // Build a flat set of ALL known aliases (lowercased) for unknown-column detection
+  const ALL_KNOWN_ALIASES = new Set(
+    ALLOWED_COLUMNS.flatMap((c) => c.aliases)
+  )
 
   const findCol = (rowKeys, aliases) => {
     const lower = rowKeys.map((k) => ({ orig: k, low: String(k).toLowerCase().trim() }))
@@ -283,20 +298,32 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
     return null
   }
 
-  const sampleKeys = Object.keys(rows[0])
-  const colName       = findCol(sampleKeys, HEADER_MAP.name)
-  const colMobile     = findCol(sampleKeys, HEADER_MAP.mobile)
-  const colDate       = findCol(sampleKeys, HEADER_MAP.date)
-  const colInterested = findCol(sampleKeys, HEADER_MAP.interestedFor)
-  const colAssignTo   = findCol(sampleKeys, HEADER_MAP.assignTo)
+  const sheetKeys = Object.keys(rows[0])
 
+  // ── 3. Reject unknown / extra columns upfront ──────────────────
+  const unknownCols = sheetKeys.filter(
+    (k) => !ALL_KNOWN_ALIASES.has(String(k).toLowerCase().trim())
+  )
+  if (unknownCols.length > 0) {
+    throw new BadRequestError(
+      `Excel contains unknown column(s): "${unknownCols.join('", "')}". ` +
+      `Allowed columns are: Name, Phone Number, Date, Interested At, Assign To.`
+    )
+  }
+
+  // ── 4. Resolve column names from the sheet ─────────────────────
+  const colName       = findCol(sheetKeys, ALLOWED_COLUMNS[0].aliases)
+  const colMobile     = findCol(sheetKeys, ALLOWED_COLUMNS[1].aliases)
+  const colDate       = findCol(sheetKeys, ALLOWED_COLUMNS[2].aliases)
+  const colInterested = findCol(sheetKeys, ALLOWED_COLUMNS[3].aliases)
+  const colAssignTo   = findCol(sheetKeys, ALLOWED_COLUMNS[4].aliases)
+
+  // Required columns must be present
   if (!colName)   throw new BadRequestError('Excel is missing required column "Name"')
   if (!colMobile) throw new BadRequestError('Excel is missing required column "Phone Number"')
   if (!colDate)   throw new BadRequestError('Excel is missing required column "Date"')
 
-  // ── 3. Pre-fetch branch users once for "Assign To" name → id lookup ──
-  // The name in the Excel cell is resolved to a userId here, then passed
-  // into createLeadService as assignedToId — same as the form does.
+  // ── 5. Pre-fetch branch users once for "Assign To" lookup ──────
   const branchUsers = actor.branchId
     ? await prisma.user.findMany({
         where: { branchId: actor.branchId, status: "ACTIVE" },
@@ -310,68 +337,152 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
     return branchUsers.find((u) => u.name.toLowerCase().trim() === needle) ?? null
   }
 
-  // ── 4. Process each row through createLeadService ─────────
+  // ── 6. Helper: parse a date value from Excel into UTC midnight ──
+  // Stores as YYYY-MM-DDT00:00:00.000Z so the DB always gets a clean date
+  const parseExcelDate = (raw) => {
+    // Case A: xlsx already parsed it as a JS Date (native Excel date cell)
+    if (raw instanceof Date) {
+      if (Number.isNaN(raw.getTime())) return null
+      // Use the local date parts from the Excel cell (year/month/day)
+      // and store as UTC midnight to avoid timezone shifts
+      const y = raw.getFullYear()
+      const m = String(raw.getMonth() + 1).padStart(2, "0")
+      const d = String(raw.getDate()).padStart(2, "0")
+      return new Date(`${y}-${m}-${d}T00:00:00.000Z`)
+    }
+
+    // Case B: string cell — try common formats
+    const str = String(raw).trim()
+    if (!str) return null
+
+    // Try ISO: YYYY-MM-DD or YYYY/MM/DD
+    let m1 = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/)
+    if (m1) {
+      const d = new Date(`${m1[1]}-${m1[2].padStart(2,"0")}-${m1[3].padStart(2,"0")}T00:00:00.000Z`)
+      return Number.isNaN(d.getTime()) ? null : d
+    }
+
+    // Try DD-MM-YYYY or DD/MM/YYYY
+    let m2 = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
+    if (m2) {
+      const d = new Date(`${m2[3]}-${m2[2].padStart(2,"0")}-${m2[1].padStart(2,"0")}T00:00:00.000Z`)
+      return Number.isNaN(d.getTime()) ? null : d
+    }
+
+    // Try DD-MMM-YYYY  e.g. 15-May-2026
+    let m3 = str.match(/^(\d{1,2})[-\s]([A-Za-z]{3,9})[-\s](\d{4})$/)
+    if (m3) {
+      const d = new Date(`${m3[1]} ${m3[2]} ${m3[3]}`)
+      if (!Number.isNaN(d.getTime())) {
+        const y = d.getFullYear()
+        const mo = String(d.getMonth() + 1).padStart(2, "0")
+        const dy = String(d.getDate()).padStart(2, "0")
+        return new Date(`${y}-${mo}-${dy}T00:00:00.000Z`)
+      }
+    }
+
+    return null
+  }
+
+  // ── 7. Process each row ────────────────────────────────────────
   const succeeded = []
   const failed    = []
 
   for (let i = 0; i < rows.length; i++) {
     const row    = rows[i]
-    const rowNum = i + 2 // row 1 = header, so first data row = 2
+    const rowNum = i + 2  // row 1 = header → first data row = 2
+    const rowErrors = []
 
+    // ── Extract raw values ──────────────────────────────────
     const rawName       = normalize(row[colName])
     const rawMobile     = normalize(row[colMobile])
     const rawDate       = row[colDate]
     const rawInterested = colInterested ? normalize(row[colInterested]) : ""
     const rawAssignTo   = colAssignTo   ? normalize(row[colAssignTo])   : ""
 
-    // ── Resolve "Assign To" name → user id before calling service ──
-    // The form sends assignedToId (a number). We do the same here.
+    // ── Validate Name ───────────────────────────────────────
+    if (!rawName) {
+      rowErrors.push("Name is required")
+    } else if (rawName.length > 100) {
+      rowErrors.push("Name must be 100 characters or less")
+    } else if (/\d/.test(rawName)) {
+      rowErrors.push("Name must not contain numbers")
+    }
+
+    // ── Validate Phone Number ───────────────────────────────
+    // Strip spaces, dashes, parentheses then check digits only
+    const mobileClean = String(rawMobile).replace(/[\s\-().+]/g, "")
+    if (!rawMobile) {
+      rowErrors.push("Phone Number is required")
+    } else if (!/^\d+$/.test(mobileClean)) {
+      rowErrors.push(`Phone Number must contain digits only — got "${rawMobile}"`)
+    } else if (mobileClean.length < 7 || mobileClean.length > 15) {
+      rowErrors.push(`Phone Number must be 7–15 digits — got ${mobileClean.length} digit(s)`)
+    }
+
+    // ── Validate Date ───────────────────────────────────────
+    let parsedDate = null
+    if (!rawDate && rawDate !== 0) {
+      rowErrors.push("Date is required")
+    } else {
+      parsedDate = parseExcelDate(rawDate)
+      if (!parsedDate) {
+        rowErrors.push(
+          `Date "${rawDate}" is not a valid date. ` +
+          `Use formats: YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, or a native Excel date cell.`
+        )
+      }
+    }
+
+    // ── Validate Interested At (optional) ───────────────────
+    if (rawInterested && rawInterested.length > 200) {
+      rowErrors.push("Interested At must be 200 characters or less")
+    }
+
+    // ── Validate Assign To (optional) ───────────────────────
     let assignedToId = null
     if (rawAssignTo) {
       const user = findUserByName(rawAssignTo)
       if (!user) {
-        failed.push({
-          row: rowNum,
-          data: { name: rawName, mobile: rawMobile },
-          errors: [`user "${rawAssignTo}" not found in branch`]
-        })
-        continue
+        rowErrors.push(`Assign To: user "${rawAssignTo}" not found in this branch`)
+      } else {
+        assignedToId = user.id
       }
-      assignedToId = user.id
     }
 
-    // ── Normalise date: xlsx gives a JS Date for native date cells;
-    //    string cells need to be converted to ISO so new Date() parses them.
-    let dateValue = rawDate
-    if (rawDate instanceof Date) {
-      // Already a proper JS Date from xlsx — convert to ISO string so
-      // createLeadService receives the same format as the form
-      dateValue = rawDate.toISOString()
+    // ── If any row errors, skip this row ────────────────────
+    if (rowErrors.length > 0) {
+      failed.push({
+        row:    rowNum,
+        data:   { name: rawName, mobile: rawMobile },
+        errors: rowErrors
+      })
+      continue
     }
 
-    // ── Build the exact same payload the form POSTs ────────────────
+    // ── Build payload — same shape as the form POST ─────────
     const payload = {
       pipelineId:    pid,
       name:          rawName,
-      mobile:        rawMobile,
-      date:          dateValue,
+      mobile:        mobileClean,          // store cleaned digits only
+      date:          parsedDate.toISOString(), // UTC midnight ISO string
       interestedFor: rawInterested || undefined,
-      assignedToId:  assignedToId  // null = unassigned, same as form
+      assignedToId:  assignedToId
     }
 
-    // ── Delegate to createLeadService — identical path as single create ──
+    // ── Insert via createLeadService (identical to form submit) ─
     try {
       const lead = await createLeadService(payload, actor)
       succeeded.push({
         row:    rowNum,
         leadId: lead.id,
         name:   lead.name,
-        mobile: lead.mobile
+        mobile: lead.mobile,
+        date:   lead.date
       })
     } catch (err) {
-      // Collect validation / business-rule errors per row without aborting the whole import
       const messages = err.errors
-        ? err.errors.map((e) => e.message)   // ValidationError array
+        ? err.errors.map((e) => e.message)
         : [err.message ?? "Unknown error"]
       failed.push({
         row:    rowNum,
