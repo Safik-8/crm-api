@@ -300,8 +300,15 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
 
   const sheetKeys = Object.keys(rows[0])
 
-  // ── 3. Reject unknown / extra columns upfront ──────────────────
-  const unknownCols = sheetKeys.filter(
+  // ── 3. Filter out empty/phantom columns xlsx adds for blank cells ──
+  // xlsx names these __EMPTY, __EMPTY_1, __EMPTY_2 etc. when a cell has
+  // no header. We silently ignore them instead of rejecting the file.
+  const meaningfulKeys = sheetKeys.filter(
+    (k) => !String(k).startsWith("__EMPTY") && String(k).trim() !== ""
+  )
+
+  // ── 4. Reject unknown / extra columns upfront ──────────────────
+  const unknownCols = meaningfulKeys.filter(
     (k) => !ALL_KNOWN_ALIASES.has(String(k).toLowerCase().trim())
   )
   if (unknownCols.length > 0) {
@@ -311,12 +318,12 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
     )
   }
 
-  // ── 4. Resolve column names from the sheet ─────────────────────
-  const colName       = findCol(sheetKeys, ALLOWED_COLUMNS[0].aliases)
-  const colMobile     = findCol(sheetKeys, ALLOWED_COLUMNS[1].aliases)
-  const colDate       = findCol(sheetKeys, ALLOWED_COLUMNS[2].aliases)
-  const colInterested = findCol(sheetKeys, ALLOWED_COLUMNS[3].aliases)
-  const colAssignTo   = findCol(sheetKeys, ALLOWED_COLUMNS[4].aliases)
+  // ── 5. Resolve column names from the sheet ─────────────────────
+  const colName       = findCol(meaningfulKeys, ALLOWED_COLUMNS[0].aliases)
+  const colMobile     = findCol(meaningfulKeys, ALLOWED_COLUMNS[1].aliases)
+  const colDate       = findCol(meaningfulKeys, ALLOWED_COLUMNS[2].aliases)
+  const colInterested = findCol(meaningfulKeys, ALLOWED_COLUMNS[3].aliases)
+  const colAssignTo   = findCol(meaningfulKeys, ALLOWED_COLUMNS[4].aliases)
 
   // Required columns must be present
   if (!colName)   throw new BadRequestError('Excel is missing required column "Name"')
@@ -395,9 +402,27 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
     return null
   }
 
-  // ── 7. Process each row ────────────────────────────────────────
-  const succeeded = []
-  const failed    = []
+  // ── 7. Pre-fetch existing mobile numbers from DB (same pipeline scope) ──
+  // Prevents re-importing a number that is already stored as a lead.
+  // Scoped to the actor's company+branch via the pipeline relation.
+  const existingLeads = await prisma.lead.findMany({
+    where: {
+      isDeleted: false,
+      pipeline: {
+        ...(actor.companyId ? { companyId: actor.companyId } : {}),
+        ...(actor.branchId  ? { branchId:  actor.branchId  } : {})
+      }
+    },
+    select: { mobile: true }
+  })
+  // Store as a Set for O(1) lookup
+  const existingMobiles = new Set(existingLeads.map((l) => l.mobile))
+
+  // ── 8. Process each row ────────────────────────────────────────
+  const succeeded  = []
+  const failed     = []
+  // Track mobiles seen within this Excel file to catch in-file duplicates
+  const seenInFile = new Set()
 
   for (let i = 0; i < rows.length; i++) {
     const row    = rows[i]
@@ -429,6 +454,20 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
       rowErrors.push(`Phone Number must contain digits only — got "${rawMobile}"`)
     } else if (mobileClean.length < 7 || mobileClean.length > 15) {
       rowErrors.push(`Phone Number must be 7–15 digits — got ${mobileClean.length} digit(s)`)
+    }
+
+    // ── Duplicate mobile check ──────────────────────────────
+    // Check 1: already exists in the database
+    if (mobileClean && existingMobiles.has(mobileClean)) {
+      rowErrors.push(`Phone Number "${mobileClean}" is already registered in the system`)
+    }
+    // Check 2: duplicate within this Excel file (same number appears twice)
+    else if (mobileClean && seenInFile.has(mobileClean)) {
+      rowErrors.push(`Phone Number "${mobileClean}" appears more than once in this Excel file`)
+    }
+    // If valid and not duplicate, mark as seen for subsequent rows
+    else if (mobileClean && /^\d+$/.test(mobileClean)) {
+      seenInFile.add(mobileClean)
     }
 
     // ── Validate Date ───────────────────────────────────────
