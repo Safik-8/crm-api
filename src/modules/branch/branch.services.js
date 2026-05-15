@@ -22,15 +22,15 @@ const assertCompanyScope = (actor, targetCompanyId) => {
 
 // ── ROLE CREATION RULES ───────────────────────────────────
 const ROLE_CREATION_RULES = {
-  SUPER_ADMIN: ["SUPER_ADMIN", "CEO", "BRANCH_ADMIN", "MANAGER", "ISE"],
-  BRANCH_ADMIN: ["MANAGER", "ISE"],
+  SUPER_ADMIN: ["SUPER_ADMIN", "CEO", "BRANCH_ADMIN", "MANAGER", "ISE", "SALES_TEAM"],
+  BRANCH_ADMIN: ["MANAGER", "ISE", "SALES_TEAM"],
   MANAGER: [],
   CEO: [],
   ISE: [],
 }
 
 // ── ROLES THAT NEED BRANCH ────────────────────────────────
-const ROLES_NEED_BRANCH = ["BRANCH_ADMIN", "MANAGER", "ISE"]
+const ROLES_NEED_BRANCH = ["BRANCH_ADMIN", "MANAGER", "ISE", "SALES_TEAM"]
 
 
 // ══════════════════════════════════════
