@@ -1,11 +1,21 @@
 import { Router } from "express"
 import { authenticate } from "../../middleware/Authenticate.js"
 import { hasPermission } from "../../middleware/hasPermission.js"
-import { addLeadComment, createLead, getLeadComments, getLeads, updateLeadStage } from "./lead.controller.js"
+import {
+  addLeadComment,
+  createLead,
+  getBranchUsersForLead,
+  getLeadComments,
+  getLeads,
+  updateLeadStage
+} from "./lead.controller.js"
 
 const router = Router()
 
 router.use(authenticate)
+
+// Dropdown — must be before /:id routes to avoid param conflict
+router.get("/branch-users", hasPermission("LEAD", "canCreate"), getBranchUsersForLead)
 
 router.post("/", hasPermission("LEAD", "canCreate"), createLead)
 router.get("/", hasPermission("LEAD", "canView"), getLeads)

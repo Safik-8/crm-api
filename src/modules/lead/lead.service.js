@@ -1,5 +1,5 @@
 import prisma from "../../config/db.js"
-import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
+import { BadRequestError, ForbiddenError, NotFoundError, ValidationError } from "../../utils/AppError.js"
 
 const normalize = (v) => String(v || "").trim()
 
@@ -8,18 +8,56 @@ const assertPipelineScope = (actor, pipeline) => {
   if (actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
 }
 
+// ══════════════════════════════════════
+// GET BRANCH USERS — for "Assign To" dropdown
+// Returns all active users in the actor's branch
+// ══════════════════════════════════════
+export const getBranchUsersForLeadService = async (actor) => {
+  if (!actor.branchId) throw new BadRequestError("No branch associated with your account")
+
+  const users = await prisma.user.findMany({
+    where: {
+      branchId: actor.branchId,
+      status: "ACTIVE"
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      userRoles: {
+        where: { isPrimary: true },
+        select: { role: { select: { name: true } } }
+      }
+    },
+    orderBy: { name: "asc" }
+  })
+
+  return users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.userRoles[0]?.role?.name ?? null
+  }))
+}
+
 export const createLeadService = async (data, actor) => {
   const name = normalize(data?.name)
   const mobile = normalize(data?.mobile)
   const interestedFor = data?.interested_for ?? data?.interestedFor
   const dateRaw = data?.date
   const pipelineId = Number(data?.pipelineId ?? data?.pipeline_id)
+  const assignedToId = data?.assignedToId ?? data?.assigned_to
+    ? Number(data?.assignedToId ?? data?.assigned_to)
+    : null
 
   const errors = []
   if (!name) errors.push({ field: "name", message: "name is required" })
   if (!mobile) errors.push({ field: "mobile", message: "mobile is required" })
   if (!Number.isInteger(pipelineId) || pipelineId < 1) errors.push({ field: "pipelineId", message: "pipelineId is required" })
   if (!dateRaw) errors.push({ field: "date", message: "date is required" })
+  if (assignedToId !== null && (!Number.isInteger(assignedToId) || assignedToId < 1)) {
+    errors.push({ field: "assignedToId", message: "assignedToId must be a valid user id" })
+  }
   if (errors.length) throw new ValidationError("Validation failed", errors)
 
   const date = new Date(dateRaw)
@@ -28,6 +66,19 @@ export const createLeadService = async (data, actor) => {
   const pipeline = await prisma.pipeline.findUnique({ where: { id: pipelineId } })
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
+
+  // Validate assignedTo user belongs to the same branch
+  if (assignedToId !== null) {
+    const assignedUser = await prisma.user.findUnique({
+      where: { id: assignedToId },
+      select: { id: true, branchId: true, status: true }
+    })
+    if (!assignedUser) throw new NotFoundError("Assigned user")
+    if (assignedUser.status !== "ACTIVE") throw new BadRequestError("Assigned user is inactive")
+    if (actor.branchId && assignedUser.branchId !== actor.branchId) {
+      throw new ForbiddenError("Assigned user does not belong to your branch")
+    }
+  }
 
   const prospectStage = await prisma.stage.findUnique({
     where: { name: "Prospect" },
@@ -45,6 +96,7 @@ export const createLeadService = async (data, actor) => {
     data: {
       pipelineId,
       stageId: prospectStage.id,
+      assignedToId,
       name,
       mobile,
       date,
@@ -54,7 +106,8 @@ export const createLeadService = async (data, actor) => {
     },
     include: {
       pipeline: { select: { id: true, name: true } },
-      stage: { select: { id: true, name: true, isDefault: true } }
+      stage: { select: { id: true, name: true, isDefault: true } },
+      assignedTo: { select: { id: true, name: true, email: true } }
     }
   })
 
@@ -83,7 +136,8 @@ export const getLeadsService = async (query, actor) => {
       take: limit,
       include: {
         pipeline: { select: { id: true, name: true } },
-        stage: { select: { id: true, name: true, isDefault: true } }
+        stage: { select: { id: true, name: true, isDefault: true } },
+        assignedTo: { select: { id: true, name: true, email: true } }
       }
     }),
     prisma.lead.count({ where })

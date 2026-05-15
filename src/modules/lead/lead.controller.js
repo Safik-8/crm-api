@@ -2,10 +2,20 @@ import { sendSuccess } from "../../utils/response.js"
 import {
   addLeadCommentService,
   createLeadService,
+  getBranchUsersForLeadService,
   getLeadCommentsService,
   getLeadsService,
   updateLeadStageService
 } from "./lead.service.js"
+
+export const getBranchUsersForLead = async (req, res, next) => {
+  try {
+    const users = await getBranchUsersForLeadService(req.user)
+    return sendSuccess(res, { users }, "Branch users fetched")
+  } catch (err) {
+    next(err)
+  }
+}
 
 export const createLead = async (req, res, next) => {
   try {

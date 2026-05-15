@@ -72,6 +72,7 @@ model User {
   assignedRoles             UserRole[]          @relation("AssignedByToUserRole")
   refreshTokens             RefreshToken[]
   createdLeads              Lead[]              @relation("UserCreatedLeads")
+  assignedLeads             Lead[]              @relation("UserAssignedLeads")
   leadComments              LeadComment[]
   createdDailyBranchReports DailyBranchReport[] @relation("UserCreatedDailyBranchReports")
 
@@ -241,6 +242,7 @@ model Lead {
   id            Int      @id @default(autoincrement())
   pipelineId    Int      @map("pipeline_id")
   stageId       Int      @map("stage_id")
+  assignedToId  Int?     @map("assigned_to")
   name          String
   mobile        String
   date          DateTime
@@ -251,13 +253,15 @@ model Lead {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  pipeline  Pipeline      @relation(fields: [pipelineId], references: [id])
-  stage     Stage         @relation(fields: [stageId], references: [id])
-  createdBy User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
-  comments  LeadComment[]
+  pipeline   Pipeline      @relation(fields: [pipelineId], references: [id])
+  stage      Stage         @relation(fields: [stageId], references: [id])
+  createdBy  User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
+  assignedTo User?         @relation("UserAssignedLeads", fields: [assignedToId], references: [id])
+  comments   LeadComment[]
 
   @@index([pipelineId])
   @@index([stageId])
+  @@index([assignedToId])
   @@map("leads")
 }
 
