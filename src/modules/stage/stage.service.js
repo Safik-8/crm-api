@@ -69,10 +69,29 @@ export const deleteStageService = async (id, actor) => {
   if (!stage || stage.isDeleted) throw new NotFoundError("Stage")
   if (stage.isDefault) throw new BadRequestError("Default stage cannot be deleted")
 
+  const leadCount = await prisma.lead.count({
+    where: { stageId, isDeleted: false }
+  })
+  if (leadCount > 0) {
+    throw new BadRequestError("Stage cannot be deleted because it contains leads")
+  }
+
   return prisma.stage.update({
     where: { id: stageId },
     data: { isDeleted: true, updatedById: actor.id }
   })
+}
+
+const normalizePipelineStagesOrder = (stages) => {
+  if (!Array.isArray(stages)) return stages
+  const prospect = stages.find(s => s.stage.name === "Prospect")
+  const closure = stages.find(s => s.stage.name === "Closure")
+  const middle = stages.filter(s => s.stage.name !== "Prospect" && s.stage.name !== "Closure")
+  const ordered = []
+  if (prospect) ordered.push(prospect)
+  ordered.push(...middle)
+  if (closure) ordered.push(closure)
+  return ordered
 }
 
 export const getStagesForPipelineService = async (pipelineId, actor) => {
@@ -95,7 +114,7 @@ export const getStagesForPipelineService = async (pipelineId, actor) => {
     include: { stage: true }
   })
 
-  return pipelineStages.map(ps => ({
+  return normalizePipelineStagesOrder(pipelineStages).map(ps => ({
     id: ps.stage.id,
     name: ps.stage.name,
     isDefault: ps.stage.isDefault,

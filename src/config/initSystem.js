@@ -307,31 +307,34 @@ export const initializeSystem = async () => {
 
         const createdById = (await prisma.user.findUnique({ where: { email: "superadmin@gmail.com" }, select: { id: true } }))?.id
         if (createdById) {
-            const defaultStage = await prisma.stage.findFirst({
-                where: { OR: [{ isDefault: true }, { name: "Prospect" }] },
-                select: { id: true, isDeleted: true, isDefault: true, name: true }
-            })
-            if (!defaultStage) {
-                await prisma.stage.create({
-                    data: {
-                        name: "Prospect",
-                        isDefault: true,
-                        isDeleted: false,
-                        createdById
-                    }
+            const defaultStages = ["Prospect", "Closure"]
+            for (const stageName of defaultStages) {
+                const existingStage = await prisma.stage.findUnique({
+                    where: { name: stageName },
+                    select: { id: true, isDeleted: true, isDefault: true, name: true }
                 })
-                console.log("✅ Default stage seeded: Prospect")
-            } else if (defaultStage.isDeleted || !defaultStage.isDefault || defaultStage.name !== "Prospect") {
-                await prisma.stage.update({
-                    where: { id: defaultStage.id },
-                    data: {
-                        name: "Prospect",
-                        isDefault: true,
-                        isDeleted: false,
-                        updatedById: createdById
-                    }
-                })
-                console.log("✅ Default stage synced: Prospect")
+                if (!existingStage) {
+                    await prisma.stage.create({
+                        data: {
+                            name: stageName,
+                            isDefault: true,
+                            isDeleted: false,
+                            createdById
+                        }
+                    })
+                    console.log(`✅ Default stage seeded: ${stageName}`)
+                } else if (existingStage.isDeleted || !existingStage.isDefault) {
+                    await prisma.stage.update({
+                        where: { id: existingStage.id },
+                        data: {
+                            name: stageName,
+                            isDefault: true,
+                            isDeleted: false,
+                            updatedById: createdById
+                        }
+                    })
+                    console.log(`✅ Default stage synced: ${stageName}`)
+                }
             }
         }
 
