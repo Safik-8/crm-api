@@ -7,6 +7,7 @@ import {
   getBranchUsersForLead,
   getLeadComments,
   getLeads,
+  importLeadsFromExcel,
   updateLeadStage
 } from "./lead.controller.js"
 
@@ -19,6 +20,9 @@ router.get("/branch-users", hasPermission("LEAD", "canCreate"), getBranchUsersFo
 
 router.post("/", hasPermission("LEAD", "canCreate"), createLead)
 router.get("/", hasPermission("LEAD", "canView"), getLeads)
+
+// Bulk import from Excel
+router.post("/import-excel", hasPermission("LEAD", "canCreate"), importLeadsFromExcel)
 
 // stage updates
 router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), updateLeadStage)
