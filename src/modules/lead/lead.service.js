@@ -447,7 +447,6 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
 
     // ── Extract raw values ────────────────────────────────────
     const rawName       = normalize(row[colName])
-    const rawMobile     = normalize(row[colMobile])
     const rawDate       = row[colDate]
     const rawInterested = colInterested ? normalize(row[colInterested]) : ""
     const rawAssignTo   = colAssignTo   ? normalize(row[colAssignTo])   : ""
@@ -462,21 +461,36 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
     }
 
     // ── Validate Phone Number ─────────────────────────────────
-    const mobileClean = String(rawMobile).replace(/[\s\-().+]/g, "")
-    if (!rawMobile) {
+    // Excel often stores phone numbers as numeric cells.
+    // Large numbers can come through as scientific notation (9.876543210e9)
+    // or with decimal points (9876543210.0) — handle all cases.
+    const rawMobileStr = (() => {
+      const v = row[colMobile]
+      if (v === "" || v === null || v === undefined) return ""
+      // If it's a number (Excel numeric cell), convert without scientific notation
+      if (typeof v === "number") {
+        return Math.round(v).toString()
+      }
+      return String(v).trim()
+    })()
+
+    // Strip spaces, dashes, parentheses, plus signs
+    const mobileClean = rawMobileStr.replace(/[\s\-().+]/g, "")
+
+    if (!mobileClean) {
       rowErrors.push("Phone Number is required")
     } else if (!/^\d+$/.test(mobileClean)) {
-      rowErrors.push(`Phone Number must contain digits only — got "${rawMobile}"`)
+      rowErrors.push(`Phone Number must contain digits only — got "${rawMobileStr}"`)
     } else if (mobileClean.length !== 10) {
       rowErrors.push(`Phone Number must be exactly 10 digits — got ${mobileClean.length} digit(s)`)
+    } else if (/^(\d)\1{9}$/.test(mobileClean)) {
+      // All same digit — e.g. 0000000000, 9999999999
+      rowErrors.push(`Phone Number "${mobileClean}" is not valid — all digits are the same`)
     } else if (existingMobiles.has(mobileClean)) {
-      // Already in the database
       rowErrors.push(`Phone Number "${mobileClean}" is already registered in the system`)
     } else if (seenInFile.has(mobileClean)) {
-      // Duplicate within this Excel file
       rowErrors.push(`Phone Number "${mobileClean}" appears more than once in this Excel file`)
     } else {
-      // Valid and unique — track it for subsequent rows
       seenInFile.add(mobileClean)
     }
 
@@ -517,7 +531,7 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
       // Row failed — record errors, do NOT add to validatedRows
       validationErrors.push({
         row:    rowNum,
-        data:   { name: rawName, mobile: rawMobile },
+        data:   { name: rawName, mobile: rawMobileStr },
         errors: rowErrors
       })
     } else {
