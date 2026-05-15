@@ -467,8 +467,8 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
       rowErrors.push("Phone Number is required")
     } else if (!/^\d+$/.test(mobileClean)) {
       rowErrors.push(`Phone Number must contain digits only — got "${rawMobile}"`)
-    } else if (mobileClean.length < 7 || mobileClean.length > 15) {
-      rowErrors.push(`Phone Number must be 7–15 digits — got ${mobileClean.length} digit(s)`)
+    } else if (mobileClean.length !== 10) {
+      rowErrors.push(`Phone Number must be exactly 10 digits — got ${mobileClean.length} digit(s)`)
     } else if (existingMobiles.has(mobileClean)) {
       // Already in the database
       rowErrors.push(`Phone Number "${mobileClean}" is already registered in the system`)
