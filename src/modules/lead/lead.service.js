@@ -323,14 +323,25 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
   if (!colMobile) throw new BadRequestError('Excel is missing required column "Phone Number"')
   if (!colDate)   throw new BadRequestError('Excel is missing required column "Date"')
 
-  // ── 5. Pre-fetch branch users once for "Assign To" lookup ──────
-  const branchUsers = actor.branchId
-    ? await prisma.user.findMany({
-        where: { branchId: actor.branchId, status: "ACTIVE" },
-        select: { id: true, name: true }
-      })
-    : []
+  // ── 5. Validate actor has a branch — required for Assign To lookup ──
+  // The logged-in user's branchId is the scope for all user lookups.
+  // Without it we cannot safely validate "Assign To" names.
+  if (!actor.branchId) {
+    throw new BadRequestError("Your account is not associated with a branch. Cannot import leads.")
+  }
 
+  // Pre-fetch ALL active users in the logged-in user's branch from the DB.
+  // This is the single source of truth — same branch scope as the form's
+  // GET /leads/branch-users dropdown.
+  const branchUsers = await prisma.user.findMany({
+    where: {
+      branchId: actor.branchId,   // strictly scoped to actor's branch
+      status:   "ACTIVE"          // inactive users cannot be assigned
+    },
+    select: { id: true, name: true, email: true }
+  })
+
+  // Case-insensitive name → user lookup within the branch
   const findUserByName = (rawName) => {
     if (!rawName) return null
     const needle = String(rawName).toLowerCase().trim()
@@ -440,13 +451,18 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
     }
 
     // ── Validate Assign To (optional) ───────────────────────
+    // Name must match an ACTIVE user in the logged-in user's branch (DB verified above).
+    // Matching is case-insensitive. If the name is present but not found → row fails.
     let assignedToId = null
     if (rawAssignTo) {
-      const user = findUserByName(rawAssignTo)
-      if (!user) {
-        rowErrors.push(`Assign To: user "${rawAssignTo}" not found in this branch`)
+      const matchedUser = findUserByName(rawAssignTo)
+      if (!matchedUser) {
+        rowErrors.push(
+          `Assign To: "${rawAssignTo}" does not match any active user in your branch. ` +
+          `Check the spelling — it must exactly match the user's name in the system.`
+        )
       } else {
-        assignedToId = user.id
+        assignedToId = matchedUser.id
       }
     }
 
