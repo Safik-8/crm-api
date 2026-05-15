@@ -280,7 +280,7 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
     { key: "name",         aliases: ["name"],                                                              required: true  },
     { key: "mobile",       aliases: ["phone number", "phonenumber", "phone", "mobile"],                    required: true  },
     { key: "date",         aliases: ["date"],                                                              required: true  },
-    { key: "interestedFor",aliases: ["interested at", "interestedat", "interested_at", "interested for"],  required: false },
+    { key: "interestedFor",aliases: ["interested at", "interestedat", "interested_at", "interested for", "interested in", "interestedin"],  required: false },
     { key: "assignTo",     aliases: ["assign to", "assignto", "assigned to", "assignedto"],                required: false }
   ]
 
