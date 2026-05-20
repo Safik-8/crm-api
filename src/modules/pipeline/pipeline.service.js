@@ -2,6 +2,10 @@ import prisma from "../../config/db.js"
 import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
 
 const normalizeName = (name) => String(name || "").trim()
+const normalizeTextFilter = (value) => {
+  const text = String(value || "").trim()
+  return text || null
+}
 
 const resolveOrgContext = async (data, actor) => {
   // branch users: fixed to actor
@@ -55,6 +59,65 @@ const normalizePipelineStagesOrder = (stages) => {
   ordered.push(...middle)
   if (closure) ordered.push(closure)
   return ordered
+}
+
+const parsePositiveInt = (value, fieldName) => {
+  if (value === undefined || value === null || value === "") return null
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new ValidationError("Validation failed", [{ field: fieldName, message: `${fieldName} must be a valid positive integer` }])
+  }
+  return parsed
+}
+
+const parseDateRange = (dateFrom, dateTo) => {
+  const from = dateFrom ? new Date(dateFrom) : null
+  const to = dateTo ? new Date(dateTo) : null
+
+  if (from && Number.isNaN(from.getTime())) {
+    throw new ValidationError("Validation failed", [{ field: "dateFrom", message: "dateFrom must be a valid date" }])
+  }
+  if (to && Number.isNaN(to.getTime())) {
+    throw new ValidationError("Validation failed", [{ field: "dateTo", message: "dateTo must be a valid date" }])
+  }
+  if (from && to && from > to) {
+    throw new ValidationError("Validation failed", [{ field: "dateRange", message: "dateFrom cannot be after dateTo" }])
+  }
+
+  return { from, to }
+}
+
+const buildLeadBoardQueryOptions = (query) => {
+  const sortBy = String(query?.sortBy || "createdAt").trim()
+  const sortOrder = String(query?.sortOrder || "desc").trim().toLowerCase()
+  const allowedSortBy = new Set(["createdAt", "updatedAt", "name", "date", "mobile"])
+  const allowedSortOrder = new Set(["asc", "desc"])
+
+  if (!allowedSortBy.has(sortBy)) {
+    throw new ValidationError("Validation failed", [{
+      field: "sortBy",
+      message: "sortBy must be one of createdAt, updatedAt, name, date, mobile"
+    }])
+  }
+  if (!allowedSortOrder.has(sortOrder)) {
+    throw new ValidationError("Validation failed", [{ field: "sortOrder", message: "sortOrder must be asc or desc" }])
+  }
+
+  const { from, to } = parseDateRange(query?.dateFrom, query?.dateTo)
+  const stageId = parsePositiveInt(query?.stageId, "stageId")
+  const assignedToId = parsePositiveInt(query?.assignedToId, "assignedToId")
+
+  return {
+    leadName: normalizeTextFilter(query?.leadName ?? query?.name),
+    mobile: normalizeTextFilter(query?.mobile),
+    interestedFor: normalizeTextFilter(query?.interestedFor),
+    stageId,
+    assignedToId,
+    dateFrom: from,
+    dateTo: to,
+    sortBy,
+    sortOrder
+  }
 }
 
 const ensureDefaultStages = async (tx, actorId) => {
@@ -189,20 +252,16 @@ export const listPipelinesService = async (query, actor) => {
   }))
 }
 
-export const getPipelineDetailsService = async (id, actor) => {
+export const getPipelineDetailsService = async (id, query, actor) => {
   const pipelineId = Number(id)
   if (!Number.isInteger(pipelineId) || pipelineId < 1) throw new BadRequestError("Invalid pipeline id")
+  const options = buildLeadBoardQueryOptions(query)
 
   const pipeline = await prisma.pipeline.findUnique({
     where: { id: pipelineId },
     include: {
       stages: {
         orderBy: { orderNo: "asc" },
-        include: { stage: true }
-      },
-      leads: {
-        where: { isDeleted: false },
-        orderBy: { createdAt: "desc" },
         include: { stage: true }
       }
     }
@@ -215,7 +274,46 @@ export const getPipelineDetailsService = async (id, actor) => {
     id: ps.stage.id,
     name: ps.stage.name,
     isDefault: ps.stage.isDefault,
-    orderNo: ps.orderNo
+    orderNo: ps.orderNo,
+    leads: []
+  }))
+
+  const leadWhere = {
+    pipelineId: pipeline.id,
+    isDeleted: false
+  }
+
+  if (options.stageId) leadWhere.stageId = options.stageId
+  if (options.assignedToId) leadWhere.assignedToId = options.assignedToId
+  if (options.leadName) leadWhere.name = { contains: options.leadName, mode: "insensitive" }
+  if (options.mobile) leadWhere.mobile = { contains: options.mobile, mode: "insensitive" }
+  if (options.interestedFor) leadWhere.interestedFor = { contains: options.interestedFor, mode: "insensitive" }
+  if (options.dateFrom || options.dateTo) {
+    leadWhere.date = {
+      ...(options.dateFrom ? { gte: options.dateFrom } : {}),
+      ...(options.dateTo ? { lte: options.dateTo } : {})
+    }
+  }
+
+  const leads = await prisma.lead.findMany({
+    where: leadWhere,
+    orderBy: { [options.sortBy]: options.sortOrder },
+    include: {
+      stage: { select: { id: true, name: true, isDefault: true } },
+      assignedTo: { select: { id: true, name: true, email: true } }
+    }
+  })
+
+  const leadsByStageId = new Map()
+  for (const lead of leads) {
+    const stageLeads = leadsByStageId.get(lead.stageId) || []
+    stageLeads.push(lead)
+    leadsByStageId.set(lead.stageId, stageLeads)
+  }
+
+  const boardStages = stages.map(stage => ({
+    ...stage,
+    leads: leadsByStageId.get(stage.id) || []
   }))
 
   return {
@@ -225,8 +323,21 @@ export const getPipelineDetailsService = async (id, actor) => {
     companyId: pipeline.companyId,
     createdAt: pipeline.createdAt,
     updatedAt: pipeline.updatedAt,
-    stages,
-    leads: pipeline.leads
+    stages: boardStages,
+    leads,
+    filters: {
+      stageId: options.stageId,
+      assignedToId: options.assignedToId,
+      leadName: options.leadName,
+      mobile: options.mobile,
+      interestedFor: options.interestedFor,
+      dateFrom: options.dateFrom,
+      dateTo: options.dateTo
+    },
+    sort: {
+      sortBy: options.sortBy,
+      sortOrder: options.sortOrder
+    }
   }
 }
 
