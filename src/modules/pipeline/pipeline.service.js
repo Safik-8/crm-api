@@ -1,5 +1,6 @@
 import prisma from "../../config/db.js"
 import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
+import { getBranchUsersByBranchId } from "../lead/lead.service.js"
 
 const normalizeName = (name) => String(name || "").trim()
 const normalizeTextFilter = (value) => {
@@ -70,9 +71,37 @@ const parsePositiveInt = (value, fieldName) => {
   return parsed
 }
 
-const parseDateRange = (dateFrom, dateTo) => {
-  const from = dateFrom ? new Date(dateFrom) : null
-  const to = dateTo ? new Date(dateTo) : null
+/** UTC calendar day bounds for "today" (matches lead date storage as UTC day). */
+const getUtcTodayBounds = () => {
+  const now = new Date()
+  const y = now.getUTCFullYear()
+  const mo = now.getUTCMonth()
+  const d = now.getUTCDate()
+  const from = new Date(Date.UTC(y, mo, d, 0, 0, 0, 0))
+  const to = new Date(Date.UTC(y, mo, d, 23, 59, 59, 999))
+  return { from, to }
+}
+
+const parseDateRange = (dateFrom, dateTo, query) => {
+  const allDates =
+    query?.allDates === "1" ||
+    query?.allDates === "true" ||
+    String(query?.allDates || "").toLowerCase() === "yes"
+
+  if (allDates) {
+    return { from: null, to: null, defaultedToToday: false, skippedDateFilter: true }
+  }
+
+  const hasFrom = dateFrom !== undefined && dateFrom !== null && String(dateFrom).trim() !== ""
+  const hasTo = dateTo !== undefined && dateTo !== null && String(dateTo).trim() !== ""
+
+  if (!hasFrom && !hasTo) {
+    const { from, to } = getUtcTodayBounds()
+    return { from, to, defaultedToToday: true, skippedDateFilter: false }
+  }
+
+  const from = hasFrom ? new Date(dateFrom) : null
+  const to = hasTo ? new Date(dateTo) : null
 
   if (from && Number.isNaN(from.getTime())) {
     throw new ValidationError("Validation failed", [{ field: "dateFrom", message: "dateFrom must be a valid date" }])
@@ -84,7 +113,7 @@ const parseDateRange = (dateFrom, dateTo) => {
     throw new ValidationError("Validation failed", [{ field: "dateRange", message: "dateFrom cannot be after dateTo" }])
   }
 
-  return { from, to }
+  return { from, to, defaultedToToday: false, skippedDateFilter: false }
 }
 
 const buildLeadBoardQueryOptions = (query) => {
@@ -103,7 +132,7 @@ const buildLeadBoardQueryOptions = (query) => {
     throw new ValidationError("Validation failed", [{ field: "sortOrder", message: "sortOrder must be asc or desc" }])
   }
 
-  const { from, to } = parseDateRange(query?.dateFrom, query?.dateTo)
+  const { from, to, defaultedToToday, skippedDateFilter } = parseDateRange(query?.dateFrom, query?.dateTo, query)
   const stageId = parsePositiveInt(query?.stageId, "stageId")
   const assignedToId = parsePositiveInt(query?.assignedToId, "assignedToId")
 
@@ -115,6 +144,8 @@ const buildLeadBoardQueryOptions = (query) => {
     assignedToId,
     dateFrom: from,
     dateTo: to,
+    dateDefaultedToToday: defaultedToToday,
+    dateFilterSkipped: skippedDateFilter,
     sortBy,
     sortOrder
   }
@@ -288,7 +319,7 @@ export const getPipelineDetailsService = async (id, query, actor) => {
   if (options.leadName) leadWhere.name = { contains: options.leadName, mode: "insensitive" }
   if (options.mobile) leadWhere.mobile = { contains: options.mobile, mode: "insensitive" }
   if (options.interestedFor) leadWhere.interestedFor = { contains: options.interestedFor, mode: "insensitive" }
-  if (options.dateFrom || options.dateTo) {
+  if (!options.dateFilterSkipped && (options.dateFrom || options.dateTo)) {
     leadWhere.date = {
       ...(options.dateFrom ? { gte: options.dateFrom } : {}),
       ...(options.dateTo ? { lte: options.dateTo } : {})
@@ -316,6 +347,8 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     leads: leadsByStageId.get(stage.id) || []
   }))
 
+  const assignableUsers = await getBranchUsersByBranchId(pipeline.branchId)
+
   return {
     id: pipeline.id,
     name: pipeline.name,
@@ -325,6 +358,7 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     updatedAt: pipeline.updatedAt,
     stages: boardStages,
     leads,
+    assignableUsers,
     filters: {
       stageId: options.stageId,
       assignedToId: options.assignedToId,
@@ -332,7 +366,9 @@ export const getPipelineDetailsService = async (id, query, actor) => {
       mobile: options.mobile,
       interestedFor: options.interestedFor,
       dateFrom: options.dateFrom,
-      dateTo: options.dateTo
+      dateTo: options.dateTo,
+      dateDefaultedToToday: options.dateDefaultedToToday,
+      allDates: options.dateFilterSkipped
     },
     sort: {
       sortBy: options.sortBy,

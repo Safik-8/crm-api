@@ -10,15 +10,16 @@ const assertPipelineScope = (actor, pipeline) => {
 }
 
 // ══════════════════════════════════════
-// GET BRANCH USERS — for "Assign To" dropdown
-// Returns all active users in the actor's branch
+// BRANCH USERS — for "Assign To" / pipeline board assignee dropdown
+// Returns all active users in a branch (id + name + email + role)
 // ══════════════════════════════════════
-export const getBranchUsersForLeadService = async (actor) => {
-  if (!actor.branchId) throw new BadRequestError("No branch associated with your account")
+export const getBranchUsersByBranchId = async (branchId) => {
+  const bid = Number(branchId)
+  if (!Number.isInteger(bid) || bid < 1) return []
 
   const users = await prisma.user.findMany({
     where: {
-      branchId: actor.branchId,
+      branchId: bid,
       status: "ACTIVE"
     },
     select: {
@@ -39,6 +40,12 @@ export const getBranchUsersForLeadService = async (actor) => {
     email: u.email,
     role: u.userRoles[0]?.role?.name ?? null
   }))
+}
+
+// GET BRANCH USERS — for "Assign To" dropdown (scoped to logged-in user's branch)
+export const getBranchUsersForLeadService = async (actor) => {
+  if (!actor.branchId) throw new BadRequestError("No branch associated with your account")
+  return getBranchUsersByBranchId(actor.branchId)
 }
 
 export const createLeadService = async (data, actor) => {
