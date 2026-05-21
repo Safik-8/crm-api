@@ -4,6 +4,13 @@ import { BadRequestError, ForbiddenError, NotFoundError, ValidationError } from 
 
 const normalize = (v) => String(v || "").trim()
 
+/** Relations for current stage, previous stage, and who/when last moved. */
+export const leadStageLogInclude = {
+  stage: { select: { id: true, name: true, isDefault: true } },
+  previousStage: { select: { id: true, name: true, isDefault: true } },
+  stageChangedBy: { select: { id: true, name: true, email: true } }
+}
+
 const assertPipelineScope = (actor, pipeline) => {
   if (actor.companyId && pipeline.companyId !== actor.companyId) throw new BadRequestError("Invalid pipeline scope")
   if (actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
@@ -100,22 +107,27 @@ export const createLeadService = async (data, actor) => {
   })
   if (!mapping) throw new BadRequestError('Pipeline is missing required "Prospect" stage assignment')
 
+  const now = new Date()
   const lead = await prisma.lead.create({
     data: {
       pipelineId,
       stageId: prospectStage.id,
+      previousStageId: null,
+      stageChangedById: actor.id,
+      stageChangedAt: now,
       assignedToId,
       name,
       mobile,
       date,
       interestedFor: interestedFor ? String(interestedFor).trim() : null,
       isDeleted: false,
-      createdById: actor.id
+      createdById: actor.id,
+      updatedById: actor.id
     },
     include: {
       pipeline: { select: { id: true, name: true } },
-      stage: { select: { id: true, name: true, isDefault: true } },
-      assignedTo: { select: { id: true, name: true, email: true } }
+      assignedTo: { select: { id: true, name: true, email: true } },
+      ...leadStageLogInclude
     }
   })
 
@@ -144,8 +156,8 @@ export const getLeadsService = async (query, actor) => {
       take: limit,
       include: {
         pipeline: { select: { id: true, name: true } },
-        stage: { select: { id: true, name: true, isDefault: true } },
-        assignedTo: { select: { id: true, name: true, email: true } }
+        assignedTo: { select: { id: true, name: true, email: true } },
+        ...leadStageLogInclude
       }
     }),
     prisma.lead.count({ where })
@@ -184,12 +196,29 @@ export const updateLeadStageService = async (leadId, data, actor) => {
   })
   if (!mapping) throw new BadRequestError("Stage is not assigned to this pipeline")
 
+  if (lead.stageId === stageId) {
+    return prisma.lead.findUnique({
+      where: { id },
+      include: {
+        pipeline: { select: { id: true, name: true } },
+        ...leadStageLogInclude
+      }
+    })
+  }
+
+  const now = new Date()
   return prisma.lead.update({
     where: { id },
-    data: { stageId, updatedById: actor.id },
+    data: {
+      previousStageId: lead.stageId,
+      stageId,
+      stageChangedById: actor.id,
+      stageChangedAt: now,
+      updatedById: actor.id
+    },
     include: {
       pipeline: { select: { id: true, name: true } },
-      stage: { select: { id: true, name: true, isDefault: true } }
+      ...leadStageLogInclude
     }
   })
 }

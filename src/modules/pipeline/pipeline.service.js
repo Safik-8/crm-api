@@ -1,6 +1,6 @@
 import prisma from "../../config/db.js"
 import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
-import { getBranchUsersByBranchId } from "../lead/lead.service.js"
+import { getBranchUsersByBranchId, leadStageLogInclude } from "../lead/lead.service.js"
 
 const normalizeName = (name) => String(name || "").trim()
 const normalizeTextFilter = (value) => {
@@ -135,11 +135,11 @@ const buildLeadBoardQueryOptions = (query) => {
   const { from, to, defaultedToToday, skippedDateFilter } = parseDateRange(query?.dateFrom, query?.dateTo, query)
   const stageId = parsePositiveInt(query?.stageId, "stageId")
   const assignedToId = parsePositiveInt(query?.assignedToId, "assignedToId")
+  // One search box: matches lead name, mobile, or interestedFor (case-insensitive partial match)
+  const search = normalizeTextFilter(query?.search ?? query?.leadName ?? query?.name ?? query?.q)
 
   return {
-    leadName: normalizeTextFilter(query?.leadName ?? query?.name),
-    mobile: normalizeTextFilter(query?.mobile),
-    interestedFor: normalizeTextFilter(query?.interestedFor),
+    search,
     stageId,
     assignedToId,
     dateFrom: from,
@@ -222,10 +222,17 @@ export const listPipelinesService = async (query, actor) => {
   if (actor.companyId) where.companyId = actor.companyId
   if (actor.branchId) where.branchId = actor.branchId
 
-  if (query?.leadName) {
-    const search = normalizeName(query.leadName)
-    if (search) {
-      where.leads = { some: { name: { contains: search, mode: "insensitive" }, isDeleted: false } }
+  const listSearch = normalizeTextFilter(query?.search ?? query?.leadName ?? query?.name ?? query?.q)
+  if (listSearch) {
+    where.leads = {
+      some: {
+        isDeleted: false,
+        OR: [
+          { name: { contains: listSearch, mode: "insensitive" } },
+          { mobile: { contains: listSearch, mode: "insensitive" } },
+          { interestedFor: { contains: listSearch, mode: "insensitive" } }
+        ]
+      }
     }
   }
 
@@ -316,9 +323,13 @@ export const getPipelineDetailsService = async (id, query, actor) => {
 
   if (options.stageId) leadWhere.stageId = options.stageId
   if (options.assignedToId) leadWhere.assignedToId = options.assignedToId
-  if (options.leadName) leadWhere.name = { contains: options.leadName, mode: "insensitive" }
-  if (options.mobile) leadWhere.mobile = { contains: options.mobile, mode: "insensitive" }
-  if (options.interestedFor) leadWhere.interestedFor = { contains: options.interestedFor, mode: "insensitive" }
+  if (options.search) {
+    leadWhere.OR = [
+      { name: { contains: options.search, mode: "insensitive" } },
+      { mobile: { contains: options.search, mode: "insensitive" } },
+      { interestedFor: { contains: options.search, mode: "insensitive" } }
+    ]
+  }
   if (!options.dateFilterSkipped && (options.dateFrom || options.dateTo)) {
     leadWhere.date = {
       ...(options.dateFrom ? { gte: options.dateFrom } : {}),
@@ -330,8 +341,8 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     where: leadWhere,
     orderBy: { [options.sortBy]: options.sortOrder },
     include: {
-      stage: { select: { id: true, name: true, isDefault: true } },
-      assignedTo: { select: { id: true, name: true, email: true } }
+      assignedTo: { select: { id: true, name: true, email: true } },
+      ...leadStageLogInclude
     }
   })
 
@@ -362,9 +373,7 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     filters: {
       stageId: options.stageId,
       assignedToId: options.assignedToId,
-      leadName: options.leadName,
-      mobile: options.mobile,
-      interestedFor: options.interestedFor,
+      search: options.search,
       dateFrom: options.dateFrom,
       dateTo: options.dateTo,
       dateDefaultedToToday: options.dateDefaultedToToday,

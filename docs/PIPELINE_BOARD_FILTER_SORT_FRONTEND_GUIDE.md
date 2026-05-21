@@ -8,7 +8,7 @@ Use the existing pipeline details endpoint with query params:
 
 Example:
 
-- `/api/pipelines/5?leadName=rahul&stageId=2&sortBy=name&sortOrder=asc`
+- `/api/pipelines/5?search=rahul&stageId=2&sortBy=name&sortOrder=asc`
 
 ---
 
@@ -45,10 +45,13 @@ Important behavior:
 
 - `stageId` (number)
 - `assignedToId` (number) — must match an `id` from `assignableUsers`
-- `leadName` (string)  
-  - Alias supported: `name`
-- `mobile` (string)
-- `interestedFor` (string)
+- **`search`** (string) — **one field** for the search box. Backend matches if the text appears in **any** of:
+  - lead **name**
+  - lead **mobile**
+  - lead **interestedFor**  
+  (case-insensitive, partial match; OR logic — one match is enough)  
+  - Aliases (same behavior): `leadName`, `name`, `q`  
+  - **Removed:** separate `mobile` and `interestedFor` query params
 - `dateFrom` (date string, e.g. `2026-05-01`)
 - `dateTo` (date string, e.g. `2026-05-20`)
 - **`allDates`** — optional. When `1`, `true`, or `yes`, **no** date filter is applied (shows leads for any lead `date`). Use this when you need the full board without picking dates.
@@ -83,7 +86,7 @@ Request:
 Default applied:
 
 - **Lead `date`:** today (UTC day), unless you pass `allDates=1`
-- No other filters (`assignedToId`, `stageId`, text search, etc.)
+- No other filters (`assignedToId`, `stageId`, `search`, etc.)
 - `sortBy=createdAt`
 - `sortOrder=desc`
 - `assignableUsers` is always included for the assignee dropdown
@@ -100,9 +103,11 @@ Default applied:
 
 - `/api/pipelines/5?assignedToId=14`
 
-### 3) Search by Lead Name
+### 3) Unified text search (name, mobile, or interested for)
 
-- `/api/pipelines/5?leadName=anil`
+- `/api/pipelines/5?search=99999` → matches mobile containing `99999`
+- `/api/pipelines/5?search=MBA` → matches `interestedFor` containing `MBA`
+- `/api/pipelines/5?search=anil` → matches name containing `anil`
 
 ### 4) Filter by Date Range
 
@@ -114,7 +119,7 @@ Default applied:
 
 ### 6) Combine Multiple Filters + Sorting
 
-- `/api/pipelines/5?stageId=2&assignedToId=14&leadName=rahul&sortBy=name&sortOrder=asc`
+- `/api/pipelines/5?stageId=2&assignedToId=14&search=rahul&sortBy=name&sortOrder=asc`
 
 ---
 
