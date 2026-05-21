@@ -2,10 +2,12 @@ import { sendSuccess } from "../../utils/response.js"
 import {
   addLeadCommentService,
   createLeadService,
+  deleteLeadService,
   getBranchUsersForLeadService,
   getLeadCommentsService,
   getLeadsService,
   importLeadsFromExcelService,
+  updateLeadService,
   updateLeadStageService
 } from "./lead.service.js"
 import { uploadExcel } from "./lead.upload.js"
@@ -32,6 +34,24 @@ export const getLeads = async (req, res, next) => {
   try {
     const result = await getLeadsService(req.query, req.user)
     return sendSuccess(res, result, "Leads fetched")
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const updateLead = async (req, res, next) => {
+  try {
+    const lead = await updateLeadService(req.params.id, req.body, req.user)
+    return sendSuccess(res, { lead }, "Lead updated successfully")
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const deleteLead = async (req, res, next) => {
+  try {
+    const lead = await deleteLeadService(req.params.id, req.user)
+    return sendSuccess(res, { lead }, "Lead deleted successfully")
   } catch (err) {
     next(err)
   }

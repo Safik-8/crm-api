@@ -346,3 +346,4 @@ Search text is **not** validated beyond trim; very long strings still work but k
 
 - Phase 1 API overview (permissions, lead stage move logging): `docs/PHASE1_PIPELINE_STAGE_LEAD_UPDATE.md`
 - Assign-to dropdown on create lead: `docs/LEAD_ASSIGN_TO_FRONTEND_GUIDE.md`
+- Lead create, update, delete, stage move: `docs/LEAD_UPDATE_DELETE_FRONTEND_GUIDE.md`

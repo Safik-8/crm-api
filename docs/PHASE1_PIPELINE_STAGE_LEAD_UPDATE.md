@@ -884,6 +884,28 @@ Common errors:
 
 ---
 
+#### PUT `/api/leads/:id` (update lead details)
+
+Permission: **`LEAD:canCreate`** (same as create — only users who can create can update)
+
+Updates: `name`, `mobile`, `date`, `interestedFor`, `assignedToId`. Does **not** change `pipelineId` or `stageId`.
+
+At least one field required per request. Partial updates supported.
+
+**Frontend guide:** `docs/LEAD_UPDATE_DELETE_FRONTEND_GUIDE.md`
+
+---
+
+#### DELETE `/api/leads/:id` (soft delete lead)
+
+Permission: **`LEAD:canCreate`** (same as create)
+
+Soft-deletes lead (`isDeleted: true`). Lead disappears from board and list queries.
+
+**Frontend guide:** `docs/LEAD_UPDATE_DELETE_FRONTEND_GUIDE.md`
+
+---
+
 #### GET `/api/leads` (list leads)
 
 Permission: `LEAD:canView`

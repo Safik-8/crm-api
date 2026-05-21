@@ -16,6 +16,42 @@ const assertPipelineScope = (actor, pipeline) => {
   if (actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
 }
 
+const leadDetailInclude = {
+  pipeline: { select: { id: true, name: true } },
+  assignedTo: { select: { id: true, name: true, email: true } },
+  ...leadStageLogInclude
+}
+
+const getLeadForActor = async (leadId) => {
+  const id = Number(leadId)
+  if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id")
+
+  const lead = await prisma.lead.findUnique({
+    where: { id },
+    include: { pipeline: true }
+  })
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead")
+  return lead
+}
+
+const validateAssignedToId = async (assignedToId, actor, pipeline) => {
+  if (assignedToId === null) return null
+
+  const assignedUser = await prisma.user.findUnique({
+    where: { id: assignedToId },
+    select: { id: true, branchId: true, status: true }
+  })
+  if (!assignedUser) throw new NotFoundError("Assigned user")
+  if (assignedUser.status !== "ACTIVE") throw new BadRequestError("Assigned user is inactive")
+  if (actor.branchId && assignedUser.branchId !== actor.branchId) {
+    throw new ForbiddenError("Assigned user does not belong to your branch")
+  }
+  if (pipeline.branchId && assignedUser.branchId !== pipeline.branchId) {
+    throw new BadRequestError("Assigned user does not belong to the pipeline branch")
+  }
+  return assignedToId
+}
+
 // ══════════════════════════════════════
 // BRANCH USERS — for "Assign To" / pipeline board assignee dropdown
 // Returns all active users in a branch (id + name + email + role)
@@ -82,18 +118,10 @@ export const createLeadService = async (data, actor) => {
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
-  // Validate assignedTo user belongs to the same branch
-  if (assignedToId !== null) {
-    const assignedUser = await prisma.user.findUnique({
-      where: { id: assignedToId },
-      select: { id: true, branchId: true, status: true }
-    })
-    if (!assignedUser) throw new NotFoundError("Assigned user")
-    if (assignedUser.status !== "ACTIVE") throw new BadRequestError("Assigned user is inactive")
-    if (actor.branchId && assignedUser.branchId !== actor.branchId) {
-      throw new ForbiddenError("Assigned user does not belong to your branch")
-    }
-  }
+  const resolvedAssignedToId =
+    assignedToId !== null
+      ? await validateAssignedToId(assignedToId, actor, pipeline)
+      : null
 
   const prospectStage = await prisma.stage.findUnique({
     where: { name: "Prospect" },
@@ -115,7 +143,7 @@ export const createLeadService = async (data, actor) => {
       previousStageId: null,
       stageChangedById: actor.id,
       stageChangedAt: now,
-      assignedToId,
+      assignedToId: resolvedAssignedToId,
       name,
       mobile,
       date,
@@ -174,20 +202,94 @@ export const getLeadsService = async (query, actor) => {
   }
 }
 
+export const updateLeadService = async (leadId, data, actor) => {
+  const lead = await getLeadForActor(leadId)
+  assertPipelineScope(actor, lead.pipeline)
+
+  const hasName = data?.name !== undefined
+  const hasMobile = data?.mobile !== undefined
+  const hasDate = data?.date !== undefined
+  const hasInterested =
+    data?.interestedFor !== undefined || data?.interested_for !== undefined
+  const hasAssigned =
+    data?.assignedToId !== undefined ||
+    data?.assigned_to !== undefined
+
+  if (!hasName && !hasMobile && !hasDate && !hasInterested && !hasAssigned) {
+    throw new ValidationError("Validation failed", [
+      { field: "body", message: "At least one field is required to update (name, mobile, date, interestedFor, assignedToId)" }
+    ])
+  }
+
+  const updateData = { updatedById: actor.id }
+  const errors = []
+
+  if (hasName) {
+    const name = normalize(data.name)
+    if (!name) errors.push({ field: "name", message: "name cannot be empty" })
+    else updateData.name = name
+  }
+
+  if (hasMobile) {
+    const mobile = normalize(data.mobile)
+    if (!mobile) errors.push({ field: "mobile", message: "mobile cannot be empty" })
+    else updateData.mobile = mobile
+  }
+
+  if (hasDate) {
+    const date = new Date(data.date)
+    if (Number.isNaN(date.getTime())) errors.push({ field: "date", message: "date must be a valid date" })
+    else updateData.date = date
+  }
+
+  if (hasInterested) {
+    const raw = data.interestedFor ?? data.interested_for
+    updateData.interestedFor =
+      raw === null || raw === "" ? null : String(raw).trim()
+  }
+
+  if (hasAssigned) {
+    const raw = data.assignedToId ?? data.assigned_to
+    if (raw === null || raw === "" || raw === undefined) {
+      updateData.assignedToId = null
+    } else {
+      const assignedToId = Number(raw)
+      if (!Number.isInteger(assignedToId) || assignedToId < 1) {
+        errors.push({ field: "assignedToId", message: "assignedToId must be a valid user id" })
+      } else {
+        updateData.assignedToId = await validateAssignedToId(assignedToId, actor, lead.pipeline)
+      }
+    }
+  }
+
+  if (errors.length) throw new ValidationError("Validation failed", errors)
+
+  return prisma.lead.update({
+    where: { id: lead.id },
+    data: updateData,
+    include: leadDetailInclude
+  })
+}
+
+export const deleteLeadService = async (leadId, actor) => {
+  const lead = await getLeadForActor(leadId)
+  assertPipelineScope(actor, lead.pipeline)
+
+  return prisma.lead.update({
+    where: { id: lead.id },
+    data: { isDeleted: true, updatedById: actor.id },
+    include: leadDetailInclude
+  })
+}
+
 export const updateLeadStageService = async (leadId, data, actor) => {
-  const id = Number(leadId)
   const stageId = Number(data?.stageId ?? data?.stage_id)
 
   const errors = []
-  if (!Number.isInteger(id) || id < 1) errors.push({ field: "id", message: "Invalid lead id" })
   if (!Number.isInteger(stageId) || stageId < 1) errors.push({ field: "stageId", message: "stageId is required" })
   if (errors.length) throw new ValidationError("Validation failed", errors)
 
-  const lead = await prisma.lead.findUnique({
-    where: { id },
-    include: { pipeline: true }
-  })
-  if (!lead || lead.isDeleted) throw new NotFoundError("Lead")
+  const lead = await getLeadForActor(leadId)
   assertPipelineScope(actor, lead.pipeline)
 
   const mapping = await prisma.pipelineStage.findUnique({
@@ -198,17 +300,14 @@ export const updateLeadStageService = async (leadId, data, actor) => {
 
   if (lead.stageId === stageId) {
     return prisma.lead.findUnique({
-      where: { id },
-      include: {
-        pipeline: { select: { id: true, name: true } },
-        ...leadStageLogInclude
-      }
+      where: { id: lead.id },
+      include: leadDetailInclude
     })
   }
 
   const now = new Date()
   return prisma.lead.update({
-    where: { id },
+    where: { id: lead.id },
     data: {
       previousStageId: lead.stageId,
       stageId,
@@ -216,10 +315,7 @@ export const updateLeadStageService = async (leadId, data, actor) => {
       stageChangedAt: now,
       updatedById: actor.id
     },
-    include: {
-      pipeline: { select: { id: true, name: true } },
-      ...leadStageLogInclude
-    }
+    include: leadDetailInclude
   })
 }
 

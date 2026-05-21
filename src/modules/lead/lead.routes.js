@@ -4,10 +4,12 @@ import { hasPermission } from "../../middleware/hasPermission.js"
 import {
   addLeadComment,
   createLead,
+  deleteLead,
   getBranchUsersForLead,
   getLeadComments,
   getLeads,
   importLeadsFromExcel,
+  updateLead,
   updateLeadStage
 } from "./lead.controller.js"
 
@@ -24,7 +26,11 @@ router.get("/", hasPermission("LEAD", "canView"), getLeads)
 // Bulk import from Excel
 router.post("/import-excel", hasPermission("LEAD", "canCreate"), importLeadsFromExcel)
 
-// stage updates
+// Update / delete lead — same permission as create (LEAD:canCreate)
+router.put("/:id", hasPermission("LEAD", "canCreate"), updateLead)
+router.delete("/:id", hasPermission("LEAD", "canCreate"), deleteLead)
+
+// stage updates (move card between columns)
 router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), updateLeadStage)
 
 // comments
