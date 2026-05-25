@@ -34,9 +34,16 @@ const LABEL_MAP = {
   totalClosureDone:     "Total Closure Done",
 }
 
+// Roles that see only their own leads (self-scoped)
+const SELF_SCOPED_ROLES = ["ISE", "SALES_TEAM"]
+
 export const getDashboardReportsService = async (query, user) => {
   const branchId = Number(user?.branchId)
   if (!Number.isInteger(branchId) || branchId < 1) throw new BadRequestError("Branch is required")
+
+  const role     = user.primaryRole                          // e.g. "ISE", "BRANCH_ADMIN"
+  const isSelf   = SELF_SCOPED_ROLES.includes(role)         // true → only own leads
+  const viewMode = isSelf ? "self" : "branch"               // returned in response so frontend knows
 
   // ── Date range ────────────────────────────────────────────────
   const todayStart = new Date()
@@ -70,15 +77,17 @@ export const getDashboardReportsService = async (query, user) => {
   })
   const stageIdByName = new Map(stages.map(s => [s.name, s.id]))
 
-  // ── Base lead filter: branch scope + date range (stageChangedAt) ─
+  // ── Base lead filter ──────────────────────────────────────────
+  // ISE / SALES_TEAM  → only leads they personally moved (stageChangedById = their id)
+  // BRANCH_ADMIN / MANAGER → all leads in their branch
   const baseLeadWhere = {
     isDeleted: false,
     pipeline: { branchId },
-    stageChangedAt: { gte: startDate, lte: endDate }
+    stageChangedAt: { gte: startDate, lte: endDate },
+    ...(isSelf ? { stageChangedById: user.id } : {})
   }
 
   // ── Fetch full lead records per stage in parallel ─────────────
-  // Each lead includes: who moved it, from/to stage, pipeline, assignedTo
   const stageResults = await Promise.all(
     DASHBOARD_STAGE_MAP.map(async ({ key, stageName }) => {
       const stageId = stageIdByName.get(stageName)
@@ -94,26 +103,11 @@ export const getDashboardReportsService = async (query, user) => {
           interestedFor:  true,
           date:           true,
           stageChangedAt: true,
-          // who moved this lead into the current stage
-          stageChangedBy: {
-            select: { id: true, name: true, email: true }
-          },
-          // previous stage (where it came from)
-          previousStage: {
-            select: { id: true, name: true }
-          },
-          // current stage
-          stage: {
-            select: { id: true, name: true }
-          },
-          // pipeline info
-          pipeline: {
-            select: { id: true, name: true }
-          },
-          // who the lead is assigned to
-          assignedTo: {
-            select: { id: true, name: true, email: true }
-          }
+          stageChangedBy: { select: { id: true, name: true, email: true } },
+          previousStage:  { select: { id: true, name: true } },
+          stage:          { select: { id: true, name: true } },
+          pipeline:       { select: { id: true, name: true } },
+          assignedTo:     { select: { id: true, name: true, email: true } }
         }
       })
 
@@ -175,6 +169,12 @@ export const getDashboardReportsService = async (query, user) => {
       startDate: startDate.toISOString(),
       endDate:   endDate.toISOString(),
       isDefault: !query?.startDate && !query?.endDate
+    },
+    viewMode,   // "self" | "branch"  — tells frontend which scope is active
+    viewer: {   // who is viewing
+      id:   user.id,
+      name: user.name,
+      role
     },
     branchId,
     totalLeadsInRange,

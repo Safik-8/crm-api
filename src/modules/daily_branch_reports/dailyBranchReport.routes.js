@@ -7,9 +7,9 @@ const router = Router()
 
 router.use(authenticate)
 
-router.post("/submit",      authorize("ISE"),          submitDailyBranchReport)
-router.get("/get-reports",  authorize("BRANCH_ADMIN"), getDailyBranchReports)
-router.get("/dashboard",    authorize("BRANCH_ADMIN", "MANAGER"), getDashboardReports)
+router.post("/submit",      authorize("ISE"),                                              submitDailyBranchReport)
+router.get("/get-reports",  authorize("BRANCH_ADMIN"),                                     getDailyBranchReports)
+router.get("/dashboard",    authorize("BRANCH_ADMIN", "MANAGER", "ISE", "SALES_TEAM"),    getDashboardReports)
 
 export default router
 
