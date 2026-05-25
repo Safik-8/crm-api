@@ -25,6 +25,15 @@ const DASHBOARD_STAGE_MAP = [
   { key: "totalClosureDone",      stageName: "Closure"           },
 ]
 
+// Human-readable labels for each key
+const LABEL_MAP = {
+  totalCallDone:        "Total Call Done",
+  totalCounsellingDone: "Total Counselling Done",
+  totalFollowUpTaken:   "Total Follow Up Taken",
+  totalQualifiedLeads:  "Total Qualified Leads (Hot Lead)",
+  totalClosureDone:     "Total Closure Done",
+}
+
 export const getDashboardReportsService = async (query, user) => {
   const branchId = Number(user?.branchId)
   if (!Number.isInteger(branchId) || branchId < 1) throw new BadRequestError("Branch is required")
@@ -54,7 +63,6 @@ export const getDashboardReportsService = async (query, user) => {
   if (startDate > endDate) throw new BadRequestError("startDate cannot be after endDate")
 
   // ── Dynamically resolve stage IDs by name ─────────────────────
-  // We look up by name so it works regardless of which stages exist.
   const stageNames = DASHBOARD_STAGE_MAP.map(m => m.stageName)
   const stages = await prisma.stage.findMany({
     where: { name: { in: stageNames }, isDeleted: false },
@@ -63,35 +71,102 @@ export const getDashboardReportsService = async (query, user) => {
   const stageIdByName = new Map(stages.map(s => [s.name, s.id]))
 
   // ── Base lead filter: branch scope + date range (stageChangedAt) ─
-  // We use stageChangedAt so the count reflects when the lead
-  // actually moved into that stage within the selected date range.
   const baseLeadWhere = {
     isDeleted: false,
     pipeline: { branchId },
     stageChangedAt: { gte: startDate, lte: endDate }
   }
 
-  // ── Count leads per stage in parallel ────────────────────────
-  const counts = await Promise.all(
+  // ── Fetch full lead records per stage in parallel ─────────────
+  // Each lead includes: who moved it, from/to stage, pipeline, assignedTo
+  const stageResults = await Promise.all(
     DASHBOARD_STAGE_MAP.map(async ({ key, stageName }) => {
       const stageId = stageIdByName.get(stageName)
-      if (!stageId) return { key, stageName, count: 0, stageExists: false }
+      if (!stageId) return { key, stageName, stageExists: false, leads: [] }
 
-      const count = await prisma.lead.count({
-        where: { ...baseLeadWhere, stageId }
+      const leads = await prisma.lead.findMany({
+        where: { ...baseLeadWhere, stageId },
+        orderBy: { stageChangedAt: "desc" },
+        select: {
+          id:             true,
+          name:           true,
+          mobile:         true,
+          interestedFor:  true,
+          date:           true,
+          stageChangedAt: true,
+          // who moved this lead into the current stage
+          stageChangedBy: {
+            select: { id: true, name: true, email: true }
+          },
+          // previous stage (where it came from)
+          previousStage: {
+            select: { id: true, name: true }
+          },
+          // current stage
+          stage: {
+            select: { id: true, name: true }
+          },
+          // pipeline info
+          pipeline: {
+            select: { id: true, name: true }
+          },
+          // who the lead is assigned to
+          assignedTo: {
+            select: { id: true, name: true, email: true }
+          }
+        }
       })
-      return { key, stageName, count, stageExists: true }
+
+      return { key, stageName, stageExists: true, leads }
     })
   )
 
-  // ── Build response cards ──────────────────────────────────────
-  const cards = counts.map(({ key, stageName, count, stageExists }) => ({
-    key,
-    label: LABEL_MAP[key],
-    stageName,
-    stageExists,
-    count
-  }))
+  // ── Build per-user breakdown for each card ────────────────────
+  // Group leads by the user who moved them (stageChangedBy)
+  const cards = stageResults.map(({ key, stageName, stageExists, leads }) => {
+    const userMap = new Map()
+
+    for (const lead of leads) {
+      const mover  = lead.stageChangedBy
+      const mapKey = mover?.id ?? "__unassigned__"
+
+      if (!userMap.has(mapKey)) {
+        userMap.set(mapKey, {
+          user:  mover ? { id: mover.id, name: mover.name, email: mover.email } : null,
+          count: 0,
+          leads: []
+        })
+      }
+
+      const entry = userMap.get(mapKey)
+      entry.count += 1
+      entry.leads.push({
+        id:            lead.id,
+        name:          lead.name,
+        mobile:        lead.mobile,
+        interestedFor: lead.interestedFor ?? null,
+        date:          lead.date,
+        movedAt:       lead.stageChangedAt,
+        fromStage:     lead.previousStage  ?? null,
+        toStage:       lead.stage,
+        pipeline:      lead.pipeline,
+        assignedTo:    lead.assignedTo ?? null
+      })
+    }
+
+    // Sort user groups by count DESC (top performer first)
+    const userBreakdown = Array.from(userMap.values())
+      .sort((a, b) => b.count - a.count)
+
+    return {
+      key,
+      label:         LABEL_MAP[key],
+      stageName,
+      stageExists,
+      count:         leads.length,
+      userBreakdown
+    }
+  })
 
   const totalLeadsInRange = cards.reduce((sum, c) => sum + c.count, 0)
 
@@ -105,15 +180,6 @@ export const getDashboardReportsService = async (query, user) => {
     totalLeadsInRange,
     cards
   }
-}
-
-// Human-readable labels for each key
-const LABEL_MAP = {
-  totalCallDone:        "Total Call Done",
-  totalCounsellingDone: "Total Counselling Done",
-  totalFollowUpTaken:   "Total Follow Up Taken",
-  totalQualifiedLeads:  "Total Qualified Leads (Hot Lead)",
-  totalClosureDone:     "Total Closure Done",
 }
 
 
