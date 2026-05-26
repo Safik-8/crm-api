@@ -292,6 +292,16 @@ export const updateLeadStageService = async (leadId, data, actor) => {
   const lead = await getLeadForActor(leadId)
   assertPipelineScope(actor, lead.pipeline)
 
+  // ── Closure lock: once a lead reaches "Closure" it cannot be moved back ──
+  // Fetch the current stage name to check if it is the terminal stage.
+  const currentStage = await prisma.stage.findUnique({
+    where: { id: lead.stageId },
+    select: { name: true }
+  })
+  if (currentStage?.name === "Closure") {
+    throw new ForbiddenError("This lead is closed. A closed lead cannot be moved to another stage.")
+  }
+
   const mapping = await prisma.pipelineStage.findUnique({
     where: { pipelineId_stageId: { pipelineId: lead.pipelineId, stageId } },
     select: { id: true }
