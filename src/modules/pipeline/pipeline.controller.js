@@ -29,7 +29,7 @@ export const listPipelines = async (req, res, next) => {
 
 export const getPipelineDetails = async (req, res, next) => {
   try {
-    const pipeline = await getPipelineDetailsService(req.params.id, req.user)
+    const pipeline = await getPipelineDetailsService(req.params.id, req.query, req.user)
     return sendSuccess(res, { pipeline }, "Pipeline fetched")
   } catch (err) {
     next(err)

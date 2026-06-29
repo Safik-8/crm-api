@@ -1,6 +1,187 @@
 import prisma from "../../config/db.js"
 import { BadRequestError, ConflictError, ValidationError } from "../../utils/AppError.js"
 
+// ══════════════════════════════════════════════════════════════════
+// DASHBOARD — GET REPORTS  (auto-computed from leads table)
+//
+// 5 metrics derived from current stage name on leads:
+//   1. Total Call Done        → stage.name = "Call Done"
+//   2. Total Counselling Done → stage.name = "Counselling Done"
+//   3. Total Follow Up Taken  → stage.name = "Follow Up"
+//   4. Total Qualified Leads  → stage.name = "Hot Lead"
+//   5. Total Closure Done     → stage.name = "Closure"
+//
+// Scoped to the authenticated user's branch via pipeline.branchId.
+// Date range: today by default, or ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+// All metrics default to 0 when no data exists.
+// ══════════════════════════════════════════════════════════════════
+
+// Stage name → dashboard card label mapping (dynamic lookup)
+const DASHBOARD_STAGE_MAP = [
+  { key: "totalCallDone",         stageName: "Call Done"         },
+  { key: "totalCounsellingDone",  stageName: "Counselling Done"  },
+  { key: "totalFollowUpTaken",    stageName: "Follow Up"         },
+  { key: "totalQualifiedLeads",   stageName: "Hot Lead"          },
+  { key: "totalClosureDone",      stageName: "Closure"           },
+]
+
+// Human-readable labels for each key
+const LABEL_MAP = {
+  totalCallDone:        "Total Call Done",
+  totalCounsellingDone: "Total Counselling Done",
+  totalFollowUpTaken:   "Total Follow Up Taken",
+  totalQualifiedLeads:  "Total Qualified Leads (Hot Lead)",
+  totalClosureDone:     "Total Closure Done",
+}
+
+// Roles that see only their own leads (self-scoped)
+const SELF_SCOPED_ROLES = ["ISE", "BDE"]
+
+export const getDashboardReportsService = async (query, user) => {
+  const branchId = Number(user?.branchId)
+  if (!Number.isInteger(branchId) || branchId < 1) throw new BadRequestError("Branch is required")
+
+  const role     = user.primaryRole                          // e.g. "ISE", "BRANCH_MANAGER"
+  const isSelf   = SELF_SCOPED_ROLES.includes(role)         // true → only own leads
+  const viewMode = isSelf ? "self" : "branch"               // returned in response so frontend knows
+
+  // ── Date range ────────────────────────────────────────────────
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const todayEnd = new Date()
+  todayEnd.setHours(23, 59, 59, 999)
+
+  let startDate = todayStart
+  let endDate   = todayEnd
+
+  if (query?.startDate) {
+    const d = new Date(query.startDate)
+    if (Number.isNaN(d.getTime())) throw new BadRequestError("Invalid startDate. Use YYYY-MM-DD format.")
+    d.setHours(0, 0, 0, 0)
+    startDate = d
+  }
+  if (query?.endDate) {
+    const d = new Date(query.endDate)
+    if (Number.isNaN(d.getTime())) throw new BadRequestError("Invalid endDate. Use YYYY-MM-DD format.")
+    d.setHours(23, 59, 59, 999)
+    endDate = d
+  }
+
+  if (startDate > endDate) throw new BadRequestError("startDate cannot be after endDate")
+
+  // ── Dynamically resolve stage IDs by name ─────────────────────
+  const stageNames = DASHBOARD_STAGE_MAP.map(m => m.stageName)
+  const stages = await prisma.stage.findMany({
+    where: { name: { in: stageNames }, isDeleted: false },
+    select: { id: true, name: true }
+  })
+  const stageIdByName = new Map(stages.map(s => [s.name, s.id]))
+
+  // ── Base lead filter ──────────────────────────────────────────
+  // ISE / SALES_TEAM  → only leads they personally moved (stageChangedById = their id)
+  // BRANCH_ADMIN / MANAGER → all leads in their branch
+  const baseLeadWhere = {
+    isDeleted: false,
+    pipeline: { branchId },
+    stageChangedAt: { gte: startDate, lte: endDate },
+    ...(isSelf ? { stageChangedById: user.id } : {})
+  }
+
+  // ── Fetch full lead records per stage in parallel ─────────────
+  const stageResults = await Promise.all(
+    DASHBOARD_STAGE_MAP.map(async ({ key, stageName }) => {
+      const stageId = stageIdByName.get(stageName)
+      if (!stageId) return { key, stageName, stageExists: false, leads: [] }
+
+      const leads = await prisma.lead.findMany({
+        where: { ...baseLeadWhere, stageId },
+        orderBy: { stageChangedAt: "desc" },
+        select: {
+          id:             true,
+          name:           true,
+          mobile:         true,
+          interestedFor:  true,
+          date:           true,
+          stageChangedAt: true,
+          stageChangedBy: { select: { id: true, name: true, email: true } },
+          previousStage:  { select: { id: true, name: true } },
+          stage:          { select: { id: true, name: true } },
+          pipeline:       { select: { id: true, name: true } },
+          assignedTo:     { select: { id: true, name: true, email: true } }
+        }
+      })
+
+      return { key, stageName, stageExists: true, leads }
+    })
+  )
+
+  // ── Build per-user breakdown for each card ────────────────────
+  // Group leads by the user who moved them (stageChangedBy)
+  const cards = stageResults.map(({ key, stageName, stageExists, leads }) => {
+    const userMap = new Map()
+
+    for (const lead of leads) {
+      const mover  = lead.stageChangedBy
+      const mapKey = mover?.id ?? "__unassigned__"
+
+      if (!userMap.has(mapKey)) {
+        userMap.set(mapKey, {
+          user:  mover ? { id: mover.id, name: mover.name, email: mover.email } : null,
+          count: 0,
+          leads: []
+        })
+      }
+
+      const entry = userMap.get(mapKey)
+      entry.count += 1
+      entry.leads.push({
+        id:            lead.id,
+        name:          lead.name,
+        mobile:        lead.mobile,
+        interestedFor: lead.interestedFor ?? null,
+        date:          lead.date,
+        movedAt:       lead.stageChangedAt,
+        fromStage:     lead.previousStage  ?? null,
+        toStage:       lead.stage,
+        pipeline:      lead.pipeline,
+        assignedTo:    lead.assignedTo ?? null
+      })
+    }
+
+    // Sort user groups by count DESC (top performer first)
+    const userBreakdown = Array.from(userMap.values())
+      .sort((a, b) => b.count - a.count)
+
+    return {
+      key,
+      label:         LABEL_MAP[key],
+      stageName,
+      stageExists,
+      count:         leads.length,
+      userBreakdown
+    }
+  })
+
+  const totalLeadsInRange = cards.reduce((sum, c) => sum + c.count, 0)
+
+  return {
+    range: {
+      startDate: startDate.toISOString(),
+      endDate:   endDate.toISOString(),
+      isDefault: !query?.startDate && !query?.endDate
+    },
+    viewMode,   // "self" | "branch"  — tells frontend which scope is active
+    viewer: {   // who is viewing
+      id:   user.id,
+      name: user.name,
+      role
+    },
+    branchId,
+    totalLeadsInRange,
+    cards
+  }
+}
+
 
 export const submitDailyBranchReportService = async (data, user) => {
   const { reportDate, callsReceived, qualifiedLeads, counsellingDone, counsellingBooked, officeVisits, closures, followupsDone, pendingFollowups } = data;

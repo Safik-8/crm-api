@@ -20,7 +20,7 @@ router.use(authenticate)
 // POST /api/branches
 router.post(
     "/",
-    authorize("SUPER_ADMIN", "BRANCH_MANAGER"),
+    authorize("SUPER_ADMIN", "COMPANY_ADMIN"),
     hasPermission("BRANCH", "canCreate"),
     createBranch
 )
@@ -48,7 +48,7 @@ router.get(
 // PUT /api/branches/:id
 router.put(
     "/:id",
-    authorize("SUPER_ADMIN", "BRANCH_MANAGER"),
+    authorize("SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER"),
     hasPermission("BRANCH", "canEdit"),
     updateBranch
 )
@@ -56,7 +56,7 @@ router.put(
 // POST /api/branches/:id/assign-user
 router.post(
     "/:id/assign-user",
-    authorize("SUPER_ADMIN", "BRANCH_MANAGER"),
+    authorize("SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER"),
     hasPermission("BRANCH", "canEdit"),
     assignUserToBranch
 )

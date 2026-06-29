@@ -42,10 +42,10 @@ router.get(
   getCompaniesWithPagination
 )
 
-// GET /api/companies/:id — Super Admin only
+// GET /api/companies/:id — Super Admin or Company Admin
 router.get(
     "/:id",
-    authorize("SUPER_ADMIN"),
+    authorize("SUPER_ADMIN", "COMPANY_ADMIN"),
     hasPermission("COMPANY", "canView"),
     getCompanyById
 )
@@ -53,7 +53,7 @@ router.get(
 // PUT /api/companies/:id
 router.put(
     "/:id",
-    authorize("SUPER_ADMIN"),
+    authorize("SUPER_ADMIN", "COMPANY_ADMIN"),
     hasPermission("COMPANY", "canEdit"),
     updateCompany
 )

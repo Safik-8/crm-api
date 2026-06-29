@@ -1,7 +1,12 @@
 import prisma from "../../config/db.js"
 import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
+import { getBranchUsersByBranchId, leadStageLogInclude } from "../lead/lead.service.js"
 
 const normalizeName = (name) => String(name || "").trim()
+const normalizeTextFilter = (value) => {
+  const text = String(value || "").trim()
+  return text || null
+}
 
 const resolveOrgContext = async (data, actor) => {
   // branch users: fixed to actor
@@ -45,34 +50,139 @@ const assertPipelineScope = (actor, pipeline) => {
   if (actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
 }
 
-const ensureProspectStage = async (tx, actorId) => {
-  const existing = await tx.stage.findFirst({
-    where: { OR: [{ isDefault: true }, { name: "Prospect" }] }
-  })
-  if (existing) {
-    if (existing.isDeleted) {
-      return tx.stage.update({
-        where: { id: existing.id },
-        data: { isDeleted: false, isDefault: true, updatedById: actorId }
-      })
-    }
-    if (!existing.isDefault) {
-      return tx.stage.update({
-        where: { id: existing.id },
-        data: { isDefault: true, updatedById: actorId }
-      })
-    }
-    return existing
+const normalizePipelineStagesOrder = (stages) => {
+  if (!Array.isArray(stages)) return stages
+  const prospect = stages.find(s => s.name === "Prospect")
+  const closure = stages.find(s => s.name === "Closure")
+  const middle = stages.filter(s => s.name !== "Prospect" && s.name !== "Closure")
+  const ordered = []
+  if (prospect) ordered.push(prospect)
+  ordered.push(...middle)
+  if (closure) ordered.push(closure)
+  return ordered
+}
+
+const parsePositiveInt = (value, fieldName) => {
+  if (value === undefined || value === null || value === "") return null
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new ValidationError("Validation failed", [{ field: fieldName, message: `${fieldName} must be a valid positive integer` }])
+  }
+  return parsed
+}
+
+/** UTC calendar day bounds for "today" (matches lead date storage as UTC day). */
+const getUtcTodayBounds = () => {
+  const now = new Date()
+  const y = now.getUTCFullYear()
+  const mo = now.getUTCMonth()
+  const d = now.getUTCDate()
+  const from = new Date(Date.UTC(y, mo, d, 0, 0, 0, 0))
+  const to = new Date(Date.UTC(y, mo, d, 23, 59, 59, 999))
+  return { from, to }
+}
+
+const parseDateRange = (dateFrom, dateTo, query) => {
+  const allDates =
+    query?.allDates === "1" ||
+    query?.allDates === "true" ||
+    String(query?.allDates || "").toLowerCase() === "yes"
+
+  if (allDates) {
+    return { from: null, to: null, defaultedToToday: false, skippedDateFilter: true }
   }
 
-  return tx.stage.create({
-    data: {
-      name: "Prospect",
-      isDefault: true,
-      isDeleted: false,
-      createdById: actorId
+  const hasFrom = dateFrom !== undefined && dateFrom !== null && String(dateFrom).trim() !== ""
+  const hasTo = dateTo !== undefined && dateTo !== null && String(dateTo).trim() !== ""
+
+  if (!hasFrom && !hasTo) {
+    const { from, to } = getUtcTodayBounds()
+    return { from, to, defaultedToToday: true, skippedDateFilter: false }
+  }
+
+  const from = hasFrom ? new Date(dateFrom) : null
+  const to = hasTo ? new Date(dateTo) : null
+
+  if (from && Number.isNaN(from.getTime())) {
+    throw new ValidationError("Validation failed", [{ field: "dateFrom", message: "dateFrom must be a valid date" }])
+  }
+  if (to && Number.isNaN(to.getTime())) {
+    throw new ValidationError("Validation failed", [{ field: "dateTo", message: "dateTo must be a valid date" }])
+  }
+  if (from && to && from > to) {
+    throw new ValidationError("Validation failed", [{ field: "dateRange", message: "dateFrom cannot be after dateTo" }])
+  }
+
+  return { from, to, defaultedToToday: false, skippedDateFilter: false }
+}
+
+const buildLeadBoardQueryOptions = (query) => {
+  const sortBy = String(query?.sortBy || "createdAt").trim()
+  const sortOrder = String(query?.sortOrder || "desc").trim().toLowerCase()
+  const allowedSortBy = new Set(["createdAt", "updatedAt", "name", "date", "mobile"])
+  const allowedSortOrder = new Set(["asc", "desc"])
+
+  if (!allowedSortBy.has(sortBy)) {
+    throw new ValidationError("Validation failed", [{
+      field: "sortBy",
+      message: "sortBy must be one of createdAt, updatedAt, name, date, mobile"
+    }])
+  }
+  if (!allowedSortOrder.has(sortOrder)) {
+    throw new ValidationError("Validation failed", [{ field: "sortOrder", message: "sortOrder must be asc or desc" }])
+  }
+
+  const { from, to, defaultedToToday, skippedDateFilter } = parseDateRange(query?.dateFrom, query?.dateTo, query)
+  const stageId = parsePositiveInt(query?.stageId, "stageId")
+  const assignedToId = parsePositiveInt(query?.assignedToId, "assignedToId")
+  // One search box: matches lead name, mobile, or interestedFor (case-insensitive partial match)
+  const search = normalizeTextFilter(query?.search ?? query?.leadName ?? query?.name ?? query?.q)
+
+  return {
+    search,
+    stageId,
+    assignedToId,
+    dateFrom: from,
+    dateTo: to,
+    dateDefaultedToToday: defaultedToToday,
+    dateFilterSkipped: skippedDateFilter,
+    sortBy,
+    sortOrder
+  }
+}
+
+const ensureDefaultStages = async (tx, actorId) => {
+  const stageNames = ["Prospect", "Closure"]
+  const stages = {}
+
+  for (const name of stageNames) {
+    let stage = await tx.stage.findUnique({
+      where: { name },
+      select: { id: true, isDefault: true, isDeleted: true }
+    })
+
+    if (stage) {
+      if (stage.isDeleted || !stage.isDefault) {
+        stage = await tx.stage.update({
+          where: { id: stage.id },
+          data: { isDeleted: false, isDefault: true, updatedById: actorId }
+        })
+      }
+    } else {
+      stage = await tx.stage.create({
+        data: {
+          name,
+          isDefault: true,
+          isDeleted: false,
+          createdById: actorId
+        }
+      })
     }
-  })
+
+    stages[name] = stage
+  }
+
+  return stages
 }
 
 export const createPipelineService = async (data, actor) => {
@@ -81,7 +191,7 @@ export const createPipelineService = async (data, actor) => {
 
   const { companyId, branchId } = await resolveOrgContext(data, actor)
 
-  // Rule: Every pipeline MUST have "Prospect" stage assigned.
+  // Rule: Every pipeline MUST have Prospect first and Closure last.
   return prisma.$transaction(async (tx) => {
     const pipeline = await tx.pipeline.create({
       data: {
@@ -93,16 +203,13 @@ export const createPipelineService = async (data, actor) => {
       }
     })
 
-    const prospect = await ensureProspectStage(tx, actor.id)
+    const { Prospect: prospect, Closure: closure } = await ensureDefaultStages(tx, actor.id)
 
-    await tx.pipelineStage.upsert({
-      where: { pipelineId_stageId: { pipelineId: pipeline.id, stageId: prospect.id } },
-      update: { orderNo: 1 },
-      create: {
-        pipelineId: pipeline.id,
-        stageId: prospect.id,
-        orderNo: 1
-      }
+    await tx.pipelineStage.createMany({
+      data: [
+        { pipelineId: pipeline.id, stageId: prospect.id, orderNo: 1 },
+        { pipelineId: pipeline.id, stageId: closure.id, orderNo: 2 }
+      ]
     })
 
     return pipeline
@@ -114,6 +221,20 @@ export const listPipelinesService = async (query, actor) => {
 
   if (actor.companyId) where.companyId = actor.companyId
   if (actor.branchId) where.branchId = actor.branchId
+
+  const listSearch = normalizeTextFilter(query?.search ?? query?.leadName ?? query?.name ?? query?.q)
+  if (listSearch) {
+    where.leads = {
+      some: {
+        isDeleted: false,
+        OR: [
+          { name: { contains: listSearch, mode: "insensitive" } },
+          { mobile: { contains: listSearch, mode: "insensitive" } },
+          { interestedFor: { contains: listSearch, mode: "insensitive" } }
+        ]
+      }
+    }
+  }
 
   if (!actor.branchId && query?.branchId) {
     where.branchId = Number(query.branchId)
@@ -159,7 +280,7 @@ export const listPipelinesService = async (query, actor) => {
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     leadCount: countsByPipelineId.get(p.id) ?? 0,
-    stages: p.stages.map(ps => ({
+    stages: normalizePipelineStagesOrder(p.stages).map(ps => ({
       id: ps.stage.id,
       name: ps.stage.name,
       isDefault: ps.stage.isDefault,
@@ -169,20 +290,16 @@ export const listPipelinesService = async (query, actor) => {
   }))
 }
 
-export const getPipelineDetailsService = async (id, actor) => {
+export const getPipelineDetailsService = async (id, query, actor) => {
   const pipelineId = Number(id)
   if (!Number.isInteger(pipelineId) || pipelineId < 1) throw new BadRequestError("Invalid pipeline id")
+  const options = buildLeadBoardQueryOptions(query)
 
   const pipeline = await prisma.pipeline.findUnique({
     where: { id: pipelineId },
     include: {
       stages: {
         orderBy: { orderNo: "asc" },
-        include: { stage: true }
-      },
-      leads: {
-        where: { isDeleted: false },
-        orderBy: { createdAt: "desc" },
         include: { stage: true }
       }
     }
@@ -191,12 +308,57 @@ export const getPipelineDetailsService = async (id, actor) => {
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
-  const stages = pipeline.stages.map(ps => ({
+  const stages = normalizePipelineStagesOrder(pipeline.stages).map(ps => ({
     id: ps.stage.id,
     name: ps.stage.name,
     isDefault: ps.stage.isDefault,
-    orderNo: ps.orderNo
+    orderNo: ps.orderNo,
+    leads: []
   }))
+
+  const leadWhere = {
+    pipelineId: pipeline.id,
+    isDeleted: false
+  }
+
+  if (options.stageId) leadWhere.stageId = options.stageId
+  if (options.assignedToId) leadWhere.assignedToId = options.assignedToId
+  if (options.search) {
+    leadWhere.OR = [
+      { name: { contains: options.search, mode: "insensitive" } },
+      { mobile: { contains: options.search, mode: "insensitive" } },
+      { interestedFor: { contains: options.search, mode: "insensitive" } }
+    ]
+  }
+  if (!options.dateFilterSkipped && (options.dateFrom || options.dateTo)) {
+    leadWhere.date = {
+      ...(options.dateFrom ? { gte: options.dateFrom } : {}),
+      ...(options.dateTo ? { lte: options.dateTo } : {})
+    }
+  }
+
+  const leads = await prisma.lead.findMany({
+    where: leadWhere,
+    orderBy: { [options.sortBy]: options.sortOrder },
+    include: {
+      assignedTo: { select: { id: true, name: true, email: true } },
+      ...leadStageLogInclude
+    }
+  })
+
+  const leadsByStageId = new Map()
+  for (const lead of leads) {
+    const stageLeads = leadsByStageId.get(lead.stageId) || []
+    stageLeads.push(lead)
+    leadsByStageId.set(lead.stageId, stageLeads)
+  }
+
+  const boardStages = stages.map(stage => ({
+    ...stage,
+    leads: leadsByStageId.get(stage.id) || []
+  }))
+
+  const assignableUsers = await getBranchUsersByBranchId(pipeline.branchId)
 
   return {
     id: pipeline.id,
@@ -205,8 +367,22 @@ export const getPipelineDetailsService = async (id, actor) => {
     companyId: pipeline.companyId,
     createdAt: pipeline.createdAt,
     updatedAt: pipeline.updatedAt,
-    stages,
-    leads: pipeline.leads
+    stages: boardStages,
+    leads,
+    assignableUsers,
+    filters: {
+      stageId: options.stageId,
+      assignedToId: options.assignedToId,
+      search: options.search,
+      dateFrom: options.dateFrom,
+      dateTo: options.dateTo,
+      dateDefaultedToToday: options.dateDefaultedToToday,
+      allDates: options.dateFilterSkipped
+    },
+    sort: {
+      sortBy: options.sortBy,
+      sortOrder: options.sortOrder
+    }
   }
 }
 
@@ -254,7 +430,7 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
   const orderedStageIds = Array.isArray(data?.orderedStageIds) ? data.orderedStageIds.map(Number).filter(n => Number.isInteger(n) && n > 0) : null
 
   return prisma.$transaction(async (tx) => {
-    const prospect = await ensureProspectStage(tx, actor.id)
+    const { Prospect: prospect, Closure: closure } = await ensureDefaultStages(tx, actor.id)
 
     const createdStageIds = []
     for (const s of newStages) {
@@ -282,7 +458,7 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
       }
     }
 
-    const set = new Set([prospect.id, ...incomingStageIds, ...createdStageIds])
+    const set = new Set([prospect.id, closure.id, ...incomingStageIds, ...createdStageIds])
     const finalStageIds = [...set]
 
     let ordered = finalStageIds
@@ -293,16 +469,18 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
         finalStageIds.every(id => orderedSet.has(id))
 
       if (!same) throw new BadRequestError("orderedStageIds must contain the same stage ids being assigned")
+      if (orderedStageIds[0] !== prospect.id) throw new BadRequestError("Prospect stage must come first")
+      if (orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
+
       ordered = orderedStageIds
     } else {
-      // default order: Prospect first, then rest by name
-      const stages = await tx.stage.findMany({ where: { id: { in: finalStageIds } }, select: { id: true, name: true, isDefault: true } })
-      const prospectId = prospect.id
+      // default order: Prospect first, closure last, then other stages by name
+      const stages = await tx.stage.findMany({ where: { id: { in: finalStageIds } }, select: { id: true, name: true } })
       const rest = stages
-        .filter(s => s.id !== prospectId)
+        .filter(s => s.id !== prospect.id && s.id !== closure.id)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(s => s.id)
-      ordered = [prospectId, ...rest]
+      ordered = [prospect.id, ...rest, closure.id]
     }
 
     await tx.pipelineStage.deleteMany({ where: { pipelineId: pid } })
@@ -355,8 +533,12 @@ export const updatePipelineStageOrderService = async (pipelineId, data, actor) =
     if (!same) throw new BadRequestError("orderedStageIds must match existing pipeline stages")
 
     // Prospect must remain included; if not present, it's invalid
-    const prospect = await tx.stage.findFirst({ where: { isDefault: true, isDeleted: false }, select: { id: true } })
+    const prospect = await tx.stage.findUnique({ where: { name: "Prospect" }, select: { id: true } })
+    const closure = await tx.stage.findUnique({ where: { name: "Closure" }, select: { id: true } })
     if (prospect && !orderedSet.has(prospect.id)) throw new BadRequestError("Prospect stage must be included")
+    if (closure && !orderedSet.has(closure.id)) throw new BadRequestError("Closure stage must be included")
+    if (prospect && orderedStageIds[0] !== prospect.id) throw new BadRequestError("Prospect stage must come first")
+    if (closure && orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
 
     for (let i = 0; i < orderedStageIds.length; i++) {
       const stageId = orderedStageIds[i]
