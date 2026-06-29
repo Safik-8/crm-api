@@ -22,15 +22,15 @@ const assertCompanyScope = (actor, targetCompanyId) => {
 
 // ── ROLE CREATION RULES ───────────────────────────────────
 const ROLE_CREATION_RULES = {
-  SUPER_ADMIN: ["SUPER_ADMIN", "CEO", "BRANCH_ADMIN", "MANAGER", "ISE"],
-  BRANCH_ADMIN: ["MANAGER", "ISE"],
-  MANAGER: [],
-  CEO: [],
+  SUPER_ADMIN: ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER", "BDE", "ISE"],
+  COMPANY_ADMIN: [],
+  BRANCH_MANAGER: ["BDE", "ISE"],
+  BDE: [],
   ISE: [],
 }
 
 // ── ROLES THAT NEED BRANCH ────────────────────────────────
-const ROLES_NEED_BRANCH = ["BRANCH_ADMIN", "MANAGER", "ISE"]
+const ROLES_NEED_BRANCH = ["BRANCH_MANAGER", "BDE", "ISE"]
 
 
 // ══════════════════════════════════════
@@ -300,7 +300,7 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
   if (!ROLES_NEED_BRANCH.includes(roleName)) {
     throw new ValidationError(
       `Role ${roleName} cannot be assigned to a branch directly`,
-      [{ field: "roleName", message: "Use BRANCH_ADMIN, MANAGER, or ISE" }]
+      [{ field: "roleName", message: "Use BRANCH_MANAGER, BDE, or ISE" }]
     )
   }
 
