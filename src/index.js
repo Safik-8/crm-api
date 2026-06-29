@@ -6,6 +6,7 @@ import cors from "cors"
 import helmet from "helmet"
 import morgan from "morgan"
 import cookieParser from "cookie-parser"
+import { rateLimit } from "express-rate-limit"
 
 import prisma from "./config/db.js"
 
@@ -31,6 +32,22 @@ const PORT = process.env.PORT || 5000
 // MIDDLEWARES
 // ══════════════════════════════════════════════════════════
 app.use(helmet())
+
+// ── RATE LIMITING ─────────────────────────────────────────
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 100, // Limit each IP to 100 requests per 15 minutes
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  statusCode: 429,
+  message: {
+    success: false,
+    statusCode: 429,
+    code: "TOO_MANY_REQUESTS",
+    message: "Too many requests from this IP, please try again after 15 minutes."
+  }
+})
+app.use(limiter)
 
 app.use(cors({
   origin:  process.env.CLIENT_URL || "http://localhost:5173",

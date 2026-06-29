@@ -1,6 +1,15 @@
 // src/modules/auth/auth.services.js
 
-import prisma from "../../config/db.js"
+import {
+  findUserByEmail,
+  findUserById,
+  updateUserLastLogin,
+  createRefreshToken,
+  findRefreshToken,
+  deleteRefreshToken,
+  deleteManyRefreshTokens
+} from "./auth.repository.js"
+import { loginSchema, refreshSchema } from "./auth.validation.js"
 import bcrypt from "bcryptjs"
 import {
   generateAccessToken,
@@ -12,36 +21,26 @@ import {
   AccountInactiveError,
   NoRoleError
 } from "../../utils/AppError.js"
-
-
 import dotenv from "dotenv"
 dotenv.config()
+
 // ══════════════════════════════════════
 // LOGIN SERVICE
 // ══════════════════════════════════════
 export const loginUserService = async (email, password) => {
 
-  // ── 1. VALIDATE INPUT ──────────────────────────────────
-  const errors = []
-  if (!email)    errors.push({ field: "email",    message: "Email is required" })
-  if (!password) errors.push({ field: "password", message: "Password is required" })
-  if (errors.length > 0) throw new ValidationError("Validation failed", errors)
+  // ── 1. VALIDATE INPUT WITH ZOD ──────────────────────────
+  const validation = loginSchema.safeParse({ email, password })
+  if (!validation.success) {
+    const fields = validation.error.errors.map(err => ({
+      field: err.path.join("."),
+      message: err.message
+    }))
+    throw new ValidationError("Validation failed", fields)
+  }
 
   // ── 2. FIND USER ───────────────────────────────────────
-  const user = await prisma.user.findUnique({
-    where   : { email },
-    include : {
-      company  : { select: { id: true, name: true, code: true } },
-      branch   : { select: { id: true, name: true, code: true } },
-      userRoles: {
-        include: {
-          role: {
-            include: { rolePermissions: true }
-          }
-        }
-      }
-    }
-  })
+  const user = await findUserByEmail(email)
 
   // ── 3. USER EXISTS CHECK ───────────────────────────────
   if (!user) throw new UnauthorizedError("Invalid email or password")
@@ -95,8 +94,6 @@ export const loginUserService = async (email, password) => {
   })
 
   // ── 10. GENERATE TOKENS ────────────────────────────────
-  // access token — includes user metadata + permissions
-  // full user data fetched fresh from DB on each request via middleware
   const accessToken  = generateAccessToken({
     userId      : user.id,
     email       : user.email,
@@ -115,19 +112,10 @@ export const loginUserService = async (email, password) => {
   const expiresAt = new Date()
   expiresAt.setDate(expiresAt.getDate() + 7)
 
-  await prisma.refreshToken.create({
-    data: {
-      userId   : user.id,
-      token    : refreshToken,
-      expiresAt,
-    }
-  })
+  await createRefreshToken(user.id, refreshToken, expiresAt)
 
   // ── 12. UPDATE LAST LOGIN ──────────────────────────────
-  await prisma.user.update({
-    where : { id: user.id },
-    data  : { lastLoginAt: new Date() }
-  })
+  await updateUserLastLogin(user.id)
 
   // ── 13. RETURN — clean structure ───────────────────────
   return {
@@ -155,11 +143,14 @@ export const loginUserService = async (email, password) => {
 // REFRESH TOKEN SERVICE
 // ══════════════════════════════════════
 export const refreshTokenService = async (refreshToken) => {
-  // ── 1. VALIDATE ────────────────────────────────────────
-  if (!refreshToken) {
-    throw new ValidationError("Validation failed", [
-      { field: "refreshToken", message: "Refresh token is required" }
-    ])
+  // ── 1. VALIDATE WITH ZOD ───────────────────────────────
+  const validation = refreshSchema.safeParse({ refreshToken })
+  if (!validation.success) {
+    const fields = validation.error.errors.map(err => ({
+      field: err.path.join("."),
+      message: err.message
+    }))
+    throw new ValidationError("Validation failed", fields)
   }
 
   // ── 2. VERIFY SIGNATURE ────────────────────────────────
@@ -172,9 +163,7 @@ export const refreshTokenService = async (refreshToken) => {
   }
 
   // ── 3. CHECK TOKEN EXISTS IN DB ────────────────────────
-  const stored = await prisma.refreshToken.findUnique({
-    where: { token: refreshToken }
-  })
+  const stored = await findRefreshToken(refreshToken)
 
   if (!stored) {
     throw new UnauthorizedError("Refresh token not found")
@@ -182,25 +171,12 @@ export const refreshTokenService = async (refreshToken) => {
 
   // ── 4. CHECK EXPIRY ────────────────────────────────────
   if (stored.expiresAt < new Date()) {
-    await prisma.refreshToken.delete({
-      where: { token: refreshToken }
-    })
+    await deleteRefreshToken(refreshToken)
     throw new UnauthorizedError("Refresh token expired")
   }
 
   // ── 5. GET FRESH USER DATA ─────────────────────────────
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
-    include: {
-      company: { select: { id: true, name: true, code: true } },
-      branch: { select: { id: true, name: true, code: true } },
-      userRoles: {
-        include: {
-          role: { include: { rolePermissions: true } }
-        }
-      }
-    }
-  })
+  const user = await findUserById(payload.userId)
 
   if (!user || user.status !== "ACTIVE") {
     throw new UnauthorizedError("User not found or inactive")
@@ -236,9 +212,7 @@ export const refreshTokenService = async (refreshToken) => {
   })
 
   // ── 7. 🔥 DELETE OLD REFRESH TOKEN (ROTATION) ──────────
-  await prisma.refreshToken.delete({
-    where: { token: refreshToken }
-  })
+  await deleteRefreshToken(refreshToken)
 
   // ── 8. 🔥 GENERATE NEW TOKENS ──────────────────────────
   const newAccessToken = generateAccessToken({
@@ -260,18 +234,12 @@ export const refreshTokenService = async (refreshToken) => {
   const expiresAt = new Date()
   expiresAt.setDate(expiresAt.getDate() + 7)
 
-  await prisma.refreshToken.create({
-    data: {
-      userId: user.id,
-      token: newRefreshToken,
-      expiresAt,
-    }
-  })
+  await createRefreshToken(user.id, newRefreshToken, expiresAt)
 
   // ── 10. RETURN ─────────────────────────────────────────
   return {
     accessToken: newAccessToken,
-    refreshToken: newRefreshToken, // 👈 IMPORTANT
+    refreshToken: newRefreshToken,
     user: {
       id: user.id,
       name: user.name,
@@ -295,7 +263,5 @@ export const refreshTokenService = async (refreshToken) => {
 export const logoutService = async (refreshToken) => {
   if (!refreshToken) return
 
-  await prisma.refreshToken.deleteMany({
-    where: { token: refreshToken }
-  })
+  await deleteManyRefreshTokens(refreshToken)
 }
