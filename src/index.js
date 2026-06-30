@@ -13,7 +13,7 @@ import prisma from "./config/db.js"
 import { errorHandler, notFound } from "./middleware/errorHandler.js"
 
 import authRoutes from "./modules/auth/auth.routes.js"
-import companyRoutes from "./modules/company/comany.routes.js"
+import companyRoutes from "./modules/company/company.routes.js"
 import branchRoutes  from "./modules/branch/branch.routes.js"
 import leadSourceRoutes from "./modules/leadsources/leadSource.routes.js"
 import pipelineRoutes from "./modules/pipeline/pipeline.routes.js"
