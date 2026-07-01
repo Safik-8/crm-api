@@ -2,63 +2,70 @@
 
 import { Router } from "express"
 import {
-    createBranch,
-    getBranches,
-    getBranchById,
-    updateBranch,
-    assignUserToBranch,
-    getBranchesPaginated
+  createBranch,
+  getBranches,
+  getBranchById,
+  updateBranch,
+  assignUserToBranch,
+  getBranchesPaginated
 } from "./branch.controllers.js"
-import { authenticate } from "../../middleware/authenticate.js"
-import { authorize } from "../../middleware/authorize.js"
+import {
+  createBranchSchema,
+  updateBranchSchema,
+  assignUserSchema,
+  validateBody
+} from "./branch.validation.js"
+import { authenticate } from "../../middleware/Authenticate.js"
 import { hasPermission } from "../../middleware/hasPermission.js"
 
 const router = Router()
 
+// All routes in this module require JWT authentication
 router.use(authenticate)
 
-// POST /api/branches
+// POST /api/branches — create/onboard a new branch
 router.post(
-    "/",
-    authorize("SUPER_ADMIN", "COMPANY_ADMIN"),
-    hasPermission("BRANCH", "canCreate"),
-    createBranch
+  "/",
+  hasPermission("BRANCH", "canCreate"),
+  validateBody(createBranchSchema),
+  createBranch
 )
 
-// GET /api/branches?company_id=X
+// GET /api/branches — raw list (useful for dropdowns)
 router.get(
-    "/",
-    hasPermission("BRANCH", "canView"),
-    getBranches
+  "/",
+  hasPermission("BRANCH", "canView"),
+  getBranches
 )
 
+// GET /api/branches/paginated — paginated/filtered list (useful for tables)
 router.get(
-    "/paginated", 
-    hasPermission("BRANCH", "canView"),
-    getBranchesPaginated
+  "/paginated",
+  hasPermission("BRANCH", "canView"),
+  getBranchesPaginated
 )
 
-// GET /api/branches/:id
+// GET /api/branches/:id — fetch single branch details
 router.get(
-    "/:id",
-    hasPermission("BRANCH", "canView"),
-    getBranchById
+  "/:id",
+  hasPermission("BRANCH", "canView"),
+  getBranchById
 )
 
-// PUT /api/branches/:id
+// PUT /api/branches/:id — update name or status
 router.put(
-    "/:id",
-    authorize("SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER"),
-    hasPermission("BRANCH", "canEdit"),
-    updateBranch
+  "/:id",
+  hasPermission("BRANCH", "canEdit"),
+  validateBody(updateBranchSchema),
+  updateBranch
 )
 
-// POST /api/branches/:id/assign-user
+// POST /api/branches/:id/assign-user — onboard manager or BDE/ISE
 router.post(
-    "/:id/assign-user",
-    authorize("SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER"),
-    hasPermission("BRANCH", "canEdit"),
-    assignUserToBranch
+  "/:id/assign-user",
+  hasPermission("BRANCH", "canEdit"),
+  validateBody(assignUserSchema),
+  assignUserToBranch
 )
 
-export default router;
+export default router
