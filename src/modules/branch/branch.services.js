@@ -31,7 +31,7 @@ const assertCompanyScope = (actor, targetCompanyId) => {
 // ── ROLE CREATION RULES ───────────────────────────────────
 const ROLE_CREATION_RULES = {
   SUPER_ADMIN: ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER", "BDE", "ISE"],
-  COMPANY_ADMIN: [],
+  COMPANY_ADMIN: ["BRANCH_MANAGER", "BDE", "ISE"],
   BRANCH_MANAGER: ["BDE", "ISE"],
   BDE: [],
   ISE: [],
@@ -44,7 +44,7 @@ const ROLES_NEED_BRANCH = ["BRANCH_MANAGER", "BDE", "ISE"]
  * Creates and registers a new branch inside a company.
  */
 export const createBranchService = async (data, actor) => {
-  const { companyId, name, code, status = "ACTIVE" } = data
+  const { companyId, name, code, address, location, status = "ACTIVE" } = data
   const formattedCode = code.toUpperCase().trim()
 
   // Scope check — cannot create branch in another company
@@ -69,6 +69,8 @@ export const createBranchService = async (data, actor) => {
     companyId: Number(companyId),
     name: name.trim(),
     code: formattedCode,
+    address: address?.trim() || null,
+    location: location?.trim() || null,
     status
   })
 }
@@ -104,8 +106,15 @@ export const getBranchesService = async (query, actor) => {
   }
 
   // ── 4. FETCH ALL BRANCHES
+  const where = { companyId: scopedCompanyId }
+
+  // If the actor is not a system or company administrator, lock views to their own branch
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    where.id = actor.branchId
+  }
+
   const branches = await findBranches({
-    where: { companyId: scopedCompanyId },
+    where,
     orderBy: { createdAt: "desc" },
     include: {
       company: { select: { id: true, name: true } },
@@ -163,7 +172,14 @@ export const getBranchesPaginatedService = async (query, actor) => {
     where.OR = [
       { name: { contains: search, mode: "insensitive" } },
       { code: { contains: search, mode: "insensitive" } },
+      { address: { contains: search, mode: "insensitive" } },
+      { location: { contains: search, mode: "insensitive" } },
     ]
+  }
+
+  // If the actor is not a system or company administrator, lock views to their own branch
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    where.id = actor.branchId
   }
 
   // Pagination parameters
@@ -207,6 +223,13 @@ export const getBranchByIdService = async (id, actor) => {
   // Scope check
   assertCompanyScope(actor, branch.companyId)
 
+  // Branch level scope check
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    if (branch.id !== actor.branchId) {
+      throw new ForbiddenError("You do not have access to view this branch")
+    }
+  }
+
   return branch
 }
 
@@ -214,7 +237,7 @@ export const getBranchByIdService = async (id, actor) => {
  * Updates branch operational details.
  */
 export const updateBranchService = async (id, data, actor) => {
-  const { name, status } = data
+  const { name, address, location, status } = data
 
   const branch = await findBranchById(Number(id))
   if (!branch) throw new NotFoundError("Branch")
@@ -222,8 +245,17 @@ export const updateBranchService = async (id, data, actor) => {
   // Scope check
   assertCompanyScope(actor, branch.companyId)
 
+  // Branch level scope check
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    if (branch.id !== actor.branchId) {
+      throw new ForbiddenError("You do not have permission to modify this branch")
+    }
+  }
+
   return updateBranch(Number(id), {
     ...(name && { name: name.trim() }),
+    ...(address !== undefined && { address: address?.trim() || null }),
+    ...(location !== undefined && { location: location?.trim() || null }),
     ...(status && { status })
   })
 }
@@ -241,6 +273,13 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
 
   // ── SCOPE GUARD
   assertCompanyScope(actor, branch.companyId)
+
+  // Branch level scope check
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    if (branch.id !== actor.branchId) {
+      throw new ForbiddenError("You can only onboard users within your assigned branch")
+    }
+  }
 
   // ── ROLE CREATION GUARD
   const allowedToCreate = ROLE_CREATION_RULES[actor.primaryRole] ?? []

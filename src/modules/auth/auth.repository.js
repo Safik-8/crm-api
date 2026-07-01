@@ -12,7 +12,7 @@ export const findUserByEmail = async (email) => {
     where: { email },
     include: {
       company: { select: { id: true, name: true, code: true } },
-      branch: { select: { id: true, name: true, code: true } },
+      branch: { select: { id: true, name: true, code: true, status: true } },
       userRoles: {
         include: {
           role: {
@@ -34,7 +34,7 @@ export const findUserById = async (id) => {
     where: { id },
     include: {
       company: { select: { id: true, name: true, code: true } },
-      branch: { select: { id: true, name: true, code: true } },
+      branch: { select: { id: true, name: true, code: true, status: true } },
       userRoles: {
         include: {
           role: {

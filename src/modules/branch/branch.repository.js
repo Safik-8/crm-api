@@ -12,6 +12,8 @@ export const createBranch = async (data, tx = prisma) => {
       companyId: data.companyId,
       name: data.name,
       code: data.code.toUpperCase(),
+      address: data.address || null,
+      location: data.location || null,
       status: data.status
     },
     include: {

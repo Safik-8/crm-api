@@ -15,15 +15,19 @@ export const createBranchSchema = z.object({
   code: z.string({
     required_error: "Branch code is required"
   }).trim().min(1, "Branch code cannot be empty").toUpperCase(),
+  address: z.string().trim().optional().nullable(),
+  location: z.string().trim().optional().nullable(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional()
 })
 
 // Validation schema for updating an existing branch
 export const updateBranchSchema = z.object({
   name: z.string().trim().min(1, "Branch name cannot be empty").optional(),
+  address: z.string().trim().optional().nullable(),
+  location: z.string().trim().optional().nullable(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional()
 }).refine(data => Object.keys(data).length > 0, {
-  message: "At least one field (name or status) must be provided for update"
+  message: "At least one field must be provided for update"
 })
 
 // Validation schema for onboarding and assigning a user to a branch

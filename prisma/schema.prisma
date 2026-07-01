@@ -38,6 +38,8 @@ model Branch {
   companyId Int      @map("company_id")
   name      String
   code      String
+  address   String?
+  location  String?
   status    String   @default("ACTIVE")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

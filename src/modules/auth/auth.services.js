@@ -19,7 +19,8 @@ import {
   ValidationError,
   UnauthorizedError,
   AccountInactiveError,
-  NoRoleError
+  NoRoleError,
+  ForbiddenError
 } from "../../utils/AppError.js"
 import dotenv from "dotenv"
 dotenv.config()
@@ -51,6 +52,11 @@ export const loginUserService = async (email, password) => {
 
   // ── 5. STATUS CHECK ────────────────────────────────────
   if (user.status !== "ACTIVE") throw new AccountInactiveError()
+
+  // ── 5.1 BRANCH STATUS CHECK ──────────────────────────
+  if (user.branchId && user.branch?.status !== "ACTIVE") {
+    throw new ForbiddenError("Your branch is currently inactive. Access denied.")
+  }
 
   // ── 6. ROLES CHECK ─────────────────────────────────────
   if (!user.userRoles?.length) throw new NoRoleError()
@@ -180,6 +186,11 @@ export const refreshTokenService = async (refreshToken) => {
 
   if (!user || user.status !== "ACTIVE") {
     throw new UnauthorizedError("User not found or inactive")
+  }
+
+  // ── 5.1 BRANCH STATUS CHECK ──────────────────────────
+  if (user.branchId && user.branch?.status !== "ACTIVE") {
+    throw new UnauthorizedError("Your branch is currently inactive. Access denied.")
   }
 
   // ── 6. REBUILD ROLES AND PERMISSIONS ───────────────────
