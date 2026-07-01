@@ -8,41 +8,39 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ══════════════════════════════════════
-// COMPANY & BRANCH
-// ══════════════════════════════════════
-
 model Company {
-  id        Int      @id @default(autoincrement())
-  name      String
-  code      String   @unique
-  status    String   @default("ACTIVE")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
+  id          Int          @id @default(autoincrement())
+  name        String
+  code        String       @unique
+  status      String       @default("ACTIVE")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  address     String?
+  industry    String?
+  logo        String?
+  website     String?
   branches    Branch[]
-  users       User[]
-  userRoles   UserRole[]
-  pipelines   Pipeline[]
   leadSources LeadSource[]
+  pipelines   Pipeline[]
+  userRoles   UserRole[]
+  users       User[]
 
   @@map("companies")
 }
 
 model Branch {
-  id        Int      @id @default(autoincrement())
-  companyId Int      @map("company_id")
-  name      String
-  code      String
-  status    String   @default("ACTIVE")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
+  id                 Int                 @id @default(autoincrement())
+  companyId          Int                 @map("company_id")
+  name               String
+  code               String
+  status             String              @default("ACTIVE")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
   company            Company             @relation(fields: [companyId], references: [id])
-  users              User[]
-  userRoles          UserRole[]
-  pipelines          Pipeline[]
   dailyBranchReports DailyBranchReport[]
+  pipelines          Pipeline[]
+  userRoles          UserRole[]
+  users              User[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -50,30 +48,27 @@ model Branch {
   @@map("branches")
 }
 
-// ══════════════════════════════════════
-// USERS ROLES & PERMISSIONS
-// ══════════════════════════════════════
-
 model User {
-  id           Int       @id @default(autoincrement())
-  companyId    Int?      @map("company_id")
-  branchId     Int?      @map("branch_id")
-  name         String
-  email        String    @unique
-  passwordHash String    @map("password_hash")
-  status       String    @default("ACTIVE")
-  lastLoginAt  DateTime? @map("last_login_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-
-  company                   Company?            @relation(fields: [companyId], references: [id])
-  branch                    Branch?             @relation(fields: [branchId], references: [id])
-  userRoles                 UserRole[]          @relation("UserToUserRole")
-  assignedRoles             UserRole[]          @relation("AssignedByToUserRole")
-  refreshTokens             RefreshToken[]
-  createdLeads              Lead[]              @relation("UserCreatedLeads")
-  leadComments              LeadComment[]
-  createdDailyBranchReports DailyBranchReport[] @relation("UserCreatedDailyBranchReports")
+  id                                     Int                 @id @default(autoincrement())
+  companyId                              Int?                @map("company_id")
+  branchId                               Int?                @map("branch_id")
+  name                                   String
+  email                                  String              @unique
+  passwordHash                           String              @map("password_hash")
+  status                                 String              @default("ACTIVE")
+  lastLoginAt                            DateTime?           @map("last_login_at")
+  createdAt                              DateTime            @default(now()) @map("created_at")
+  updatedAt                              DateTime            @updatedAt @map("updated_at")
+  createdDailyBranchReports              DailyBranchReport[] @relation("UserCreatedDailyBranchReports")
+  leadComments                           LeadComment[]
+  leads_leads_assigned_toTousers         Lead[]              @relation("leads_assigned_toTousers")
+  createdLeads                           Lead[]              @relation("UserCreatedLeads")
+  leads_leads_stage_changed_by_idTousers Lead[]              @relation("leads_stage_changed_by_idTousers")
+  refreshTokens                          RefreshToken[]
+  assignedRoles                          UserRole[]          @relation("AssignedByToUserRole")
+  userRoles                              UserRole[]          @relation("UserToUserRole")
+  branch                                 Branch?             @relation(fields: [branchId], references: [id])
+  company                                Company?            @relation(fields: [companyId], references: [id])
 
   @@index([companyId])
   @@index([branchId])
@@ -81,32 +76,30 @@ model User {
 }
 
 model Role {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  userRoles       UserRole[]
+  id              Int          @id @default(autoincrement())
+  name            String       @unique
+  description     String?
+  createdAt       DateTime     @default(now()) @map("created_at")
   rolePermissions Permission[]
+  userRoles       UserRole[]
 
   @@map("roles")
 }
 
 model UserRole {
-  id         Int      @id @default(autoincrement())
-  userId     Int      @map("user_id")
-  roleId     Int      @map("role_id")
-  companyId  Int?     @map("company_id")
-  branchId   Int?     @map("branch_id")
-  isPrimary  Boolean  @default(false) @map("is_primary")
-  assignedAt DateTime @default(now()) @map("assigned_at")
-  assignedBy Int?     @map("assigned_by")
-
-  user           User     @relation("UserToUserRole", fields: [userId], references: [id])
-  role           Role     @relation(fields: [roleId], references: [id])
-  company        Company? @relation(fields: [companyId], references: [id])
-  branch         Branch?  @relation(fields: [branchId], references: [id])
+  id             Int      @id @default(autoincrement())
+  userId         Int      @map("user_id")
+  roleId         Int      @map("role_id")
+  companyId      Int?     @map("company_id")
+  branchId       Int?     @map("branch_id")
+  isPrimary      Boolean  @default(false) @map("is_primary")
+  assignedAt     DateTime @default(now()) @map("assigned_at")
+  assignedBy     Int?     @map("assigned_by")
   assignedByUser User?    @relation("AssignedByToUserRole", fields: [assignedBy], references: [id])
+  branch         Branch?  @relation(fields: [branchId], references: [id])
+  company        Company? @relation(fields: [companyId], references: [id])
+  role           Role     @relation(fields: [roleId], references: [id])
+  user           User     @relation("UserToUserRole", fields: [userId], references: [id])
 
   @@unique([userId, roleId, companyId, branchId])
   @@map("user_roles")
@@ -121,8 +114,7 @@ model Permission {
   canEdit   Boolean  @default(false) @map("can_edit")
   canDelete Boolean  @default(false) @map("can_delete")
   createdAt DateTime @default(now()) @map("created_at")
-
-  role Role @relation(fields: [roleId], references: [id])
+  role      Role     @relation(fields: [roleId], references: [id])
 
   @@unique([roleId, module])
   @@map("permissions")
@@ -134,136 +126,105 @@ model RefreshToken {
   token     String   @unique
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@map("refresh_tokens")
 }
-
-// ══════════════════════════════════════════════════════════
-// SPRINT 2 — ADD TO BOTTOM OF schema.prisma
-// ══════════════════════════════════════════════════════════
-
-// ── LEAD SOURCE ────────────────────────────────────────────
-// Proper table instead of raw String on Prospect
-// companyId = null means global/system default for all companies
-// Ensures consistent values in reports and dropdowns
 
 model LeadSource {
   id        Int       @id @default(autoincrement())
   companyId Int?      @map("company_id")
   name      String
   isActive  Boolean   @default(true) @map("is_active")
-  deletedAt DateTime? @map("deleted_at")
   createdAt DateTime  @default(now()) @map("created_at")
-
-  company Company? @relation(fields: [companyId], references: [id])
+  deletedAt DateTime? @map("deleted_at")
+  company   Company?  @relation(fields: [companyId], references: [id])
 
   @@unique([companyId, name])
   @@map("lead_sources")
 }
 
-// ══════════════════════════════════════
-// PIPELINE MANAGEMENT
-// ══════════════════════════════════════
-
-// Pipeline belongs to a branch
-// One branch can have multiple pipelines
-
 model Pipeline {
-  id          Int      @id @default(autoincrement())
-  branchId    Int      @map("branch_id")
-  companyId   Int      @map("company_id")
+  id          Int             @id @default(autoincrement())
+  branchId    Int             @map("branch_id")
+  companyId   Int             @map("company_id")
   name        String
-  isDeleted   Boolean  @default(false) @map("is_deleted")
-  createdById Int      @map("created_by")
-  updatedById Int?     @map("updated_by")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  branch  Branch          @relation(fields: [branchId], references: [id])
-  company Company         @relation(fields: [companyId], references: [id])
-  stages  PipelineStage[]
-  leads   Lead[]
+  isDeleted   Boolean         @default(false) @map("is_deleted")
+  createdById Int             @map("created_by")
+  updatedById Int?            @map("updated_by")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  leads       Lead[]
+  stages      PipelineStage[]
+  branch      Branch          @relation(fields: [branchId], references: [id])
+  company     Company         @relation(fields: [companyId], references: [id])
 
   @@index([branchId])
   @@index([companyId])
   @@map("pipelines")
 }
 
-// ══════════════════════════════════════
-// STAGE MASTER
-// Global stages shared across all pipelines
-// is_default = true means "Prospect" stage
-// ══════════════════════════════════════
-
 model Stage {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique
-  isDefault   Boolean  @default(false) @map("is_default")
-  isDeleted   Boolean  @default(false) @map("is_deleted")
-  createdById Int      @map("created_by")
-  updatedById Int?     @map("updated_by")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  pipelineStages PipelineStage[]
-  leads          Lead[]
+  id                                    Int             @id @default(autoincrement())
+  name                                  String          @unique
+  isDefault                             Boolean         @default(false) @map("is_default")
+  isDeleted                             Boolean         @default(false) @map("is_deleted")
+  createdById                           Int             @map("created_by")
+  updatedById                           Int?            @map("updated_by")
+  createdAt                             DateTime        @default(now()) @map("created_at")
+  updatedAt                             DateTime        @updatedAt @map("updated_at")
+  leads_leads_previous_stage_idTostages Lead[]          @relation("leads_previous_stage_idTostages")
+  leads                                 Lead[]
+  pipelineStages                        PipelineStage[]
 
   @@map("stages")
 }
 
-// ══════════════════════════════════════
-// PIPELINE STAGES MAPPING
-// Links stages to pipelines with order
-// ══════════════════════════════════════
-
 model PipelineStage {
-  id         Int @id @default(autoincrement())
-  pipelineId Int @map("pipeline_id")
-  stageId    Int @map("stage_id")
-  orderNo    Int @map("order_no")
-
-  pipeline Pipeline @relation(fields: [pipelineId], references: [id])
-  stage    Stage    @relation(fields: [stageId], references: [id])
+  id         Int      @id @default(autoincrement())
+  pipelineId Int      @map("pipeline_id")
+  stageId    Int      @map("stage_id")
+  orderNo    Int      @map("order_no")
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id])
+  stage      Stage    @relation(fields: [stageId], references: [id])
 
   @@unique([pipelineId, stageId])
   @@index([pipelineId])
   @@map("pipeline_stages")
 }
 
-// ══════════════════════════════════════
-// LEAD
-// ══════════════════════════════════════
-
 model Lead {
-  id            Int      @id @default(autoincrement())
-  pipelineId    Int      @map("pipeline_id")
-  stageId       Int      @map("stage_id")
-  name          String
-  mobile        String
-  date          DateTime
-  interestedFor String?  @map("interested_for")
-  isDeleted     Boolean  @default(false) @map("is_deleted")
-  createdById   Int      @map("created_by")
-  updatedById   Int?     @map("updated_by")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  pipeline  Pipeline      @relation(fields: [pipelineId], references: [id])
-  stage     Stage         @relation(fields: [stageId], references: [id])
-  createdBy User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
-  comments  LeadComment[]
+  id                                     Int           @id @default(autoincrement())
+  pipelineId                             Int           @map("pipeline_id")
+  stageId                                Int           @map("stage_id")
+  name                                   String
+  mobile                                 String
+  date                                   DateTime
+  interestedFor                          String?       @map("interested_for")
+  isDeleted                              Boolean       @default(false) @map("is_deleted")
+  createdById                            Int           @map("created_by")
+  updatedById                            Int?          @map("updated_by")
+  createdAt                              DateTime      @default(now()) @map("created_at")
+  updatedAt                              DateTime      @updatedAt @map("updated_at")
+  assigned_to                            Int?
+  previous_stage_id                      Int?
+  stage_changed_by_id                    Int?
+  stage_changed_at                       DateTime?
+  comments                               LeadComment[]
+  users_leads_assigned_toTousers         User?         @relation("leads_assigned_toTousers", fields: [assigned_to], references: [id])
+  createdBy                              User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
+  pipeline                               Pipeline      @relation(fields: [pipelineId], references: [id])
+  stages_leads_previous_stage_idTostages Stage?        @relation("leads_previous_stage_idTostages", fields: [previous_stage_id], references: [id])
+  users_leads_stage_changed_by_idTousers User?         @relation("leads_stage_changed_by_idTousers", fields: [stage_changed_by_id], references: [id])
+  stage                                  Stage         @relation(fields: [stageId], references: [id])
 
   @@index([pipelineId])
   @@index([stageId])
+  @@index([assigned_to])
+  @@index([previous_stage_id])
   @@map("leads")
 }
-
-// ══════════════════════════════════════
-// LEAD COMMENT
-// ══════════════════════════════════════
 
 model LeadComment {
   id          Int      @id @default(autoincrement())
@@ -275,44 +236,47 @@ model LeadComment {
   updatedById Int?     @map("updated_by")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-
-  lead Lead @relation(fields: [leadId], references: [id])
-  user User @relation(fields: [userId], references: [id])
+  lead        Lead     @relation(fields: [leadId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
 
   @@index([leadId])
   @@map("lead_comments")
 }
 
-//===========================================================================================
-// daily_branch_reports
-//===========================================================================================
-
 model DailyBranchReport {
-  id Int @id @default(autoincrement())
+  id                Int      @id @default(autoincrement())
+  branchId          Int      @map("branch_id")
+  reportDate        DateTime @map("report_date")
+  callsReceived     Int      @default(0) @map("calls_received")
+  qualifiedLeads    Int      @default(0) @map("qualified_leads")
+  counsellingDone   Int      @default(0) @map("counselling_done")
+  counsellingBooked Int      @default(0) @map("counselling_booked")
+  officeVisits      Int      @default(0) @map("office_visits")
+  closures          Int      @default(0) @map("closures")
+  followupsDone     Int      @default(0) @map("followups_done")
+  pendingFollowups  Int      @default(0) @map("pending_followups")
+  isDeleted         Boolean  @default(false) @map("is_deleted")
+  createdById       Int      @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+  branch            Branch   @relation(fields: [branchId], references: [id])
+  createdBy         User     @relation("UserCreatedDailyBranchReports", fields: [createdById], references: [id])
 
-  branchId   Int      @map("branch_id")
-  reportDate DateTime @map("report_date") // store date-only at 00:00:00
-
-  callsReceived      Int     @default(0) @map("calls_received")
-  qualifiedLeads     Int     @default(0) @map("qualified_leads")
-  counsellingDone    Int     @default(0) @map("counselling_done")
-  counsellingBooked  Int     @default(0) @map("counselling_booked")
-  officeVisits       Int     @default(0) @map("office_visits")
-  closures           Int     @default(0) @map("closures")
-  followupsDone      Int     @default(0) @map("followups_done")
-  pendingFollowups   Int     @default(0) @map("pending_followups")
-
-  isDeleted   Boolean  @default(false) @map("is_deleted")
-  createdById Int      @map("created_by")
-  createdAt   DateTime @default(now()) @map("created_at")
-  // updatedAt removed: daily reports are submit-once (no updates)
-
-  branch    Branch @relation(fields: [branchId], references: [id])
-  createdBy User   @relation("UserCreatedDailyBranchReports", fields: [createdById], references: [id])
-
-  // multiple users can submit for same branch+date, but each user only once
   @@unique([branchId, reportDate, createdById])
   @@index([branchId])
   @@index([createdById])
   @@map("daily_branch_reports")
+}
+
+// ══════════════════════════════════════
+// PASSWORD RESET (OTP)
+// ══════════════════════════════════════
+model PasswordReset {
+  id         Int      @id @default(autoincrement())
+  email      String   @unique
+  otp        String
+  isVerified Boolean  @default(false) @map("is_verified")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("password_resets")
 }

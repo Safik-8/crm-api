@@ -107,3 +107,76 @@ export const deleteManyRefreshTokens = async (token) => {
     where: { token }
   })
 }
+
+/**
+ * Upsert a password reset record with email, OTP, and expiry.
+ * @param {string} email
+ * @param {string} otp
+ * @param {Date} expiresAt
+ * @returns {Promise<object>}
+ */
+export const upsertPasswordReset = async (email, otp, expiresAt) => {
+  return prisma.passwordReset.upsert({
+    where: { email },
+    update: {
+      otp,
+      expiresAt,
+      isVerified: false,
+    },
+    create: {
+      email,
+      otp,
+      expiresAt,
+      isVerified: false,
+    }
+  })
+}
+
+/**
+ * Find a password reset record by email.
+ * @param {string} email
+ * @returns {Promise<object|null>}
+ */
+export const findPasswordResetByEmail = async (email) => {
+  return prisma.passwordReset.findUnique({
+    where: { email }
+  })
+}
+
+/**
+ * Update the isVerified field on a password reset record.
+ * @param {string} email
+ * @param {boolean} isVerified
+ * @returns {Promise<object>}
+ */
+export const updatePasswordResetVerified = async (email, isVerified) => {
+  return prisma.passwordReset.update({
+    where: { email },
+    data: { isVerified }
+  })
+}
+
+/**
+ * Delete a password reset record.
+ * @param {string} email
+ * @returns {Promise<object>}
+ */
+export const deletePasswordReset = async (email) => {
+  return prisma.passwordReset.delete({
+    where: { email }
+  })
+}
+
+/**
+ * Update a user's password hash.
+ * @param {string} email
+ * @param {string} passwordHash
+ * @returns {Promise<object>}
+ */
+export const updateUserPassword = async (email, passwordHash) => {
+  return prisma.user.update({
+    where: { email },
+    data: { passwordHash }
+  })
+}
+

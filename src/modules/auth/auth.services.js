@@ -1,5 +1,3 @@
-// src/modules/auth/auth.services.js
-
 import {
   findUserByEmail,
   findUserById,
@@ -7,7 +5,12 @@ import {
   createRefreshToken,
   findRefreshToken,
   deleteRefreshToken,
-  deleteManyRefreshTokens
+  deleteManyRefreshTokens,
+  upsertPasswordReset,
+  findPasswordResetByEmail,
+  updatePasswordResetVerified,
+  deletePasswordReset,
+  updateUserPassword
 } from "./auth.repository.js"
 import { loginSchema, refreshSchema } from "./auth.validation.js"
 import bcrypt from "bcryptjs"
@@ -19,8 +22,12 @@ import {
   ValidationError,
   UnauthorizedError,
   AccountInactiveError,
-  NoRoleError
+  NoRoleError,
+  NotFoundError,
+  BadRequestError
 } from "../../utils/AppError.js"
+import { sendEmail } from "../../utils/mailer.js"
+import { hashPassword } from "../../utils/passwordUtils.js"
 import dotenv from "dotenv"
 dotenv.config()
 
@@ -32,7 +39,7 @@ export const loginUserService = async (email, password) => {
   // ── 1. VALIDATE INPUT WITH ZOD ──────────────────────────
   const validation = loginSchema.safeParse({ email, password })
   if (!validation.success) {
-    const fields = validation.error.errors.map(err => ({
+    const fields = validation.error.issues.map(err => ({
       field: err.path.join("."),
       message: err.message
     }))
@@ -146,7 +153,7 @@ export const refreshTokenService = async (refreshToken) => {
   // ── 1. VALIDATE WITH ZOD ───────────────────────────────
   const validation = refreshSchema.safeParse({ refreshToken })
   if (!validation.success) {
-    const fields = validation.error.errors.map(err => ({
+    const fields = validation.error.issues.map(err => ({
       field: err.path.join("."),
       message: err.message
     }))
@@ -265,3 +272,98 @@ export const logoutService = async (refreshToken) => {
 
   await deleteManyRefreshTokens(refreshToken)
 }
+
+// ══════════════════════════════════════
+// FORGOT PASSWORD SERVICE (Send OTP)
+// ══════════════════════════════════════
+export const forgotPasswordService = async (email) => {
+  // Check if user exists
+  const user = await findUserByEmail(email)
+  if (!user) {
+    throw new NotFoundError("User with this email")
+  }
+
+  // Generate 6-digit OTP code
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes expiry
+
+  // Save OTP to DB
+  await upsertPasswordReset(email, otp, expiresAt)
+
+  // Send Email with OTP
+  await sendEmail({
+    to: email,
+    subject: "StackDot CRM - Password Reset OTP",
+    text: `Your password reset OTP code is ${otp}. It will expire in 10 minutes.`,
+    html: `
+      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <h2>Password Reset Request</h2>
+        <p>You requested a password reset for your StackDot CRM account.</p>
+        <p>Please use the following 6-digit One-Time Password (OTP) to reset your password:</p>
+        <div style="background-color: #f4f4f4; padding: 15px; font-size: 24px; font-weight: bold; letter-spacing: 5px; text-align: center; border-radius: 4px; margin: 20px 0;">
+          ${otp}
+        </div>
+        <p style="color: #666; font-size: 12px;">This OTP will expire in 10 minutes. If you did not make this request, please ignore this email.</p>
+      </div>
+    `
+  })
+
+  return { email }
+}
+
+// ══════════════════════════════════════
+// VERIFY OTP SERVICE
+// ══════════════════════════════════════
+export const verifyOtpService = async (email, otp) => {
+  const record = await findPasswordResetByEmail(email)
+  
+  if (!record) {
+    throw new NotFoundError("OTP request")
+  }
+
+  if (record.expiresAt < new Date()) {
+    throw new BadRequestError("OTP code has expired")
+  }
+
+  if (record.otp !== otp) {
+    throw new BadRequestError("Invalid OTP code")
+  }
+
+  // Mark as verified
+  await updatePasswordResetVerified(email, true)
+
+  return { email, verified: true }
+}
+
+// ══════════════════════════════════════
+// RESET PASSWORD SERVICE
+// ══════════════════════════════════════
+export const resetPasswordService = async (email, otp, newPassword) => {
+  const record = await findPasswordResetByEmail(email)
+
+  if (!record) {
+    throw new BadRequestError("No password reset request found. Please request OTP first.")
+  }
+
+  if (!record.isVerified) {
+    throw new BadRequestError("OTP has not been verified. Please verify OTP first.")
+  }
+
+  if (record.expiresAt < new Date()) {
+    throw new BadRequestError("Reset session has expired. Please request a new OTP.")
+  }
+
+  if (record.otp !== otp) {
+    throw new BadRequestError("Invalid OTP code matching this session")
+  }
+
+  // Hash new password and update user record
+  const passwordHash = await hashPassword(newPassword)
+  await updateUserPassword(email, passwordHash)
+
+  // Clear/delete reset record
+  await deletePasswordReset(email)
+
+  return { email, success: true }
+}
+
