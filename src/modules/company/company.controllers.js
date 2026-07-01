@@ -15,7 +15,7 @@ import { sendSuccess } from "../../utils/response.js"
  */
 export const createCompany = async (req, res, next) => {
   try {
-    const company = await createCompanyService(req.body)
+    const company = await createCompanyService(req.body, req.user)
     return sendSuccess(res, { company }, "Company created successfully", 201)
   } catch (err) {
     next(err)
@@ -28,7 +28,7 @@ export const createCompany = async (req, res, next) => {
  */
 export const getAllCompanies = async (req, res, next) => {
   try {
-    const companies = await getAllCompaniesService()
+    const companies = await getAllCompaniesService(req.user)
     return sendSuccess(res, companies, "Companies fetched successfully")
   } catch (err) {
     next(err)
@@ -41,7 +41,7 @@ export const getAllCompanies = async (req, res, next) => {
  */
 export const getCompaniesWithPagination = async (req, res, next) => {
   try {
-    const result = await getCompaniesWithPaginationService(req.query)
+    const result = await getCompaniesWithPaginationService(req.query, req.user)
     return sendSuccess(res, result, "Companies fetched successfully")
   } catch (err) {
     next(err)
@@ -54,7 +54,7 @@ export const getCompaniesWithPagination = async (req, res, next) => {
  */
 export const getCompanyById = async (req, res, next) => {
   try {
-    const company = await getCompanyByIdService(req.params.id)
+    const company = await getCompanyByIdService(req.params.id, req.user)
     return sendSuccess(res, { company }, "Company fetched successfully")
   } catch (err) {
     next(err)
@@ -67,7 +67,7 @@ export const getCompanyById = async (req, res, next) => {
  */
 export const updateCompany = async (req, res, next) => {
   try {
-    const company = await updateCompanyService(req.params.id, req.body)
+    const company = await updateCompanyService(req.params.id, req.body, req.user)
     return sendSuccess(res, { company }, "Company updated successfully")
   } catch (err) {
     next(err)

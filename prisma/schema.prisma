@@ -16,6 +16,10 @@ model Company {
   id        Int      @id @default(autoincrement())
   name      String
   code      String   @unique
+  logo      String?
+  industry  String?
+  website   String?
+  address   String?
   status    String   @default("ACTIVE")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
