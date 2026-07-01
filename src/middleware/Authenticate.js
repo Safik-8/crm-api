@@ -37,6 +37,7 @@ export const authenticate = async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where  : { id: payload.userId },
       include: {
+        company: { select: { id: true, name: true, code: true, logo: true, industry: true, website: true, address: true, status: true } },
         userRoles: {
           include: {
             role: {
@@ -79,6 +80,7 @@ export const authenticate = async (req, res, next) => {
       email        : user.email,
       companyId    : user.companyId,
       branchId     : user.branchId,
+      company      : user.company,
       primaryRole  : primaryRole.role.name,
       allRoles     : user.userRoles.map(ur => ({
         role     : ur.role.name,

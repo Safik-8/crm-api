@@ -6,7 +6,7 @@ import {
   getLeadSources,
   updateLeadSource,
 } from "./leadSource.controller.js"
-import { authenticate }  from "../../middleware/authenticate.js"
+import { authenticate }  from "../../middleware/Authenticate.js"
 import { authorize }     from "../../middleware/authorize.js"
 
 const router = Router()
