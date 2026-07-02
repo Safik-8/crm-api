@@ -301,7 +301,10 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
   const role = await prisma.role.findFirst({
     where: {
       name: roleName,
-      companyId: { in: [null, branch.companyId] }
+      OR: [
+        { companyId: null },
+        { companyId: branch.companyId }
+      ]
     }
   })
   if (!role) throw new NotFoundError("Role")
