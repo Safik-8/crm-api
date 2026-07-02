@@ -298,8 +298,11 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
   }
 
   // ── CHECK ROLE EXISTS
-  const role = await prisma.role.findUnique({
-    where: { name: roleName }
+  const role = await prisma.role.findFirst({
+    where: {
+      name: roleName,
+      companyId: { in: [null, branch.companyId] }
+    }
   })
   if (!role) throw new NotFoundError("Role")
 
@@ -339,6 +342,8 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
     })
 
     return user
+  }, {
+    timeout: 30000
   })
 
   // ── RETURN SAFE USER
