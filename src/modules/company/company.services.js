@@ -107,6 +107,8 @@ export const createCompanyService = async (data, actor) => {
     })
 
     return company
+  }, {
+    timeout: 30000 // 30 seconds to prevent Supabase connection timeout issues
   })
 }
 

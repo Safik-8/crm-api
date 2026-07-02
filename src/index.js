@@ -104,6 +104,7 @@ const startServer = async () => {
     // Step 2 → Initialize roles and permissions
     await initializeSystem()
 
+    // Server startup file.
     // Step 3 → Start listening
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`)

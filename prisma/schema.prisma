@@ -27,9 +27,10 @@ model Company {
   branches    Branch[]
   users       User[]
   userRoles   UserRole[]
-  pipelines   Pipeline[]
-  leadSources LeadSource[]
-  roles       Role[]
+  pipelines      Pipeline[]
+  leadSources    LeadSource[]
+  roles          Role[]
+  passwordResets PasswordReset[]
 
   @@map("companies")
 }
@@ -84,6 +85,7 @@ model User {
   leadComments              LeadComment[]
   createdDailyBranchReports DailyBranchReport[] @relation("UserCreatedDailyBranchReports")
   createdRoles              Role[]              @relation("RoleCreatedBy")
+  passwordResets            PasswordReset[]
 
   @@index([companyId])
   @@index([branchId])
