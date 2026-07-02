@@ -2,42 +2,31 @@
 
 import prisma from "./db.js"
 import { hashPassword } from "../utils/passwordUtils.js"
+import {
+  ROLE_NAMES,
+  ROLE_RANKS,
+  MODULES,
+} from "./roleConstants.js"
 
 // ══════════════════════════════════════
-// ROLES
+// SYSTEM ROLES — seeds on every startup
+// name  = role identifier (unique within companyId=null scope)
+// rank  = authority level (100=highest) — gapped so custom roles can slot in
+// isSystem = true locks rank & name, prevents deletion
 // ══════════════════════════════════════
 const ROLES = [
-    { name: "SUPER_ADMIN", description: "Super Admin - Full system access" },
-    { name: "COMPANY_ADMIN", description: "Company Admin - Company wide full access" },
-    { name: "BRANCH_MANAGER", description: "Branch Manager - Full branch access and approvals" },
-    { name: "BDE", description: "Business Development Executive - Client acquisition and follow-ups" },
-    { name: "ISE", description: "Inside Sales Executive - Support and lead nurture" },
+  { name: ROLE_NAMES.SUPER_ADMIN,    rank: ROLE_RANKS.SUPER_ADMIN,    isSystem: true, status: "ACTIVE", description: "Super Admin - Full system access" },
+  { name: ROLE_NAMES.COMPANY_ADMIN,  rank: ROLE_RANKS.COMPANY_ADMIN,  isSystem: true, status: "ACTIVE", description: "Company Admin - Company wide full access" },
+  { name: ROLE_NAMES.BRANCH_MANAGER, rank: ROLE_RANKS.BRANCH_MANAGER, isSystem: true, status: "ACTIVE", description: "Branch Manager - Full branch access and approvals" },
+  { name: ROLE_NAMES.BDE,            rank: ROLE_RANKS.BDE,            isSystem: true, status: "ACTIVE", description: "Business Development Executive - Client acquisition and follow-ups" },
+  { name: ROLE_NAMES.ISE,            rank: ROLE_RANKS.ISE,            isSystem: true, status: "ACTIVE", description: "Inside Sales Executive - Support and lead nurture" },
 ]
 
 // ══════════════════════════════════════
 // MODULES
 // ══════════════════════════════════════
-const MODULES = [
-    "SYSTEM_SETTINGS",
-    "COMPANY",
-    "BRANCH",
-    "ROLE_PERMISSION",
-    "USER",
-    "TEAM",
-    "LEAD",
-    "LEAD_ASSIGNMENT",
-    "PIPELINE",
-    "TASK",
-    "ACTIVITY",
-    "COURSE",
-    "TARGET",
-    "CUSTOMER",
-    "APPROVAL",
-    "DASHBOARD",
-    "REPORT",
-    "NOTIFICATION",
-    "AUDIT",
-]
+// MODULES imported from roleConstants.js above
+
 
 // ══════════════════════════════════════
 // PERMISSION MATRIX PER ROLE
@@ -168,8 +157,11 @@ export const initializeSystem = async () => {
         })
 
         // ── STEP 0: ENSURE ROLES + PERMISSIONS (FAST SYNC) ─────
-        // Goal: don't write on every restart — only create/update if missing or changed.
-        const existingRoles = await prisma.role.findMany({ select: { id: true, name: true, description: true } })
+        // Keys on name + companyId=null (system roles are globally unique by name with null companyId).
+        const existingRoles = await prisma.role.findMany({
+            where: { companyId: null },
+            select: { id: true, name: true, description: true, rank: true, isSystem: true, status: true }
+        })
         const roleByName = new Map(existingRoles.map(r => [r.name, r]))
 
         const rolesToCreate = ROLES.filter(r => !roleByName.has(r.name))
@@ -181,16 +173,22 @@ export const initializeSystem = async () => {
             .map(r => {
                 const existing = roleByName.get(r.name)
                 if (!existing) return null
-                if ((existing.description || "") === (r.description || "")) return null
-                return { id: existing.id, description: r.description }
+                const descChanged   = (existing.description || "") !== (r.description || "")
+                const rankChanged   = existing.rank !== r.rank
+                const statusChanged = existing.status !== r.status
+                if (!descChanged && !rankChanged && !statusChanged) return null
+                return { id: existing.id, description: r.description, rank: r.rank, status: r.status }
             })
             .filter(Boolean)
         for (const r of rolesToUpdate) {
-            await prisma.role.update({ where: { id: r.id }, data: { description: r.description } })
+            await prisma.role.update({ where: { id: r.id }, data: { description: r.description, rank: r.rank, status: r.status } })
         }
 
-        // Refresh roles after any creates/updats (we need role ids)
-        const roles = await prisma.role.findMany({ select: { id: true, name: true } })
+        // Refresh roles after any creates/updates (we need role ids)
+        const roles = await prisma.role.findMany({
+            where: { companyId: null },
+            select: { id: true, name: true }
+        })
         const roleIdByName = new Map(roles.map(r => [r.name, r.id]))
 
         // Fetch existing permissions once, then only write diffs
@@ -293,8 +291,9 @@ export const initializeSystem = async () => {
             console.log("First time — initializing system...")
 
             // ── STEP 3: CREATE INITIAL SUPERADMIN ──────────────
-            const superAdminRole = await prisma.role.findUnique({
-                where: { name: "SUPER_ADMIN" }
+            // Uses findFirst with name + companyId:null (system roles are unique within null company scope)
+            const superAdminRole = await prisma.role.findFirst({
+                where: { name: ROLE_NAMES.SUPER_ADMIN, companyId: null }
             })
 
             const superAdminUser = await prisma.user.upsert({

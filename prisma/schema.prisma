@@ -29,6 +29,7 @@ model Company {
   userRoles   UserRole[]
   pipelines   Pipeline[]
   leadSources LeadSource[]
+  roles       Role[]
 
   @@map("companies")
 }
@@ -82,6 +83,7 @@ model User {
   stageChangedLeads         Lead[]              @relation("UserStageChangedLeads")
   leadComments              LeadComment[]
   createdDailyBranchReports DailyBranchReport[] @relation("UserCreatedDailyBranchReports")
+  createdRoles              Role[]              @relation("RoleCreatedBy")
 
   @@index([companyId])
   @@index([branchId])
@@ -90,13 +92,23 @@ model User {
 
 model Role {
   id          Int      @id @default(autoincrement())
-  name        String   @unique
+  companyId   Int?     @map("company_id")             // null = global system role, shared by all companies
+  name        String                                   // role identifier — unique within company scope
   description String?
+  rank        Int      @default(0)                     // authority level: Super Admin=100, Company Admin=80, Branch Manager=60, BDE/ISE=40
+  isSystem    Boolean  @default(false) @map("is_system") // true = seeded role, locks rank & name, prevents deletion
+  status      String   @default("ACTIVE")              // "ACTIVE" | "INACTIVE"
+  createdBy   Int?     @map("created_by")
   createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
+  company         Company?    @relation(fields: [companyId], references: [id])
+  createdByUser   User?       @relation("RoleCreatedBy", fields: [createdBy], references: [id])
   userRoles       UserRole[]
   rolePermissions Permission[]
 
+  @@unique([companyId, name])           // same name allowed per-company, no cross-company collision
+  @@index([companyId])
   @@map("roles")
 }
 
@@ -121,14 +133,15 @@ model UserRole {
 }
 
 model Permission {
-  id        Int      @id @default(autoincrement())
-  roleId    Int      @map("role_id")
-  module    String
-  canView   Boolean  @default(false) @map("can_view")
-  canCreate Boolean  @default(false) @map("can_create")
-  canEdit   Boolean  @default(false) @map("can_edit")
-  canDelete Boolean  @default(false) @map("can_delete")
-  createdAt DateTime @default(now()) @map("created_at")
+  id         Int      @id @default(autoincrement())
+  roleId     Int      @map("role_id")
+  module     String
+  canView    Boolean  @default(false) @map("can_view")
+  canCreate  Boolean  @default(false) @map("can_create")
+  canEdit    Boolean  @default(false) @map("can_edit")
+  canDelete  Boolean  @default(false) @map("can_delete")
+  canArchive Boolean  @default(false) @map("can_archive")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   role Role @relation(fields: [roleId], references: [id])
 
@@ -147,6 +160,24 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// OTP-based password reset — linked to user_id + company_id for audit trail
+model PasswordReset {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  companyId  Int?     @map("company_id")  // denormalized from user at creation time
+  otp        String
+  isVerified Boolean  @default(false) @map("is_verified")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([userId])
+  @@index([companyId])
+  @@map("password_resets")
 }
 
 // ══════════════════════════════════════════════════════════

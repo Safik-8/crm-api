@@ -65,13 +65,14 @@ export const loginUserService = async (email, password) => {
   const primaryUserRole =
     user.userRoles.find(ur => ur.isPrimary) ?? user.userRoles[0]
 
-  // ── 8. ALL ROLES — deduplicated ────────────────────────
+  // ── 8. ALL ROLES — deduplicated ──────────────────────────────────
   const uniqueRolesMap = new Map()
   user.userRoles.forEach(ur => {
     const key = `${ur.role.name}_${ur.companyId}_${ur.branchId}`
     if (!uniqueRolesMap.has(key)) {
       uniqueRolesMap.set(key, {
-        role      : ur.role.name,
+        name      : ur.role.name,
+        rank      : ur.role.rank ?? 0,
         companyId : ur.companyId,
         branchId  : ur.branchId,
         isPrimary : ur.isPrimary,
@@ -101,14 +102,15 @@ export const loginUserService = async (email, password) => {
 
   // ── 10. GENERATE TOKENS ────────────────────────────────
   const accessToken  = generateAccessToken({
-    userId      : user.id,
-    email       : user.email,
-    name        : user.name,
-    companyId   : user.companyId,
-    branchId    : user.branchId,
-    primaryRole : primaryUserRole.role.name,
-    roles       : allRoles,
-    permissions : permissionsMap,
+    userId          : user.id,
+    email           : user.email,
+    name            : user.name,
+    companyId       : user.companyId,
+    branchId        : user.branchId,
+    primaryRole     : primaryUserRole.role.name,
+    primaryRoleRank : primaryUserRole.role.rank ?? 0,
+    roles           : allRoles,
+    permissions     : permissionsMap,
   })
   const refreshToken = generateRefreshToken({
     userId    : user.id,
@@ -128,20 +130,21 @@ export const loginUserService = async (email, password) => {
     accessToken,
     refreshToken,
     user: {
-      id          : user.id,
-      name        : user.name,
-      email       : user.email,
-      status      : user.status,
-      companyId   : user.companyId,
-      companyName : user.company?.name    ?? null,
-      companyCode : user.company?.code    ?? null,
-      company     : user.company,
-      branchId    : user.branchId,
-      branchName  : user.branch?.name     ?? null,
-      branchCode  : user.branch?.code     ?? null,
-      primaryRole : primaryUserRole.role.name,
-      roles       : allRoles,
-      permissions : permissionsMap,
+      id              : user.id,
+      name            : user.name,
+      email           : user.email,
+      status          : user.status,
+      companyId       : user.companyId,
+      companyName     : user.company?.name    ?? null,
+      companyCode     : user.company?.code    ?? null,
+      company         : user.company,
+      branchId        : user.branchId,
+      branchName      : user.branch?.name     ?? null,
+      branchCode      : user.branch?.code     ?? null,
+      primaryRole     : primaryUserRole.role.name,
+      primaryRoleRank : primaryUserRole.role.rank ?? 0,
+      roles           : allRoles,
+      permissions     : permissionsMap,
     }
   }
 }
@@ -199,10 +202,11 @@ export const refreshTokenService = async (refreshToken) => {
     user.userRoles.find(ur => ur.isPrimary) ?? user.userRoles[0]
 
   const allRoles = user.userRoles.map(ur => ({
-    role: ur.role.name,
-    companyId: ur.companyId,
-    branchId: ur.branchId,
-    isPrimary: ur.isPrimary,
+    name      : ur.role.name,
+    rank      : ur.role.rank ?? 0,
+    companyId : ur.companyId,
+    branchId  : ur.branchId,
+    isPrimary : ur.isPrimary,
   }))
 
   const permissionsMap = {}
@@ -228,14 +232,15 @@ export const refreshTokenService = async (refreshToken) => {
 
   // ── 8. 🔥 GENERATE NEW TOKENS ──────────────────────────
   const newAccessToken = generateAccessToken({
-    userId: user.id,
-    email: user.email,
-    name: user.name,
-    companyId: user.companyId,
-    branchId: user.branchId,
-    primaryRole: primaryUserRole.role.name,
-    roles: allRoles,
-    permissions: permissionsMap,
+    userId          : user.id,
+    email           : user.email,
+    name            : user.name,
+    companyId       : user.companyId,
+    branchId        : user.branchId,
+    primaryRole     : primaryUserRole.role.name,
+    primaryRoleRank : primaryUserRole.role.rank ?? 0,
+    roles           : allRoles,
+    permissions     : permissionsMap,
   })
 
   const newRefreshToken = generateRefreshToken({
@@ -253,19 +258,20 @@ export const refreshTokenService = async (refreshToken) => {
     accessToken: newAccessToken,
     refreshToken: newRefreshToken,
     user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      companyId: user.companyId,
-      companyName: user.company?.name ?? null,
-      companyCode: user.company?.code ?? null,
-      company: user.company,
-      branchId: user.branchId,
-      branchName: user.branch?.name ?? null,
-      branchCode: user.branch?.code ?? null,
-      primaryRole: primaryUserRole.role.name,
-      roles: allRoles,
-      permissions: permissionsMap,
+      id              : user.id,
+      name            : user.name,
+      email           : user.email,
+      companyId       : user.companyId,
+      companyName     : user.company?.name ?? null,
+      companyCode     : user.company?.code ?? null,
+      company         : user.company,
+      branchId        : user.branchId,
+      branchName      : user.branch?.name ?? null,
+      branchCode      : user.branch?.code ?? null,
+      primaryRole     : primaryUserRole.role.name,
+      primaryRoleRank : primaryUserRole.role.rank ?? 0,
+      roles           : allRoles,
+      permissions     : permissionsMap,
     }
   }
 }
