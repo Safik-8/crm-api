@@ -204,12 +204,22 @@ export const refreshTokenService = async (refreshToken) => {
     throw new UnauthorizedError("User not found or inactive")
   }
 
-  // ── 5.1 BRANCH STATUS CHECK ──────────────────────────
-  if (user.branchId && user.branch?.status !== "ACTIVE") {
-    throw new UnauthorizedError("Your branch is currently inactive. Access denied.")
+  // ── 5.0 COMPANY STATUS CHECK ──────────────────────────
+  if (user.companyId && user.company?.status !== "ACTIVE") {
+    throw new ForbiddenError("Your company is currently inactive. Access denied.")
   }
 
-  // ── 6. REBUILD ROLES AND PERMISSIONS ───────────────────
+  // ── 5.1 BRANCH STATUS CHECK ──────────────────────────
+  if (user.branchId && user.branch?.status !== "ACTIVE") {
+    throw new ForbiddenError("Your branch is currently inactive. Access denied.")
+  }
+
+  // ── 6. ROLES CHECK ─────────────────────────────────────
+  if (!user.userRoles?.length) {
+    throw new NoRoleError()
+  }
+
+  // ── 7. REBUILD ROLES AND PERMISSIONS ───────────────────
   const primaryUserRole =
     user.userRoles.find(ur => ur.isPrimary) ?? user.userRoles[0]
 
