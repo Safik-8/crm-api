@@ -38,12 +38,20 @@ const LABEL_MAP = {
 const SELF_SCOPED_ROLES = ["ISE", "BDE"]
 
 export const getDashboardReportsService = async (query, user) => {
-  const branchId = Number(user?.branchId)
-  if (!Number.isInteger(branchId) || branchId < 1) throw new BadRequestError("Branch is required")
+  const isSystemOrCompanyAdmin = user.primaryRole === "SUPER_ADMIN" || user.primaryRole === "COMPANY_ADMIN"
+  
+  const branchIdVal = query?.branchId || query?.branch_id || user?.branchId
+  const branchId = branchIdVal ? Number(branchIdVal) : null
+
+  if (!isSystemOrCompanyAdmin) {
+    if (!branchId || branchId < 1) {
+      throw new BadRequestError("Branch is required")
+    }
+  }
 
   const role     = user.primaryRole                          // e.g. "ISE", "BRANCH_MANAGER"
   const isSelf   = SELF_SCOPED_ROLES.includes(role)         // true → only own leads
-  const viewMode = isSelf ? "self" : "branch"               // returned in response so frontend knows
+  const viewMode = isSelf ? "self" : (isSystemOrCompanyAdmin ? "company" : "branch") // returned in response so frontend knows
 
   // ── Date range ────────────────────────────────────────────────
   const todayStart = new Date()
@@ -82,9 +90,14 @@ export const getDashboardReportsService = async (query, user) => {
   // BRANCH_ADMIN / MANAGER → all leads in their branch
   const baseLeadWhere = {
     isDeleted: false,
-    pipeline: { branchId },
     stageChangedAt: { gte: startDate, lte: endDate },
     ...(isSelf ? { stageChangedById: user.id } : {})
+  }
+
+  if (branchId) {
+    baseLeadWhere.pipeline = { branchId }
+  } else if (user.companyId) {
+    baseLeadWhere.pipeline = { companyId: user.companyId }
   }
 
   // ── Fetch full lead records per stage in parallel ─────────────

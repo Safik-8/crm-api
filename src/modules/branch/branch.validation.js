@@ -41,10 +41,9 @@ export const assignUserSchema = z.object({
   password: z.string({
     required_error: "Password is required"
   }).min(6, "Password must be at least 6 characters"),
-  roleName: z.enum(["BRANCH_MANAGER", "BDE", "ISE"], {
-    required_error: "Assign Role is required",
-    invalid_type_error: "Role must be one of: BRANCH_MANAGER, BDE, ISE"
-  })
+  roleName: z.string({
+    required_error: "Assign Role is required"
+  }).trim().min(1, "Assign Role is required")
 })
 
 /**
@@ -57,7 +56,8 @@ export const validateBody = (schema) => {
       next()
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const formattedErrors = error.errors.map(err => ({
+        const issues = error.errors || error.issues || []
+        const formattedErrors = issues.map(err => ({
           field: err.path.join("."),
           message: err.message
         }))

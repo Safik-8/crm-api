@@ -60,7 +60,7 @@ const ROLE_PERMISSIONS = {
         SYSTEM_SETTINGS: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         COMPANY: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         BRANCH: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        ROLE_PERMISSION: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        ROLE_PERMISSION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         USER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         TEAM: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
@@ -287,28 +287,33 @@ export const initializeSystem = async () => {
             console.log("✅ Default lead sources already present")
         }
 
-        if (!existingSuperAdmin) {
-            console.log("First time — initializing system...")
+        // ── STEP 3: CREATE/UPDATE INITIAL SUPERADMIN ──────────────
+        // Uses findFirst with name + companyId:null (system roles are unique within null company scope)
+        const superAdminRole = await prisma.role.findFirst({
+            where: { name: ROLE_NAMES.SUPER_ADMIN, companyId: null }
+        })
 
-            // ── STEP 3: CREATE INITIAL SUPERADMIN ──────────────
-            // Uses findFirst with name + companyId:null (system roles are unique within null company scope)
-            const superAdminRole = await prisma.role.findFirst({
-                where: { name: ROLE_NAMES.SUPER_ADMIN, companyId: null }
-            })
+        const superAdminUser = await prisma.user.upsert({
+            where: { email: "superadmin@gmail.com" },
+            update: { passwordHash: await hashPassword("superadmin123") },
+            create: {
+                name: "Super Admin",
+                email: "superadmin@gmail.com",
+                passwordHash: await hashPassword("superadmin123"),
+                companyId: null,
+                branchId: null,
+            }
+        })
 
-            const superAdminUser = await prisma.user.upsert({
-                where: { email: "superadmin@gmail.com" },
-                update: { passwordHash: await hashPassword("superadmin123") },
-                create: {
-                    name: "Super Admin",
-                    email: "superadmin@gmail.com",
-                    passwordHash: await hashPassword("superadmin123"),
-                    companyId: null,
-                    branchId: null,
-                }
-            })
+        // ── STEP 4: ASSIGN ROLE IF MISSING ─
+        const existingAssignment = await prisma.userRole.findFirst({
+            where: {
+                userId: superAdminUser.id,
+                roleId: superAdminRole.id,
+            }
+        })
 
-            // ── STEP 4: ASSIGN ROLE (FIXED — NO UPSERT WITH NULL) ─
+        if (!existingAssignment) {
             // First, remove any duplicate roles for this user
             await prisma.userRole.deleteMany({
                 where: {
@@ -327,12 +332,12 @@ export const initializeSystem = async () => {
                     isPrimary: true
                 }
             })
-
-            console.log("SuperAdmin ensured")
-            console.log("System initialized successfully!")
+            console.log("✅ SuperAdmin UserRole initialized/restored")
         } else {
-            console.log("System already initialized — SuperAdmin exists, syncing defaults")
+            console.log("✅ SuperAdmin UserRole verified")
         }
+
+        console.log("System initialized successfully!")
 
         const createdById = (await prisma.user.findUnique({ where: { email: "superadmin@gmail.com" }, select: { id: true } }))?.id
         if (createdById) {

@@ -108,3 +108,53 @@ export const deleteManyRefreshTokens = async (token) => {
     where: { token }
   })
 }
+
+/**
+ * Create a new password reset OTP entry.
+ */
+export const createPasswordReset = async (userId, companyId, otp, expiresAt) => {
+  return prisma.passwordReset.create({
+    data: {
+      userId,
+      companyId,
+      otp,
+      expiresAt
+    }
+  })
+}
+
+/**
+ * Find the latest unverified password reset entry for a user and OTP.
+ */
+export const findLatestResetByUserIdAndOtp = async (userId, otp) => {
+  return prisma.passwordReset.findFirst({
+    where: {
+      userId,
+      otp,
+      isVerified: false
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  })
+}
+
+/**
+ * Mark a password reset record as verified.
+ */
+export const markPasswordResetVerified = async (resetId) => {
+  return prisma.passwordReset.update({
+    where: { id: resetId },
+    data: { isVerified: true }
+  })
+}
+
+/**
+ * Update a user's password hash.
+ */
+export const updateUserPassword = async (userId, passwordHash) => {
+  return prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash }
+  })
+}

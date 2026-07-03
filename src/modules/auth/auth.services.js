@@ -7,9 +7,13 @@ import {
   createRefreshToken,
   findRefreshToken,
   deleteRefreshToken,
-  deleteManyRefreshTokens
+  deleteManyRefreshTokens,
+  createPasswordReset,
+  findLatestResetByUserIdAndOtp,
+  markPasswordResetVerified,
+  updateUserPassword
 } from "./auth.repository.js"
-import { loginSchema, refreshSchema } from "./auth.validation.js"
+import { loginSchema, refreshSchema, forgotPasswordSchema, resetPasswordSchema } from "./auth.validation.js"
 import bcrypt from "bcryptjs"
 import {
   generateAccessToken,
@@ -20,8 +24,11 @@ import {
   UnauthorizedError,
   AccountInactiveError,
   NoRoleError,
-  ForbiddenError
+  ForbiddenError,
+  NotFoundError,
+  BadRequestError
 } from "../../utils/AppError.js"
+import { sendOTPEmail } from "../../utils/mailer.js"
 import dotenv from "dotenv"
 dotenv.config()
 
@@ -52,6 +59,11 @@ export const loginUserService = async (email, password) => {
 
   // ── 5. STATUS CHECK ────────────────────────────────────
   if (user.status !== "ACTIVE") throw new AccountInactiveError()
+
+  // ── 5.0 COMPANY STATUS CHECK ──────────────────────────
+  if (user.companyId && user.company?.status !== "ACTIVE") {
+    throw new ForbiddenError("Your company is currently inactive. Access denied.")
+  }
 
   // ── 5.1 BRANCH STATUS CHECK ──────────────────────────
   if (user.branchId && user.branch?.status !== "ACTIVE") {
@@ -283,4 +295,107 @@ export const logoutService = async (refreshToken) => {
   if (!refreshToken) return
 
   await deleteManyRefreshTokens(refreshToken)
+}
+
+// ══════════════════════════════════════
+// FORGOT PASSWORD SERVICE
+// ══════════════════════════════════════
+export const forgotPasswordService = async (email) => {
+  // Validate email
+  const validation = forgotPasswordSchema.safeParse({ email })
+  if (!validation.success) {
+    const fields = validation.error.errors.map(err => ({
+      field: err.path.join("."),
+      message: err.message
+    }))
+    throw new ValidationError("Validation failed", fields)
+  }
+
+  // Find user
+  const user = await findUserByEmail(email)
+  if (!user) {
+    throw new NotFoundError("No account exists with this email")
+  }
+
+  // Generate 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+
+  // OTP expires in 10 minutes
+  const expiresAt = new Date()
+  expiresAt.setMinutes(expiresAt.getMinutes() + 10)
+
+  // Save to database
+  await createPasswordReset(user.id, user.companyId, otp, expiresAt)
+
+  // Send email
+  await sendOTPEmail(user.email, otp)
+
+  return { success: true, message: "OTP sent successfully to your email" }
+}
+
+// ══════════════════════════════════════
+// RESET PASSWORD SERVICE
+// ══════════════════════════════════════
+export const resetPasswordService = async (email, otp, newPassword) => {
+  // Validate fields
+  const validation = resetPasswordSchema.safeParse({ email, otp, password: newPassword })
+  if (!validation.success) {
+    const fields = validation.error.errors.map(err => ({
+      field: err.path.join("."),
+      message: err.message
+    }))
+    throw new ValidationError("Validation failed", fields)
+  }
+
+  // Find user
+  const user = await findUserByEmail(email)
+  if (!user) {
+    throw new NotFoundError("No account exists with this email")
+  }
+
+  // Find latest unverified reset record with matching OTP
+  const resetRecord = await findLatestResetByUserIdAndOtp(user.id, otp)
+  if (!resetRecord) {
+    throw new BadRequestError("Invalid OTP code")
+  }
+
+  // Check expiration
+  if (resetRecord.expiresAt < new Date()) {
+    throw new BadRequestError("OTP code has expired")
+  }
+
+  // Hash new password using bcrypt
+  const passwordHash = await bcrypt.hash(newPassword, 10)
+
+  // Update password in DB
+  await updateUserPassword(user.id, passwordHash)
+
+  // Mark OTP as verified
+  await markPasswordResetVerified(resetRecord.id)
+
+  return { success: true, message: "Password has been reset successfully" }
+}
+
+// ══════════════════════════════════════
+// VERIFY OTP SERVICE
+// ══════════════════════════════════════
+export const verifyOtpService = async (email, otp) => {
+  // Find user
+  const user = await findUserByEmail(email)
+  if (!user) {
+    throw new NotFoundError("No account exists with this email")
+  }
+
+  // Find latest unverified reset record with matching OTP
+  const resetRecord = await findLatestResetByUserIdAndOtp(user.id, otp)
+  if (!resetRecord) {
+    throw new BadRequestError("Invalid OTP code")
+  }
+
+  // Check expiration
+  if (resetRecord.expiresAt < new Date()) {
+    throw new BadRequestError("OTP code has expired")
+  }
+
+  return { success: true, message: "OTP verified successfully" }
 }

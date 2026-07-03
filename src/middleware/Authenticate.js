@@ -6,7 +6,8 @@ import {
   TokenExpiredError,
   TokenInvalidError,
   AccountInactiveError,
-  NoRoleError
+  NoRoleError,
+  ForbiddenError
 } from "../utils/AppError.js"
 import prisma from "../config/db.js"
 
@@ -49,6 +50,9 @@ export const authenticate = async (req, res, next) => {
 
     if (!user)                   return next(new UnauthorizedError("User not found"))
     if (user.status !== "ACTIVE") return next(new AccountInactiveError())
+    if (user.companyId && user.company?.status !== "ACTIVE") {
+      return next(new ForbiddenError("Your company is currently inactive. Access denied."))
+    }
     if (!user.userRoles?.length) return next(new NoRoleError())
 
     const primaryUserRole = user.userRoles.find(ur => ur.isPrimary) || user.userRoles[0]

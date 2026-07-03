@@ -19,6 +19,41 @@ export const refreshSchema = z.object({
     .nonempty("Refresh token is required")
 })
 
+// Schema to validate forgot password email input
+export const forgotPasswordSchema = z.object({
+  email: z.string({ required_error: "Email is required" })
+    .trim()
+    .nonempty("Email is required")
+    .email("Invalid email format")
+})
+
+// Schema to validate reset password input
+export const resetPasswordSchema = z.object({
+  email: z.string({ required_error: "Email is required" })
+    .trim()
+    .nonempty("Email is required")
+    .email("Invalid email format"),
+  otp: z.string({ required_error: "OTP is required" })
+    .trim()
+    .nonempty("OTP is required")
+    .length(6, "OTP must be exactly 6 characters"),
+  password: z.string({ required_error: "New password is required" })
+    .nonempty("New password is required")
+    .min(6, "Password must be at least 6 characters")
+})
+
+// Schema to validate OTP verification input
+export const verifyOtpSchema = z.object({
+  email: z.string({ required_error: "Email is required" })
+    .trim()
+    .nonempty("Email is required")
+    .email("Invalid email format"),
+  otp: z.string({ required_error: "OTP is required" })
+    .trim()
+    .nonempty("OTP is required")
+    .length(6, "OTP must be exactly 6 characters")
+})
+
 /**
  * Express middleware to validate request body against a Zod schema.
  * Formats any validation errors to match the project's native ValidationError shape.

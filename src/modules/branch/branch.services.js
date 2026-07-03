@@ -281,22 +281,6 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
     }
   }
 
-  // ── ROLE CREATION GUARD
-  const allowedToCreate = ROLE_CREATION_RULES[actor.primaryRole] ?? []
-  if (!allowedToCreate.includes(roleName)) {
-    throw new ForbiddenError(
-      `${actor.primaryRole} cannot create user with role ${roleName}`
-    )
-  }
-
-  // ── ROLE NEEDS BRANCH CHECK
-  if (!ROLES_NEED_BRANCH.includes(roleName)) {
-    throw new ValidationError(
-      `Role ${roleName} cannot be assigned to a branch directly`,
-      [{ field: "roleName", message: "Use BRANCH_MANAGER, BDE, or ISE" }]
-    )
-  }
-
   // ── CHECK ROLE EXISTS
   const role = await prisma.role.findFirst({
     where: {
@@ -309,6 +293,23 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
   })
   if (!role) throw new NotFoundError("Role")
 
+  // ── ROLE CREATION RANK GUARD
+  if (role.rank >= actor.primaryRoleRank) {
+    throw new ForbiddenError(
+      `Cannot assign role "${roleName}" (rank ${role.rank}) with equal or higher rank than your own (${actor.primaryRoleRank})`
+    )
+  }
+
+  // ── BRANCH ELIGIBILITY CHECK
+  // Allow Company Admin (rank 80) to be onboarded but handle it at company scope.
+  // Other roles >= 80 (e.g. SUPER_ADMIN) cannot be onboarded here.
+  if (role.rank >= 80 && role.name !== "COMPANY_ADMIN") {
+    throw new ValidationError(
+      `Role "${roleName}" cannot be assigned to a branch directly`,
+      [{ field: "roleName", message: "Only roles with rank lower than Company Admin (rank 80) can be assigned to a branch" }]
+    )
+  }
+
   // ── CHECK EMAIL UNIQUE
   const existingUser = await prisma.user.findUnique({
     where: { email: formattedEmail }
@@ -320,14 +321,14 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
 
   // ── CREATE USER + ASSIGN ROLE IN TRANSACTION
   const result = await prisma.$transaction(async (tx) => {
-    // Create user scoped to company and branch
+    // Create user scoped to company (and branch if not Company Admin)
     const user = await tx.user.create({
       data: {
         name: name.trim(),
         email: formattedEmail,
         passwordHash: hashedPassword,
         companyId: branch.companyId,
-        branchId: Number(branchId),
+        branchId: role.name === "COMPANY_ADMIN" ? null : Number(branchId),
         status: "ACTIVE"
       }
     })
@@ -338,7 +339,7 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
         userId: user.id,
         roleId: role.id,
         companyId: branch.companyId,
-        branchId: Number(branchId),
+        branchId: role.name === "COMPANY_ADMIN" ? null : Number(branchId),
         isPrimary: true,
         assignedBy: actor.id
       }
