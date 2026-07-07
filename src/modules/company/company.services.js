@@ -11,7 +11,8 @@ import {
 import {
   NotFoundError,
   ConflictError,
-  ForbiddenError
+  ForbiddenError,
+  ValidationError
 } from "../../utils/AppError.js"
 import { hashPassword } from "../../utils/passwordUtils.js"
 import prisma from "../../config/db.js"
@@ -38,7 +39,8 @@ export const createCompanyService = async (data, actor) => {
     status = "ACTIVE",
     adminName,
     adminEmail,
-    adminPassword
+    adminPassword,
+    adminSecondaryRoles = []
   } = data
 
   const formattedCode = code.toUpperCase().trim()
@@ -60,16 +62,53 @@ export const createCompanyService = async (data, actor) => {
 
   // 3. Verify COMPANY_ADMIN role exists
   const companyAdminRole = await prisma.role.findFirst({
-    where: { name: "COMPANY_ADMIN" }
+    where: { name: "COMPANY_ADMIN", companyId: null }
   })
   if (!companyAdminRole) {
     throw new NotFoundError("COMPANY_ADMIN role not found in system")
   }
 
-  // 4. Hash the admin's password
+  // 4. Verify and fetch secondary roles if requested
+  let secondaryRolesDb = []
+  if (adminSecondaryRoles && adminSecondaryRoles.length > 0) {
+    // Only pre-seeded system roles can be assigned as secondary roles during onboarding
+    // Exclude SUPER_ADMIN (violates security boundaries) and COMPANY_ADMIN (already primary)
+    const invalidRoles = adminSecondaryRoles.filter(
+      roleName => roleName === "SUPER_ADMIN" || roleName === "COMPANY_ADMIN"
+    )
+    if (invalidRoles.length > 0) {
+      throw new ValidationError("Invalid secondary roles selection", [
+        { field: "adminSecondaryRoles", message: `Roles "${invalidRoles.join(", ")}" cannot be assigned as secondary roles` }
+      ])
+    }
+
+    secondaryRolesDb = await prisma.role.findMany({
+      where: {
+        name: { in: adminSecondaryRoles },
+        companyId: null
+      }
+    })
+
+    if (secondaryRolesDb.length !== adminSecondaryRoles.length) {
+      const foundNames = secondaryRolesDb.map(r => r.name)
+      const missing = adminSecondaryRoles.filter(name => !foundNames.includes(name))
+      throw new NotFoundError(`Secondary roles not found: ${missing.join(", ")}`)
+    }
+
+    // Verify that all secondary roles have a rank less than or equal to the primary role (COMPANY_ADMIN = rank 80)
+    for (const role of secondaryRolesDb) {
+      if (role.rank > companyAdminRole.rank) {
+        throw new ValidationError("Invalid secondary roles selection", [
+          { field: "adminSecondaryRoles", message: `Secondary role "${role.name}" (rank ${role.rank}) cannot have a higher rank than the primary role "${companyAdminRole.name}" (rank ${companyAdminRole.rank})` }
+        ])
+      }
+    }
+  }
+
+  // 5. Hash the admin's password
   const hashedPassword = await hashPassword(adminPassword)
 
-  // 5. Execute atomic transaction
+  // 6. Execute atomic transaction
   return prisma.$transaction(async (tx) => {
     // A. Create Company record
     const company = await createCompany({
@@ -94,7 +133,7 @@ export const createCompanyService = async (data, actor) => {
       }
     })
 
-    // C. Assign UserRole mapping to COMPANY_ADMIN
+    // C. Assign UserRole mapping to COMPANY_ADMIN (Primary role)
     await tx.userRole.create({
       data: {
         userId: user.id,
@@ -105,6 +144,22 @@ export const createCompanyService = async (data, actor) => {
         assignedBy: actor?.id || null
       }
     })
+
+    // D. Assign Secondary roles mapping if they exist
+    if (secondaryRolesDb.length > 0) {
+      const secondaryMappings = secondaryRolesDb.map(role => ({
+        userId: user.id,
+        roleId: role.id,
+        companyId: company.id,
+        branchId: null,
+        isPrimary: false,
+        assignedBy: actor?.id || null
+      }))
+
+      await tx.userRole.createMany({
+        data: secondaryMappings
+      })
+    }
 
     return company
   }, {

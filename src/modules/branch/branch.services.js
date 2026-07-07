@@ -264,93 +264,130 @@ export const updateBranchService = async (id, data, actor) => {
  * Registers a new user and assigns them to a branch.
  */
 export const assignUserToBranchService = async (branchId, data, actor) => {
-  const { name, email, password, roleName } = data
+  const { name, email, password, primaryRole, secondaryRoles = [] } = data
   const formattedEmail = email.toLowerCase().trim()
 
-  // ── CHECK BRANCH EXISTS
+  // ── 1. VERIFY TARGET BRANCH EXISTS
   const branch = await findBranchById(Number(branchId))
   if (!branch) throw new NotFoundError("Branch")
 
-  // ── SCOPE GUARD
+  // ── 2. ENFORCE MULTI-TENANCY SCOPING
   assertCompanyScope(actor, branch.companyId)
 
-  // Branch level scope check
+  // Non-administrators (like Branch Managers) can only onboard users within their own branch
   if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
     if (branch.id !== actor.branchId) {
       throw new ForbiddenError("You can only onboard users within your assigned branch")
     }
   }
 
-  // ── CHECK ROLE EXISTS
-  const role = await prisma.role.findFirst({
+  // ── 3. DEDUPLICATE AND RESOLVE REQUESTED ROLES
+  // Combine primary and secondary role selections to load them in one DB query
+  const uniqueRoleNames = Array.from(new Set([primaryRole, ...secondaryRoles]))
+
+  const rolesFromDb = await prisma.role.findMany({
     where: {
-      name: roleName,
+      name: { in: uniqueRoleNames },
       OR: [
-        { companyId: null },
-        { companyId: branch.companyId }
+        { companyId: null }, // Global/System roles
+        { companyId: branch.companyId } // Tenant-scoped custom roles
       ]
     }
   })
-  if (!role) throw new NotFoundError("Role")
 
-  // ── ROLE CREATION RANK GUARD
-  if (role.rank >= actor.primaryRoleRank) {
-    throw new ForbiddenError(
-      `Cannot assign role "${roleName}" (rank ${role.rank}) with equal or higher rank than your own (${actor.primaryRoleRank})`
-    )
+  // Ensure all requested roles were found in the database
+  if (rolesFromDb.length !== uniqueRoleNames.length) {
+    const foundNames = rolesFromDb.map(r => r.name)
+    const missing = uniqueRoleNames.filter(name => !foundNames.includes(name))
+    throw new NotFoundError(`Roles not found: ${missing.join(", ")}`)
   }
 
-  // ── BRANCH ELIGIBILITY CHECK
-  // Allow Company Admin (rank 80) to be onboarded but handle it at company scope.
-  // Other roles >= 80 (e.g. SUPER_ADMIN) cannot be onboarded here.
-  if (role.rank >= 80 && role.name !== "COMPANY_ADMIN") {
-    throw new ValidationError(
-      `Role "${roleName}" cannot be assigned to a branch directly`,
-      [{ field: "roleName", message: "Only roles with rank lower than Company Admin (rank 80) can be assigned to a branch" }]
-    )
+  // Find the database record corresponding to the primary role
+  const primaryRoleDb = rolesFromDb.find(r => r.name === primaryRole)
+
+  // ── 4. RUN SECURITY & HIERARCHY GUARDS (RANK CHECK)
+  // The creator cannot assign any role (primary or secondary) that has an equal or higher rank than their own
+  for (const role of rolesFromDb) {
+    if (role.rank >= actor.primaryRoleRank) {
+      throw new ForbiddenError(
+        `Cannot assign role "${role.name}" (rank ${role.rank}) with equal or higher rank than your own (${actor.primaryRoleRank})`
+      )
+    }
   }
 
-  // ── CHECK EMAIL UNIQUE
+  // ── 5. ENFORCE PRIMARY ROLE IS HIGHEST OR EQUAL RANK
+  // The rank of the primary role must be greater than or equal to the rank of all secondary roles
+  for (const role of rolesFromDb) {
+    if (role.name !== primaryRole && role.rank > primaryRoleDb.rank) {
+      throw new ValidationError(
+        "Invalid secondary roles selection",
+        [{ field: "secondaryRoles", message: `Secondary role "${role.name}" (rank ${role.rank}) cannot have a higher rank than the primary role "${primaryRole}" (rank ${primaryRoleDb.rank})` }]
+      )
+    }
+  }
+
+  // ── 6. ENFORCE BRANCH ELIGIBILITY
+  // Roles with rank >= 80 (except COMPANY_ADMIN) cannot be assigned directly to a branch, as they are higher-level scopes
+  for (const role of rolesFromDb) {
+    if (role.rank >= 80 && role.name !== "COMPANY_ADMIN") {
+      throw new ValidationError(
+        `Role "${role.name}" cannot be assigned to a branch directly`,
+        [{ field: "primaryRole", message: "Only roles with rank lower than Company Admin (rank 80) can be assigned to a branch" }]
+      )
+    }
+  }
+
+  // ── 6. VERIFY EMAIL UNIQUENESS
   const existingUser = await prisma.user.findUnique({
     where: { email: formattedEmail }
   })
   if (existingUser) throw new ConflictError("Email already registered", "email")
 
-  // ── HASH PASSWORD
+  // ── 7. ENCRYPT CREDENTIALS
   const hashedPassword = await hashPassword(password)
 
-  // ── CREATE USER + ASSIGN ROLE IN TRANSACTION
+  // ── 8. EXECUTE ATOMIC TRANSACTION (ALL-OR-NOTHING WRITE)
   const result = await prisma.$transaction(async (tx) => {
-    // Create user scoped to company (and branch if not Company Admin)
+    // A. Create the User profile
+    // Scoped to the branch unless their primary role is Company Admin (which has company-wide scope)
     const user = await tx.user.create({
       data: {
         name: name.trim(),
         email: formattedEmail,
         passwordHash: hashedPassword,
         companyId: branch.companyId,
-        branchId: role.name === "COMPANY_ADMIN" ? null : Number(branchId),
+        branchId: primaryRole === "COMPANY_ADMIN" ? null : Number(branchId),
         status: "ACTIVE"
       }
     })
 
-    // Create user-role mapping
-    await tx.userRole.create({
-      data: {
+    // B. Build UserRole mapping entries for both primary and secondary roles
+    const userRoleMappings = rolesFromDb.map(role => {
+      const isPrimary = role.name === primaryRole
+      // Scope role to branch if it is not a company-wide admin role
+      const roleBranchId = role.name === "COMPANY_ADMIN" ? null : Number(branchId)
+      
+      return {
         userId: user.id,
         roleId: role.id,
         companyId: branch.companyId,
-        branchId: role.name === "COMPANY_ADMIN" ? null : Number(branchId),
-        isPrimary: true,
+        branchId: roleBranchId,
+        isPrimary,
         assignedBy: actor.id
       }
     })
 
+    // C. Bulk write role associations
+    await tx.userRole.createMany({
+      data: userRoleMappings
+    })
+
     return user
   }, {
-    timeout: 30000
+    timeout: 30000 // 30s connection window limit
   })
 
-  // ── RETURN SAFE USER
+  // ── 9. RETURN SANITIZED RESPONSE PAYLOAD
   return prisma.user.findUnique({
     where: { id: result.id },
     select: {

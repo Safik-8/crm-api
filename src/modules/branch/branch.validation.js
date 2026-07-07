@@ -41,9 +41,10 @@ export const assignUserSchema = z.object({
   password: z.string({
     required_error: "Password is required"
   }).min(6, "Password must be at least 6 characters"),
-  roleName: z.string({
-    required_error: "Assign Role is required"
-  }).trim().min(1, "Assign Role is required")
+  primaryRole: z.string({
+    required_error: "Primary Role is required"
+  }).trim().min(1, "Primary Role is required"),
+  secondaryRoles: z.array(z.string().trim()).optional().default([])
 })
 
 /**

@@ -67,6 +67,17 @@ export const errorHandler = (err, req, res, next) => {
     })
   }
 
+  // Payload too large (express body limit)
+  if (err.type === "entity.too.large" || err.status === 413 || err.statusCode === 413) {
+    return res.status(413).json({
+      success: false,
+      statusCode: 413,
+      code: "PAYLOAD_TOO_LARGE",
+      message: "The request payload size exceeds the server limit (10MB). Please check file size.",
+      timestamp: new Date().toISOString()
+    })
+  }
+
   // Unknown
   console.error("Unhandled Error:", err)
   const serverError = new ServerError()

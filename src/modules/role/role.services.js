@@ -46,7 +46,7 @@ export const getRolesService = async (query, actor) => {
         { companyId: actor.companyId },
         { companyId: null } // Include global system roles
       ],
-      rank: { lte: actor.primaryRoleRank } // Hide roles above their rank (like SUPER_ADMIN)
+      rank: { lt: actor.primaryRoleRank } // Hide roles equal to or above their rank (only show assignable roles)
     }
   } else if (query.companyId) {
     const targetCompanyId = parseInt(query.companyId, 10)
@@ -63,10 +63,15 @@ export const getRolesService = async (query, actor) => {
   }
 
   if (search) {
-    where.name = {
-      contains: search,
-      mode: "insensitive"
-    }
+    const searchString = search.trim()
+    where.AND = [
+      {
+        OR: [
+          { name: { contains: searchString, mode: "insensitive" } },
+          { description: { contains: searchString, mode: "insensitive" } }
+        ]
+      }
+    ]
   }
 
   const [roles, total] = await Promise.all([
@@ -174,6 +179,9 @@ export const createRoleService = async (data, actor) => {
     }
 
     return findRoleById(role.id, tx)
+  }, {
+    maxWait: 15000,
+    timeout: 30000
   })
 }
 
@@ -250,6 +258,9 @@ export const updateRoleService = async (id, data, actor) => {
     }
 
     return findRoleById(role.id, tx)
+  }, {
+    maxWait: 15000,
+    timeout: 30000
   })
 }
 
@@ -314,6 +325,9 @@ export const deleteRoleService = async (id, actor, reassignRoleId) => {
         // 3. Delete the role
         await deleteRole(role.id, tx)
         return { success: true, message: "Users reassigned and role successfully deleted" }
+      }, {
+        maxWait: 15000,
+        timeout: 30000
       })
     } else {
       // Return list of users having this role
@@ -333,6 +347,9 @@ export const deleteRoleService = async (id, actor, reassignRoleId) => {
     // 2. Delete the role
     await deleteRole(role.id, tx)
     return { success: true, message: "Role successfully deleted" }
+  }, {
+    maxWait: 15000,
+    timeout: 30000
   })
 }
 
