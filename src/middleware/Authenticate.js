@@ -57,7 +57,7 @@ export const authenticate = async (req, res, next) => {
 
     const primaryUserRole = user.userRoles.find(ur => ur.isPrimary) || user.userRoles[0]
 
-    // Build permissions map: { "COMPANY": { canView, canCreate, canEdit, canDelete } }
+    // Build permissions map: { "COMPANY": { canView, canCreate, canEdit, canDelete, canArchive } }
     const permissionsMap = {}
     user.userRoles.forEach(ur => {
       ur.role.rolePermissions.forEach(rp => {
@@ -66,7 +66,8 @@ export const authenticate = async (req, res, next) => {
             canView   : false,
             canCreate : false,
             canEdit   : false,
-            canDelete : false
+            canDelete : false,
+            canArchive: false
           }
         }
         // Additive — if ANY role has permission, user has it
@@ -74,6 +75,7 @@ export const authenticate = async (req, res, next) => {
         if (rp.canCreate) permissionsMap[rp.module].canCreate = true
         if (rp.canEdit)   permissionsMap[rp.module].canEdit   = true
         if (rp.canDelete) permissionsMap[rp.module].canDelete = true
+        if (rp.canArchive) permissionsMap[rp.module].canArchive = true
       })
     })
 

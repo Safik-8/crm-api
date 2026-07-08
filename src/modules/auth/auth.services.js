@@ -103,12 +103,14 @@ export const loginUserService = async (email, password) => {
           canCreate : false,
           canEdit   : false,
           canDelete : false,
+          canArchive: false,
         }
       }
       if (rp.canView)   permissionsMap[rp.module].canView   = true
       if (rp.canCreate) permissionsMap[rp.module].canCreate = true
       if (rp.canEdit)   permissionsMap[rp.module].canEdit   = true
       if (rp.canDelete) permissionsMap[rp.module].canDelete = true
+      if (rp.canArchive) permissionsMap[rp.module].canArchive = true
     })
   })
 
@@ -240,40 +242,49 @@ export const refreshTokenService = async (refreshToken) => {
           canCreate: false,
           canEdit: false,
           canDelete: false,
+          canArchive: false,
         }
       }
       if (rp.canView)   permissionsMap[rp.module].canView = true
       if (rp.canCreate) permissionsMap[rp.module].canCreate = true
       if (rp.canEdit)   permissionsMap[rp.module].canEdit = true
       if (rp.canDelete) permissionsMap[rp.module].canDelete = true
+      if (rp.canArchive) permissionsMap[rp.module].canArchive = true
     })
   })
 
-  // ── 7. 🔥 DELETE OLD REFRESH TOKEN (ROTATION) ──────────
-  await deleteRefreshToken(refreshToken)
+  // ── 7. 🔥 REFRESH TOKEN ROTATION (TRANSACTIONAL) ──────────
+  const { newAccessToken, newRefreshToken } = await prisma.$transaction(async (tx) => {
+    // Delete old refresh token from DB
+    await deleteRefreshToken(refreshToken, tx)
 
-  // ── 8. 🔥 GENERATE NEW TOKENS ──────────────────────────
-  const newAccessToken = generateAccessToken({
-    userId          : user.id,
-    email           : user.email,
-    name            : user.name,
-    companyId       : user.companyId,
-    branchId        : user.branchId,
-    primaryRole     : primaryUserRole.role.name,
-    primaryRoleRank : primaryUserRole.role.rank ?? 0,
-    roles           : allRoles,
-    permissions     : permissionsMap,
+    // Generate new tokens
+    const newAccessToken = generateAccessToken({
+      userId          : user.id,
+      email           : user.email,
+      name            : user.name,
+      companyId       : user.companyId,
+      branchId        : user.branchId,
+      primaryRole     : primaryUserRole.role.name,
+      primaryRoleRank : primaryUserRole.role.rank ?? 0,
+      roles           : allRoles,
+      permissions     : permissionsMap,
+    })
+
+    const newRefreshToken = generateRefreshToken({
+      userId: user.id,
+    })
+
+    // Save new refresh token to DB
+    const expiresAt = new Date()
+    expiresAt.setDate(expiresAt.getDate() + 7)
+    await createRefreshToken(user.id, newRefreshToken, expiresAt, tx)
+
+    return { newAccessToken, newRefreshToken }
+  }, {
+    maxWait: 5000,
+    timeout: 10000
   })
-
-  const newRefreshToken = generateRefreshToken({
-    userId: user.id,
-  })
-
-  // ── 9. 🔥 SAVE NEW REFRESH TOKEN ───────────────────────
-  const expiresAt = new Date()
-  expiresAt.setDate(expiresAt.getDate() + 7)
-
-  await createRefreshToken(user.id, newRefreshToken, expiresAt)
 
   // ── 10. RETURN ─────────────────────────────────────────
   return {

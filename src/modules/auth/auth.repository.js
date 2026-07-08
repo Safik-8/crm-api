@@ -64,10 +64,11 @@ export const updateUserLastLogin = async (id) => {
  * @param {number} userId
  * @param {string} token
  * @param {Date} expiresAt
+ * @param {object} [tx=prisma]
  * @returns {Promise<object>}
  */
-export const createRefreshToken = async (userId, token, expiresAt) => {
-  return prisma.refreshToken.create({
+export const createRefreshToken = async (userId, token, expiresAt, tx = prisma) => {
+  return tx.refreshToken.create({
     data: {
       userId,
       token,
@@ -90,10 +91,11 @@ export const findRefreshToken = async (token) => {
 /**
  * Delete a specific refresh token.
  * @param {string} token
+ * @param {object} [tx=prisma]
  * @returns {Promise<object>}
  */
-export const deleteRefreshToken = async (token) => {
-  return prisma.refreshToken.delete({
+export const deleteRefreshToken = async (token, tx = prisma) => {
+  return tx.refreshToken.delete({
     where: { token }
   })
 }

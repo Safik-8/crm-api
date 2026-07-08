@@ -214,28 +214,31 @@ export const initializeSystem = async () => {
                     permsToCreate.push({
                         roleId,
                         module: moduleName,
-                        canView: perms.canView,
-                        canCreate: perms.canCreate,
-                        canEdit: perms.canEdit,
-                        canDelete: perms.canDelete,
+                        canView: perms.canView ?? false,
+                        canCreate: perms.canCreate ?? false,
+                        canEdit: perms.canEdit ?? false,
+                        canDelete: perms.canDelete ?? false,
+                        canArchive: perms.canArchive ?? false,
                     })
                     continue
                 }
 
                 const changed =
-                    existing.canView !== perms.canView ||
-                    existing.canCreate !== perms.canCreate ||
-                    existing.canEdit !== perms.canEdit ||
-                    existing.canDelete !== perms.canDelete
+                    existing.canView !== (perms.canView ?? false) ||
+                    existing.canCreate !== (perms.canCreate ?? false) ||
+                    existing.canEdit !== (perms.canEdit ?? false) ||
+                    existing.canDelete !== (perms.canDelete ?? false) ||
+                    existing.canArchive !== (perms.canArchive ?? false)
 
                 if (changed) {
                     permsToUpdate.push({
                         id: existing.id,
                         data: {
-                            canView: perms.canView,
-                            canCreate: perms.canCreate,
-                            canEdit: perms.canEdit,
-                            canDelete: perms.canDelete,
+                            canView: perms.canView ?? false,
+                            canCreate: perms.canCreate ?? false,
+                            canEdit: perms.canEdit ?? false,
+                            canDelete: perms.canDelete ?? false,
+                            canArchive: perms.canArchive ?? false,
                         }
                     })
                 }
