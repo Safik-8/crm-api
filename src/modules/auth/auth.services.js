@@ -7,9 +7,13 @@ import {
   createRefreshToken,
   findRefreshToken,
   deleteRefreshToken,
-  deleteManyRefreshTokens
+  deleteManyRefreshTokens,
+  createPasswordReset,
+  findLatestResetByUserIdAndOtp,
+  markPasswordResetVerified,
+  updateUserPassword
 } from "./auth.repository.js"
-import { loginSchema, refreshSchema } from "./auth.validation.js"
+import { loginSchema, refreshSchema, forgotPasswordSchema, resetPasswordSchema } from "./auth.validation.js"
 import bcrypt from "bcryptjs"
 import {
   generateAccessToken,
@@ -19,8 +23,12 @@ import {
   ValidationError,
   UnauthorizedError,
   AccountInactiveError,
-  NoRoleError
+  NoRoleError,
+  ForbiddenError,
+  NotFoundError,
+  BadRequestError
 } from "../../utils/AppError.js"
+import { sendOTPEmail } from "../../utils/mailer.js"
 import dotenv from "dotenv"
 dotenv.config()
 
@@ -52,6 +60,16 @@ export const loginUserService = async (email, password) => {
   // ── 5. STATUS CHECK ────────────────────────────────────
   if (user.status !== "ACTIVE") throw new AccountInactiveError()
 
+  // ── 5.0 COMPANY STATUS CHECK ──────────────────────────
+  if (user.companyId && user.company?.status !== "ACTIVE") {
+    throw new ForbiddenError("Your company is currently inactive. Access denied.")
+  }
+
+  // ── 5.1 BRANCH STATUS CHECK ──────────────────────────
+  if (user.branchId && user.branch?.status !== "ACTIVE") {
+    throw new ForbiddenError("Your branch is currently inactive. Access denied.")
+  }
+
   // ── 6. ROLES CHECK ─────────────────────────────────────
   if (!user.userRoles?.length) throw new NoRoleError()
 
@@ -59,13 +77,14 @@ export const loginUserService = async (email, password) => {
   const primaryUserRole =
     user.userRoles.find(ur => ur.isPrimary) ?? user.userRoles[0]
 
-  // ── 8. ALL ROLES — deduplicated ────────────────────────
+  // ── 8. ALL ROLES — deduplicated ──────────────────────────────────
   const uniqueRolesMap = new Map()
   user.userRoles.forEach(ur => {
     const key = `${ur.role.name}_${ur.companyId}_${ur.branchId}`
     if (!uniqueRolesMap.has(key)) {
       uniqueRolesMap.set(key, {
-        role      : ur.role.name,
+        name      : ur.role.name,
+        rank      : ur.role.rank ?? 0,
         companyId : ur.companyId,
         branchId  : ur.branchId,
         isPrimary : ur.isPrimary,
@@ -84,25 +103,28 @@ export const loginUserService = async (email, password) => {
           canCreate : false,
           canEdit   : false,
           canDelete : false,
+          canArchive: false,
         }
       }
       if (rp.canView)   permissionsMap[rp.module].canView   = true
       if (rp.canCreate) permissionsMap[rp.module].canCreate = true
       if (rp.canEdit)   permissionsMap[rp.module].canEdit   = true
       if (rp.canDelete) permissionsMap[rp.module].canDelete = true
+      if (rp.canArchive) permissionsMap[rp.module].canArchive = true
     })
   })
 
   // ── 10. GENERATE TOKENS ────────────────────────────────
   const accessToken  = generateAccessToken({
-    userId      : user.id,
-    email       : user.email,
-    name        : user.name,
-    companyId   : user.companyId,
-    branchId    : user.branchId,
-    primaryRole : primaryUserRole.role.name,
-    roles       : allRoles,
-    permissions : permissionsMap,
+    userId          : user.id,
+    email           : user.email,
+    name            : user.name,
+    companyId       : user.companyId,
+    branchId        : user.branchId,
+    primaryRole     : primaryUserRole.role.name,
+    primaryRoleRank : primaryUserRole.role.rank ?? 0,
+    roles           : allRoles,
+    permissions     : permissionsMap,
   })
   const refreshToken = generateRefreshToken({
     userId    : user.id,
@@ -122,19 +144,21 @@ export const loginUserService = async (email, password) => {
     accessToken,
     refreshToken,
     user: {
-      id          : user.id,
-      name        : user.name,
-      email       : user.email,
-      status      : user.status,
-      companyId   : user.companyId,
-      companyName : user.company?.name    ?? null,
-      companyCode : user.company?.code    ?? null,
-      branchId    : user.branchId,
-      branchName  : user.branch?.name     ?? null,
-      branchCode  : user.branch?.code     ?? null,
-      primaryRole : primaryUserRole.role.name,
-      roles       : allRoles,
-      permissions : permissionsMap,
+      id              : user.id,
+      name            : user.name,
+      email           : user.email,
+      status          : user.status,
+      companyId       : user.companyId,
+      companyName     : user.company?.name    ?? null,
+      companyCode     : user.company?.code    ?? null,
+      company         : user.company,
+      branchId        : user.branchId,
+      branchName      : user.branch?.name     ?? null,
+      branchCode      : user.branch?.code     ?? null,
+      primaryRole     : primaryUserRole.role.name,
+      primaryRoleRank : primaryUserRole.role.rank ?? 0,
+      roles           : allRoles,
+      permissions     : permissionsMap,
     }
   }
 }
@@ -182,15 +206,31 @@ export const refreshTokenService = async (refreshToken) => {
     throw new UnauthorizedError("User not found or inactive")
   }
 
-  // ── 6. REBUILD ROLES AND PERMISSIONS ───────────────────
+  // ── 5.0 COMPANY STATUS CHECK ──────────────────────────
+  if (user.companyId && user.company?.status !== "ACTIVE") {
+    throw new ForbiddenError("Your company is currently inactive. Access denied.")
+  }
+
+  // ── 5.1 BRANCH STATUS CHECK ──────────────────────────
+  if (user.branchId && user.branch?.status !== "ACTIVE") {
+    throw new ForbiddenError("Your branch is currently inactive. Access denied.")
+  }
+
+  // ── 6. ROLES CHECK ─────────────────────────────────────
+  if (!user.userRoles?.length) {
+    throw new NoRoleError()
+  }
+
+  // ── 7. REBUILD ROLES AND PERMISSIONS ───────────────────
   const primaryUserRole =
     user.userRoles.find(ur => ur.isPrimary) ?? user.userRoles[0]
 
   const allRoles = user.userRoles.map(ur => ({
-    role: ur.role.name,
-    companyId: ur.companyId,
-    branchId: ur.branchId,
-    isPrimary: ur.isPrimary,
+    name      : ur.role.name,
+    rank      : ur.role.rank ?? 0,
+    companyId : ur.companyId,
+    branchId  : ur.branchId,
+    isPrimary : ur.isPrimary,
   }))
 
   const permissionsMap = {}
@@ -202,57 +242,69 @@ export const refreshTokenService = async (refreshToken) => {
           canCreate: false,
           canEdit: false,
           canDelete: false,
+          canArchive: false,
         }
       }
       if (rp.canView)   permissionsMap[rp.module].canView = true
       if (rp.canCreate) permissionsMap[rp.module].canCreate = true
       if (rp.canEdit)   permissionsMap[rp.module].canEdit = true
       if (rp.canDelete) permissionsMap[rp.module].canDelete = true
+      if (rp.canArchive) permissionsMap[rp.module].canArchive = true
     })
   })
 
-  // ── 7. 🔥 DELETE OLD REFRESH TOKEN (ROTATION) ──────────
-  await deleteRefreshToken(refreshToken)
+  // ── 7. 🔥 REFRESH TOKEN ROTATION (TRANSACTIONAL) ──────────
+  const { newAccessToken, newRefreshToken } = await prisma.$transaction(async (tx) => {
+    // Delete old refresh token from DB
+    await deleteRefreshToken(refreshToken, tx)
 
-  // ── 8. 🔥 GENERATE NEW TOKENS ──────────────────────────
-  const newAccessToken = generateAccessToken({
-    userId: user.id,
-    email: user.email,
-    name: user.name,
-    companyId: user.companyId,
-    branchId: user.branchId,
-    primaryRole: primaryUserRole.role.name,
-    roles: allRoles,
-    permissions: permissionsMap,
+    // Generate new tokens
+    const newAccessToken = generateAccessToken({
+      userId          : user.id,
+      email           : user.email,
+      name            : user.name,
+      companyId       : user.companyId,
+      branchId        : user.branchId,
+      primaryRole     : primaryUserRole.role.name,
+      primaryRoleRank : primaryUserRole.role.rank ?? 0,
+      roles           : allRoles,
+      permissions     : permissionsMap,
+    })
+
+    const newRefreshToken = generateRefreshToken({
+      userId: user.id,
+    })
+
+    // Save new refresh token to DB
+    const expiresAt = new Date()
+    expiresAt.setDate(expiresAt.getDate() + 7)
+    await createRefreshToken(user.id, newRefreshToken, expiresAt, tx)
+
+    return { newAccessToken, newRefreshToken }
+  }, {
+    maxWait: 5000,
+    timeout: 10000
   })
-
-  const newRefreshToken = generateRefreshToken({
-    userId: user.id,
-  })
-
-  // ── 9. 🔥 SAVE NEW REFRESH TOKEN ───────────────────────
-  const expiresAt = new Date()
-  expiresAt.setDate(expiresAt.getDate() + 7)
-
-  await createRefreshToken(user.id, newRefreshToken, expiresAt)
 
   // ── 10. RETURN ─────────────────────────────────────────
   return {
     accessToken: newAccessToken,
     refreshToken: newRefreshToken,
     user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      companyId: user.companyId,
-      companyName: user.company?.name ?? null,
-      companyCode: user.company?.code ?? null,
-      branchId: user.branchId,
-      branchName: user.branch?.name ?? null,
-      branchCode: user.branch?.code ?? null,
-      primaryRole: primaryUserRole.role.name,
-      roles: allRoles,
-      permissions: permissionsMap,
+      id              : user.id,
+      name            : user.name,
+      email           : user.email,
+      companyId       : user.companyId,
+      companyName     : user.company?.name ?? null,
+      companyCode     : user.company?.code ?? null,
+      company         : user.company,
+      branchId        : user.branchId,
+      branchName      : user.branch?.name ?? null,
+      branchCode      : user.branch?.code ?? null,
+      primaryRole     : primaryUserRole.role.name,
+      primaryRoleRank : primaryUserRole.role.rank ?? 0,
+      roles           : allRoles,
+      permissions     : permissionsMap,
     }
   }
 }
@@ -264,4 +316,107 @@ export const logoutService = async (refreshToken) => {
   if (!refreshToken) return
 
   await deleteManyRefreshTokens(refreshToken)
+}
+
+// ══════════════════════════════════════
+// FORGOT PASSWORD SERVICE
+// ══════════════════════════════════════
+export const forgotPasswordService = async (email) => {
+  // Validate email
+  const validation = forgotPasswordSchema.safeParse({ email })
+  if (!validation.success) {
+    const fields = validation.error.errors.map(err => ({
+      field: err.path.join("."),
+      message: err.message
+    }))
+    throw new ValidationError("Validation failed", fields)
+  }
+
+  // Find user
+  const user = await findUserByEmail(email)
+  if (!user) {
+    throw new NotFoundError("No account exists with this email")
+  }
+
+  // Generate 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+
+  // OTP expires in 10 minutes
+  const expiresAt = new Date()
+  expiresAt.setMinutes(expiresAt.getMinutes() + 10)
+
+  // Save to database
+  await createPasswordReset(user.id, user.companyId, otp, expiresAt)
+
+  // Send email
+  await sendOTPEmail(user.email, otp)
+
+  return { success: true, message: "OTP sent successfully to your email" }
+}
+
+// ══════════════════════════════════════
+// RESET PASSWORD SERVICE
+// ══════════════════════════════════════
+export const resetPasswordService = async (email, otp, newPassword) => {
+  // Validate fields
+  const validation = resetPasswordSchema.safeParse({ email, otp, password: newPassword })
+  if (!validation.success) {
+    const fields = validation.error.errors.map(err => ({
+      field: err.path.join("."),
+      message: err.message
+    }))
+    throw new ValidationError("Validation failed", fields)
+  }
+
+  // Find user
+  const user = await findUserByEmail(email)
+  if (!user) {
+    throw new NotFoundError("No account exists with this email")
+  }
+
+  // Find latest unverified reset record with matching OTP
+  const resetRecord = await findLatestResetByUserIdAndOtp(user.id, otp)
+  if (!resetRecord) {
+    throw new BadRequestError("Invalid OTP code")
+  }
+
+  // Check expiration
+  if (resetRecord.expiresAt < new Date()) {
+    throw new BadRequestError("OTP code has expired")
+  }
+
+  // Hash new password using bcrypt
+  const passwordHash = await bcrypt.hash(newPassword, 10)
+
+  // Update password in DB
+  await updateUserPassword(user.id, passwordHash)
+
+  // Mark OTP as verified
+  await markPasswordResetVerified(resetRecord.id)
+
+  return { success: true, message: "Password has been reset successfully" }
+}
+
+// ══════════════════════════════════════
+// VERIFY OTP SERVICE
+// ══════════════════════════════════════
+export const verifyOtpService = async (email, otp) => {
+  // Find user
+  const user = await findUserByEmail(email)
+  if (!user) {
+    throw new NotFoundError("No account exists with this email")
+  }
+
+  // Find latest unverified reset record with matching OTP
+  const resetRecord = await findLatestResetByUserIdAndOtp(user.id, otp)
+  if (!resetRecord) {
+    throw new BadRequestError("Invalid OTP code")
+  }
+
+  // Check expiration
+  if (resetRecord.expiresAt < new Date()) {
+    throw new BadRequestError("OTP code has expired")
+  }
+
+  return { success: true, message: "OTP verified successfully" }
 }

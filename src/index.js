@@ -13,12 +13,13 @@ import prisma from "./config/db.js"
 import { errorHandler, notFound } from "./middleware/errorHandler.js"
 
 import authRoutes from "./modules/auth/auth.routes.js"
-import companyRoutes from "./modules/company/comany.routes.js"
+import companyRoutes from "./modules/company/company.routes.js"
 import branchRoutes  from "./modules/branch/branch.routes.js"
 import leadSourceRoutes from "./modules/leadsources/leadSource.routes.js"
 import pipelineRoutes from "./modules/pipeline/pipeline.routes.js"
 import stageRoutes from "./modules/stage/stage.routes.js"
 import leadRoutes from "./modules/lead/lead.routes.js"
+import roleRoutes from "./modules/role/role.routes.js"
 import { initializeSystem } from "./config/initSystem.js"
 import dailyBranchReportRoutes from "./modules/daily_branch_reports/dailyBranchReport.routes.js"
 
@@ -36,7 +37,7 @@ app.use(helmet())
 // ── RATE LIMITING ─────────────────────────────────────────
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 100, // Limit each IP to 100 requests per 15 minutes
+  limit: 1000, // Limit each IP to 100 requests per 15 minutes
   standardHeaders: "draft-7",
   legacyHeaders: false,
   statusCode: 429,
@@ -57,8 +58,8 @@ app.use(cors({
 }))
 
 app.use(morgan("dev"))
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
+app.use(express.json({ limit: "10mb" }))
+app.use(express.urlencoded({ limit: "10mb", extended: true }))
 app.use(cookieParser())
 
 // ══════════════════════════════════════════════════════════
@@ -84,6 +85,7 @@ app.use("/api/lead-sources", leadSourceRoutes);
 app.use("/api/pipelines", pipelineRoutes);
 app.use("/api/stages", stageRoutes);
 app.use("/api/leads", leadRoutes);
+app.use("/api/roles", roleRoutes);
 app.use("/api/daily-branch-reports", dailyBranchReportRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
@@ -104,6 +106,7 @@ const startServer = async () => {
     // Step 2 → Initialize roles and permissions
     await initializeSystem()
 
+    // Server startup file.
     // Step 3 → Start listening
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`)

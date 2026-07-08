@@ -11,8 +11,8 @@ export const findUserByEmail = async (email) => {
   return prisma.user.findUnique({
     where: { email },
     include: {
-      company: { select: { id: true, name: true, code: true } },
-      branch: { select: { id: true, name: true, code: true } },
+      company: { select: { id: true, name: true, code: true, logo: true, industry: true, website: true, address: true, status: true } },
+      branch: { select: { id: true, name: true, code: true, status: true } },
       userRoles: {
         include: {
           role: {
@@ -28,13 +28,14 @@ export const findUserByEmail = async (email) => {
  * Find a user by their ID, including associated company, branch, and roles/permissions.
  * @param {number} id
  * @returns {Promise<object|null>}
+ * @returns {Promise<object|null>}
  */
 export const findUserById = async (id) => {
   return prisma.user.findUnique({
     where: { id },
     include: {
-      company: { select: { id: true, name: true, code: true } },
-      branch: { select: { id: true, name: true, code: true } },
+      company: { select: { id: true, name: true, code: true, logo: true, industry: true, website: true, address: true, status: true } },
+      branch: { select: { id: true, name: true, code: true, status: true } },
       userRoles: {
         include: {
           role: {
@@ -63,10 +64,11 @@ export const updateUserLastLogin = async (id) => {
  * @param {number} userId
  * @param {string} token
  * @param {Date} expiresAt
+ * @param {object} [tx=prisma]
  * @returns {Promise<object>}
  */
-export const createRefreshToken = async (userId, token, expiresAt) => {
-  return prisma.refreshToken.create({
+export const createRefreshToken = async (userId, token, expiresAt, tx = prisma) => {
+  return tx.refreshToken.create({
     data: {
       userId,
       token,
@@ -89,10 +91,11 @@ export const findRefreshToken = async (token) => {
 /**
  * Delete a specific refresh token.
  * @param {string} token
+ * @param {object} [tx=prisma]
  * @returns {Promise<object>}
  */
-export const deleteRefreshToken = async (token) => {
-  return prisma.refreshToken.delete({
+export const deleteRefreshToken = async (token, tx = prisma) => {
+  return tx.refreshToken.delete({
     where: { token }
   })
 }
@@ -105,5 +108,55 @@ export const deleteRefreshToken = async (token) => {
 export const deleteManyRefreshTokens = async (token) => {
   return prisma.refreshToken.deleteMany({
     where: { token }
+  })
+}
+
+/**
+ * Create a new password reset OTP entry.
+ */
+export const createPasswordReset = async (userId, companyId, otp, expiresAt) => {
+  return prisma.passwordReset.create({
+    data: {
+      userId,
+      companyId,
+      otp,
+      expiresAt
+    }
+  })
+}
+
+/**
+ * Find the latest unverified password reset entry for a user and OTP.
+ */
+export const findLatestResetByUserIdAndOtp = async (userId, otp) => {
+  return prisma.passwordReset.findFirst({
+    where: {
+      userId,
+      otp,
+      isVerified: false
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  })
+}
+
+/**
+ * Mark a password reset record as verified.
+ */
+export const markPasswordResetVerified = async (resetId) => {
+  return prisma.passwordReset.update({
+    where: { id: resetId },
+    data: { isVerified: true }
+  })
+}
+
+/**
+ * Update a user's password hash.
+ */
+export const updateUserPassword = async (userId, passwordHash) => {
+  return prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash }
   })
 }

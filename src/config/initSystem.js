@@ -2,37 +2,31 @@
 
 import prisma from "./db.js"
 import { hashPassword } from "../utils/passwordUtils.js"
+import {
+  ROLE_NAMES,
+  ROLE_RANKS,
+  MODULES,
+} from "./roleConstants.js"
 
 // ══════════════════════════════════════
-// ROLES
+// SYSTEM ROLES — seeds on every startup
+// name  = role identifier (unique within companyId=null scope)
+// rank  = authority level (100=highest) — gapped so custom roles can slot in
+// isSystem = true locks rank & name, prevents deletion
 // ══════════════════════════════════════
 const ROLES = [
-    { name: "SUPER_ADMIN", description: "Full system access" },
-    { name: "CEO", description: "Company wide read only" },
-    { name: "BRANCH_ADMIN", description: "Full branch access" },
-    { name: "MANAGER", description: "Team view and approvals" },
-    { name: "ISE", description: "Own prospects only" },
+  { name: ROLE_NAMES.SUPER_ADMIN,    rank: ROLE_RANKS.SUPER_ADMIN,    isSystem: true, status: "ACTIVE", description: "Super Admin - Full system access" },
+  { name: ROLE_NAMES.COMPANY_ADMIN,  rank: ROLE_RANKS.COMPANY_ADMIN,  isSystem: true, status: "ACTIVE", description: "Company Admin - Company wide full access" },
+  { name: ROLE_NAMES.BRANCH_MANAGER, rank: ROLE_RANKS.BRANCH_MANAGER, isSystem: true, status: "ACTIVE", description: "Branch Manager - Full branch access and approvals" },
+  { name: ROLE_NAMES.BDE,            rank: ROLE_RANKS.BDE,            isSystem: true, status: "ACTIVE", description: "Business Development Executive - Client acquisition and follow-ups" },
+  { name: ROLE_NAMES.ISE,            rank: ROLE_RANKS.ISE,            isSystem: true, status: "ACTIVE", description: "Inside Sales Executive - Support and lead nurture" },
 ]
 
 // ══════════════════════════════════════
 // MODULES
 // ══════════════════════════════════════
-const MODULES = [
-    "COMPANY",
-    "BRANCH",
-    "USER",
-    "PROSPECT",
-    "ACTIVITY",
-    "TASK",
-    "PIPELINE",
-    "STAGE",
-    "LEAD",
-    "SESSION",
-    "REPORT",
-    "AUDIT",
-    "TARGET",
-    "NOTIFICATION",
-]
+// MODULES imported from roleConstants.js above
+
 
 // ══════════════════════════════════════
 // PERMISSION MATRIX PER ROLE
@@ -41,88 +35,113 @@ const MODULES = [
 const ROLE_PERMISSIONS = {
 
     SUPER_ADMIN: {
+        SYSTEM_SETTINGS: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         COMPANY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         BRANCH: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        ROLE_PERMISSION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         USER: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        PROSPECT: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        STAGE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        TEAM: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        SESSION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        REPORT: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_ASSIGNMENT: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        COURSE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         TARGET: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        NOTIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    },
-
-    CEO: {
-        COMPANY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        BRANCH: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        USER: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        PROSPECT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        ACTIVITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        TASK: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        PIPELINE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        STAGE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        LEAD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        SESSION: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        CUSTOMER: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        APPROVAL: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-        TARGET: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        NOTIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     },
 
-    BRANCH_ADMIN: {
+    COMPANY_ADMIN: {
+        SYSTEM_SETTINGS: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        COMPANY: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        BRANCH: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        ROLE_PERMISSION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        USER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        TEAM: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        LEAD_ASSIGNMENT: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        TASK: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        ACTIVITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        COURSE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        TARGET: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        CUSTOMER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        APPROVAL: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    },
+
+    BRANCH_MANAGER: {
+        SYSTEM_SETTINGS: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         COMPANY: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         BRANCH: { canView: true, canCreate: false, canEdit: true, canDelete: false },
-        USER: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        PROSPECT: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        STAGE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        ROLE_PERMISSION: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        USER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        TEAM: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        SESSION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        LEAD_ASSIGNMENT: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        TASK: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        ACTIVITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        COURSE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        TARGET: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        CUSTOMER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        APPROVAL: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-        TARGET: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     },
 
-    MANAGER: {
+    BDE: {
+        SYSTEM_SETTINGS: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         COMPANY: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         BRANCH: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        ROLE_PERMISSION: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         USER: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        PROSPECT: { canView: true, canCreate: false, canEdit: true, canDelete: false },
-        ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-        PIPELINE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        STAGE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        TEAM: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        SESSION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        LEAD_ASSIGNMENT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        PIPELINE: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        COURSE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        TARGET: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        CUSTOMER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        APPROVAL: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-        TARGET: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
     },
 
     ISE: {
+        SYSTEM_SETTINGS: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         COMPANY: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         BRANCH: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        ROLE_PERMISSION: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         USER: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-        PROSPECT: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        ACTIVITY: { canView: true, canCreate: true, canEdit: false, canDelete: false },
+        TEAM: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        LEAD_ASSIGNMENT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        PIPELINE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        PIPELINE: { canView: true, canCreate: false, canEdit: true, canDelete: false },
-        STAGE: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-        LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        SESSION: { canView: true, canCreate: true, canEdit: false, canDelete: false },
-        REPORT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-        AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        COURSE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TARGET: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        CUSTOMER: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        APPROVAL: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        REPORT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
     },
 }
 
@@ -138,8 +157,11 @@ export const initializeSystem = async () => {
         })
 
         // ── STEP 0: ENSURE ROLES + PERMISSIONS (FAST SYNC) ─────
-        // Goal: don't write on every restart — only create/update if missing or changed.
-        const existingRoles = await prisma.role.findMany({ select: { id: true, name: true, description: true } })
+        // Keys on name + companyId=null (system roles are globally unique by name with null companyId).
+        const existingRoles = await prisma.role.findMany({
+            where: { companyId: null },
+            select: { id: true, name: true, description: true, rank: true, isSystem: true, status: true }
+        })
         const roleByName = new Map(existingRoles.map(r => [r.name, r]))
 
         const rolesToCreate = ROLES.filter(r => !roleByName.has(r.name))
@@ -151,16 +173,22 @@ export const initializeSystem = async () => {
             .map(r => {
                 const existing = roleByName.get(r.name)
                 if (!existing) return null
-                if ((existing.description || "") === (r.description || "")) return null
-                return { id: existing.id, description: r.description }
+                const descChanged   = (existing.description || "") !== (r.description || "")
+                const rankChanged   = existing.rank !== r.rank
+                const statusChanged = existing.status !== r.status
+                if (!descChanged && !rankChanged && !statusChanged) return null
+                return { id: existing.id, description: r.description, rank: r.rank, status: r.status }
             })
             .filter(Boolean)
         for (const r of rolesToUpdate) {
-            await prisma.role.update({ where: { id: r.id }, data: { description: r.description } })
+            await prisma.role.update({ where: { id: r.id }, data: { description: r.description, rank: r.rank, status: r.status } })
         }
 
-        // Refresh roles after any creates/updats (we need role ids)
-        const roles = await prisma.role.findMany({ select: { id: true, name: true } })
+        // Refresh roles after any creates/updates (we need role ids)
+        const roles = await prisma.role.findMany({
+            where: { companyId: null },
+            select: { id: true, name: true }
+        })
         const roleIdByName = new Map(roles.map(r => [r.name, r.id]))
 
         // Fetch existing permissions once, then only write diffs
@@ -186,28 +214,31 @@ export const initializeSystem = async () => {
                     permsToCreate.push({
                         roleId,
                         module: moduleName,
-                        canView: perms.canView,
-                        canCreate: perms.canCreate,
-                        canEdit: perms.canEdit,
-                        canDelete: perms.canDelete,
+                        canView: perms.canView ?? false,
+                        canCreate: perms.canCreate ?? false,
+                        canEdit: perms.canEdit ?? false,
+                        canDelete: perms.canDelete ?? false,
+                        canArchive: perms.canArchive ?? false,
                     })
                     continue
                 }
 
                 const changed =
-                    existing.canView !== perms.canView ||
-                    existing.canCreate !== perms.canCreate ||
-                    existing.canEdit !== perms.canEdit ||
-                    existing.canDelete !== perms.canDelete
+                    existing.canView !== (perms.canView ?? false) ||
+                    existing.canCreate !== (perms.canCreate ?? false) ||
+                    existing.canEdit !== (perms.canEdit ?? false) ||
+                    existing.canDelete !== (perms.canDelete ?? false) ||
+                    existing.canArchive !== (perms.canArchive ?? false)
 
                 if (changed) {
                     permsToUpdate.push({
                         id: existing.id,
                         data: {
-                            canView: perms.canView,
-                            canCreate: perms.canCreate,
-                            canEdit: perms.canEdit,
-                            canDelete: perms.canDelete,
+                            canView: perms.canView ?? false,
+                            canCreate: perms.canCreate ?? false,
+                            canEdit: perms.canEdit ?? false,
+                            canDelete: perms.canDelete ?? false,
+                            canArchive: perms.canArchive ?? false,
                         }
                     })
                 }
@@ -259,27 +290,33 @@ export const initializeSystem = async () => {
             console.log("✅ Default lead sources already present")
         }
 
-        if (!existingSuperAdmin) {
-            console.log("First time — initializing system...")
+        // ── STEP 3: CREATE/UPDATE INITIAL SUPERADMIN ──────────────
+        // Uses findFirst with name + companyId:null (system roles are unique within null company scope)
+        const superAdminRole = await prisma.role.findFirst({
+            where: { name: ROLE_NAMES.SUPER_ADMIN, companyId: null }
+        })
 
-            // ── STEP 3: CREATE INITIAL SUPERADMIN ──────────────
-            const superAdminRole = await prisma.role.findUnique({
-                where: { name: "SUPER_ADMIN" }
-            })
+        const superAdminUser = await prisma.user.upsert({
+            where: { email: "superadmin@gmail.com" },
+            update: { passwordHash: await hashPassword("superadmin123") },
+            create: {
+                name: "Super Admin",
+                email: "superadmin@gmail.com",
+                passwordHash: await hashPassword("superadmin123"),
+                companyId: null,
+                branchId: null,
+            }
+        })
 
-            const superAdminUser = await prisma.user.upsert({
-                where: { email: "superadmin@gmail.com" },
-                update: { passwordHash: await hashPassword("superadmin123") },
-                create: {
-                    name: "Super Admin",
-                    email: "superadmin@gmail.com",
-                    passwordHash: await hashPassword("superadmin123"),
-                    companyId: null,
-                    branchId: null,
-                }
-            })
+        // ── STEP 4: ASSIGN ROLE IF MISSING ─
+        const existingAssignment = await prisma.userRole.findFirst({
+            where: {
+                userId: superAdminUser.id,
+                roleId: superAdminRole.id,
+            }
+        })
 
-            // ── STEP 4: ASSIGN ROLE (FIXED — NO UPSERT WITH NULL) ─
+        if (!existingAssignment) {
             // First, remove any duplicate roles for this user
             await prisma.userRole.deleteMany({
                 where: {
@@ -298,40 +335,43 @@ export const initializeSystem = async () => {
                     isPrimary: true
                 }
             })
-
-            console.log("SuperAdmin ensured")
-            console.log("System initialized successfully!")
+            console.log("✅ SuperAdmin UserRole initialized/restored")
         } else {
-            console.log("System already initialized — SuperAdmin exists, syncing defaults")
+            console.log("✅ SuperAdmin UserRole verified")
         }
+
+        console.log("System initialized successfully!")
 
         const createdById = (await prisma.user.findUnique({ where: { email: "superadmin@gmail.com" }, select: { id: true } }))?.id
         if (createdById) {
-            const defaultStage = await prisma.stage.findFirst({
-                where: { OR: [{ isDefault: true }, { name: "Prospect" }] },
-                select: { id: true, isDeleted: true, isDefault: true, name: true }
-            })
-            if (!defaultStage) {
-                await prisma.stage.create({
-                    data: {
-                        name: "Prospect",
-                        isDefault: true,
-                        isDeleted: false,
-                        createdById
-                    }
+            const defaultStages = ["Prospect", "Closure"]
+            for (const stageName of defaultStages) {
+                const existingStage = await prisma.stage.findUnique({
+                    where: { name: stageName },
+                    select: { id: true, isDeleted: true, isDefault: true, name: true }
                 })
-                console.log("✅ Default stage seeded: Prospect")
-            } else if (defaultStage.isDeleted || !defaultStage.isDefault || defaultStage.name !== "Prospect") {
-                await prisma.stage.update({
-                    where: { id: defaultStage.id },
-                    data: {
-                        name: "Prospect",
-                        isDefault: true,
-                        isDeleted: false,
-                        updatedById: createdById
-                    }
-                })
-                console.log("✅ Default stage synced: Prospect")
+                if (!existingStage) {
+                    await prisma.stage.create({
+                        data: {
+                            name: stageName,
+                            isDefault: true,
+                            isDeleted: false,
+                            createdById
+                        }
+                    })
+                    console.log(`✅ Default stage seeded: ${stageName}`)
+                } else if (existingStage.isDeleted || !existingStage.isDefault) {
+                    await prisma.stage.update({
+                        where: { id: existingStage.id },
+                        data: {
+                            name: stageName,
+                            isDefault: true,
+                            isDeleted: false,
+                            updatedById: createdById
+                        }
+                    })
+                    console.log(`✅ Default stage synced: ${stageName}`)
+                }
             }
         }
 

@@ -85,7 +85,7 @@ If your frontend previously used prospect APIs, switch to the **Lead + Pipeline 
 
 - **`stages`**: global stage master (shared across all pipelines).
 - **`pipeline_stages`**: mapping table connecting a pipeline to stages with `order_no` (ordering is per pipeline).
-- **`leads`**: belongs to a pipeline and a stage.
+- **`leads`**: belongs to a pipeline and a stage. Includes **last stage move** fields: `previous_stage_id`, `stage_changed_by_id`, `stage_changed_at` (set automatically on create and on `PATCH /api/leads/:id/stage`).
 - **`lead_comments`**: comments/activity per lead.
 
 ### Default “Prospect” stage
@@ -153,7 +153,25 @@ Frontend can:
 - `POST /api/leads` always sets lead’s `stageId` to the **default Prospect** stage.
 - It also validates Prospect is assigned to the chosen pipeline.
 
-### 5) ISE allowed actions (permissions)
+### 5) Pipeline board filters (GET `/api/pipelines/:id`)
+
+- **One search field** (`search`): matches lead **name**, **mobile**, or **interestedFor** (any match).
+- Other filters: `stageId`, `assignedToId`, date range (defaults to **today UTC** if no dates), `allDates=1` to disable date filter.
+- Sort: `sortBy` + `sortOrder`.
+- See full spec under **GET `/api/pipelines/:id`** below.
+
+### 6) Lead stage move logging (on `leads` row)
+
+When a user moves a lead via `PATCH /api/leads/:id/stage` (different `stageId`):
+
+- `previous_stage_id` ← old stage
+- `stage_id` ← new stage
+- `stage_changed_by_id` ← logged-in user
+- `stage_changed_at` ← move time
+
+No separate history table; only the **last** move is stored on the lead.
+
+### 7) ISE allowed actions (permissions)
 
 ISE is configured to:
 - **Add leads**: `LEAD:canCreate`
@@ -459,6 +477,13 @@ Permission: `PIPELINE:canView`
 
 Access (roles): `SUPER_ADMIN`, `BRANCH_ADMIN`, `MANAGER`
 
+Query params (optional):
+
+| Param | Description |
+|-------|-------------|
+| `search` | Unified search on leads (name / mobile / interestedFor). Aliases: `leadName`, `name`, `q`. |
+| `branchId` | Filter by branch (company-level users without a fixed branch). |
+
 Success (200):
 
 ```json
@@ -480,13 +505,44 @@ Common errors:
 
 ---
 
-#### GET `/api/pipelines/:id` (details: stages + leads)
+#### GET `/api/pipelines/:id` (pipeline board: stages + filtered leads)
 
 Permission: `PIPELINE:canView`
 
 Access (roles): `SUPER_ADMIN`, `BRANCH_ADMIN`, `MANAGER`
 
-Success (200):
+**Purpose:** Kanban board for one pipeline. Returns **all stage columns**; **leads** are filtered/sorted via **query string** (no separate filter API).
+
+##### Query parameters (all optional)
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `search` | string | **Unified search.** One value searches **name OR mobile OR interestedFor** (case-insensitive, partial match). Aliases: `leadName`, `name`, `q`. |
+| `stageId` | number | Only leads in this stage (other columns stay visible but empty). |
+| `assignedToId` | number | Only leads assigned to this user (`id` from `assignableUsers`). |
+| `dateFrom` | date | Lead `date` ≥ this (with `dateTo` or alone). |
+| `dateTo` | date | Lead `date` ≤ this. |
+| `allDates` | `1` / `true` / `yes` | Skip date filter (show all lead dates). |
+| `sortBy` | string | `createdAt` (default), `updatedAt`, `name`, `date`, `mobile` |
+| `sortOrder` | string | `desc` (default) or `asc` |
+
+**Date default:** If `dateFrom` and `dateTo` are both omitted and `allDates` is not set → only leads whose **`date`** is **today (UTC calendar day)**.
+
+**Assignee dropdown:** Response includes `assignableUsers` (active users in the pipeline’s branch). UI shows `name`; on select, refetch with `assignedToId=<user id>`.
+
+**Removed params (do not use):** `mobile`, `interestedFor` as separate filters — use `search` only.
+
+##### Examples
+
+```http
+GET /api/pipelines/5
+GET /api/pipelines/5?search=9876543210
+GET /api/pipelines/5?search=MBA&allDates=1
+GET /api/pipelines/5?assignedToId=12&dateFrom=2026-05-01&dateTo=2026-05-31
+GET /api/pipelines/5?stageId=3&search=rahul&sortBy=name&sortOrder=asc
+```
+
+##### Success (200) — shape (abbreviated)
 
 ```json
 {
@@ -500,28 +556,62 @@ Success (200):
       "companyId": 1,
       "branchId": 2,
       "stages": [
-        { "id": 1, "name": "Prospect", "isDefault": true, "orderNo": 1 }
-      ],
-      "leads": [
         {
-          "id": 100,
-          "name": "Aman",
-          "mobile": "9999999999",
-          "stageId": 1,
-          "pipelineId": 1,
-          "createdAt": "2026-04-16T00:00:00.000Z"
+          "id": 1,
+          "name": "Prospect",
+          "isDefault": true,
+          "orderNo": 1,
+          "leads": [
+            {
+              "id": 100,
+              "name": "Aman",
+              "mobile": "9999999999",
+              "stageId": 1,
+              "previousStageId": 2,
+              "stageChangedAt": "2026-05-20T10:00:00.000Z",
+              "stage": { "id": 1, "name": "Prospect" },
+              "previousStage": { "id": 2, "name": "Counselling" },
+              "stageChangedBy": { "id": 5, "name": "Priya", "email": "priya@example.com" },
+              "assignedTo": { "id": 12, "name": "Rahul", "email": "rahul@example.com" }
+            }
+          ]
         }
-      ]
+      ],
+      "leads": [],
+      "assignableUsers": [
+        { "id": 12, "name": "Rahul", "email": "rahul@example.com", "role": "ISE" }
+      ],
+      "filters": {
+        "search": null,
+        "stageId": null,
+        "assignedToId": null,
+        "dateFrom": "2026-05-20T00:00:00.000Z",
+        "dateTo": "2026-05-20T23:59:59.999Z",
+        "dateDefaultedToToday": true,
+        "allDates": false
+      },
+      "sort": { "sortBy": "createdAt", "sortOrder": "desc" }
     }
-  },
-  "timestamp": "2026-04-16T00:00:00.000Z"
+  }
 }
 ```
+
+Notes:
+- **`stages[].leads`** — use for Kanban cards per column.
+- **`leads`** — same filtered list as a flat array.
+- All stages are always returned; columns with no matches have `leads: []`.
+
+##### GET `/api/pipelines` (list) — optional search
+
+Same unified `search` (or aliases) on the list endpoint: returns pipelines that have **at least one** non-deleted lead matching name, mobile, or interestedFor.
 
 Common errors:
 - 404 `NOT_FOUND` (pipeline not found / deleted)
 - 400 `BAD_REQUEST` (invalid id)
+- 400 `VALIDATION_ERROR` (invalid `sortBy`, `sortOrder`, dates, `stageId`, `assignedToId`)
 - 403 `PERMISSION_DENIED` (`PIPELINE:canView`)
+
+**Frontend detail doc:** `docs/PIPELINE_BOARD_FILTER_SORT_FRONTEND_GUIDE.md`
 
 ---
 
@@ -794,6 +884,28 @@ Common errors:
 
 ---
 
+#### PUT `/api/leads/:id` (update lead details)
+
+Permission: **`LEAD:canCreate`** (same as create — only users who can create can update)
+
+Updates: `name`, `mobile`, `date`, `interestedFor`, `assignedToId`. Does **not** change `pipelineId` or `stageId`.
+
+At least one field required per request. Partial updates supported.
+
+**Frontend guide:** `docs/LEAD_UPDATE_DELETE_FRONTEND_GUIDE.md`
+
+---
+
+#### DELETE `/api/leads/:id` (soft delete lead)
+
+Permission: **`LEAD:canCreate`** (same as create)
+
+Soft-deletes lead (`isDeleted: true`). Lead disappears from board and list queries.
+
+**Frontend guide:** `docs/LEAD_UPDATE_DELETE_FRONTEND_GUIDE.md`
+
+---
+
 #### GET `/api/leads` (list leads)
 
 Permission: `LEAD:canView`
@@ -854,6 +966,18 @@ Request body:
 
 Backend validation:
 - `stageId` must be assigned to the lead’s pipeline in `pipeline_stages`.
+- If `stageId` is the same as current stage → no DB change; returns current lead.
+
+**Automatic logging (no extra body fields):** updates on the `leads` row:
+
+| Column | Value |
+|--------|--------|
+| `previous_stage_id` | Stage before move |
+| `stage_id` | New stage |
+| `stage_changed_by_id` | Authenticated user |
+| `stage_changed_at` | Timestamp of move |
+
+Response includes `stage`, `previousStage`, `stageChangedBy`, `stageChangedAt`.
 
 Common errors:
 - 404 `NOT_FOUND` (lead not found)

@@ -16,6 +16,10 @@ model Company {
   id        Int      @id @default(autoincrement())
   name      String
   code      String   @unique
+  logo      String?
+  industry  String?
+  website   String?
+  address   String?
   status    String   @default("ACTIVE")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -23,8 +27,10 @@ model Company {
   branches    Branch[]
   users       User[]
   userRoles   UserRole[]
-  pipelines   Pipeline[]
-  leadSources LeadSource[]
+  pipelines      Pipeline[]
+  leadSources    LeadSource[]
+  roles          Role[]
+  passwordResets PasswordReset[]
 
   @@map("companies")
 }
@@ -34,6 +40,8 @@ model Branch {
   companyId Int      @map("company_id")
   name      String
   code      String
+  address   String?
+  location  String?
   status    String   @default("ACTIVE")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -72,8 +80,12 @@ model User {
   assignedRoles             UserRole[]          @relation("AssignedByToUserRole")
   refreshTokens             RefreshToken[]
   createdLeads              Lead[]              @relation("UserCreatedLeads")
+  assignedLeads             Lead[]              @relation("UserAssignedLeads")
+  stageChangedLeads         Lead[]              @relation("UserStageChangedLeads")
   leadComments              LeadComment[]
   createdDailyBranchReports DailyBranchReport[] @relation("UserCreatedDailyBranchReports")
+  createdRoles              Role[]              @relation("RoleCreatedBy")
+  passwordResets            PasswordReset[]
 
   @@index([companyId])
   @@index([branchId])
@@ -82,13 +94,23 @@ model User {
 
 model Role {
   id          Int      @id @default(autoincrement())
-  name        String   @unique
+  companyId   Int?     @map("company_id")             // null = global system role, shared by all companies
+  name        String                                   // role identifier — unique within company scope
   description String?
+  rank        Int      @default(0)                     // authority level: Super Admin=100, Company Admin=80, Branch Manager=60, BDE/ISE=40
+  isSystem    Boolean  @default(false) @map("is_system") // true = seeded role, locks rank & name, prevents deletion
+  status      String   @default("ACTIVE")              // "ACTIVE" | "INACTIVE"
+  createdBy   Int?     @map("created_by")
   createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
+  company         Company?    @relation(fields: [companyId], references: [id])
+  createdByUser   User?       @relation("RoleCreatedBy", fields: [createdBy], references: [id])
   userRoles       UserRole[]
   rolePermissions Permission[]
 
+  @@unique([companyId, name])           // same name allowed per-company, no cross-company collision
+  @@index([companyId])
   @@map("roles")
 }
 
@@ -113,14 +135,15 @@ model UserRole {
 }
 
 model Permission {
-  id        Int      @id @default(autoincrement())
-  roleId    Int      @map("role_id")
-  module    String
-  canView   Boolean  @default(false) @map("can_view")
-  canCreate Boolean  @default(false) @map("can_create")
-  canEdit   Boolean  @default(false) @map("can_edit")
-  canDelete Boolean  @default(false) @map("can_delete")
-  createdAt DateTime @default(now()) @map("created_at")
+  id         Int      @id @default(autoincrement())
+  roleId     Int      @map("role_id")
+  module     String
+  canView    Boolean  @default(false) @map("can_view")
+  canCreate  Boolean  @default(false) @map("can_create")
+  canEdit    Boolean  @default(false) @map("can_edit")
+  canDelete  Boolean  @default(false) @map("can_delete")
+  canArchive Boolean  @default(false) @map("can_archive")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   role Role @relation(fields: [roleId], references: [id])
 
@@ -139,6 +162,24 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// OTP-based password reset — linked to user_id + company_id for audit trail
+model PasswordReset {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  companyId  Int?     @map("company_id")  // denormalized from user at creation time
+  otp        String
+  isVerified Boolean  @default(false) @map("is_verified")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([userId])
+  @@index([companyId])
+  @@map("password_resets")
 }
 
 // ══════════════════════════════════════════════════════════
@@ -208,8 +249,9 @@ model Stage {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  pipelineStages PipelineStage[]
-  leads          Lead[]
+  pipelineStages   PipelineStage[]
+  leads            Lead[]
+  leadsPreviousStage Lead[] @relation("LeadPreviousStage")
 
   @@map("stages")
 }
@@ -241,6 +283,10 @@ model Lead {
   id            Int      @id @default(autoincrement())
   pipelineId    Int      @map("pipeline_id")
   stageId       Int      @map("stage_id")
+  previousStageId Int?   @map("previous_stage_id")
+  stageChangedById Int?  @map("stage_changed_by_id")
+  stageChangedAt DateTime? @map("stage_changed_at")
+  assignedToId  Int?     @map("assigned_to")
   name          String
   mobile        String
   date          DateTime
@@ -251,13 +297,18 @@ model Lead {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  pipeline  Pipeline      @relation(fields: [pipelineId], references: [id])
-  stage     Stage         @relation(fields: [stageId], references: [id])
-  createdBy User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
-  comments  LeadComment[]
+  pipeline       Pipeline      @relation(fields: [pipelineId], references: [id])
+  stage          Stage         @relation(fields: [stageId], references: [id])
+  previousStage  Stage?        @relation("LeadPreviousStage", fields: [previousStageId], references: [id])
+  stageChangedBy User?         @relation("UserStageChangedLeads", fields: [stageChangedById], references: [id])
+  createdBy      User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
+  assignedTo     User?         @relation("UserAssignedLeads", fields: [assignedToId], references: [id])
+  comments       LeadComment[]
 
   @@index([pipelineId])
   @@index([stageId])
+  @@index([previousStageId])
+  @@index([assignedToId])
   @@map("leads")
 }
 

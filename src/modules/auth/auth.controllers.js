@@ -3,7 +3,10 @@
 import {
     loginUserService,
     refreshTokenService,
-    logoutService
+    logoutService,
+    forgotPasswordService,
+    resetPasswordService,
+    verifyOtpService
 } from "./auth.services.js"
 import { sendSuccess } from "../../utils/response.js"
 import dotenv from "dotenv"
@@ -105,6 +108,45 @@ export const logout = async (req, res, next) => {
 export const getMe = async (req, res, next) => {
     try {
         return sendSuccess(res, { user: req.user }, "User fetched")
+    } catch (err) {
+        next(err)
+    }
+}
+
+// ══════════════════════════════════════
+// POST /api/auth/forgot-password
+// ══════════════════════════════════════
+export const forgotPassword = async (req, res, next) => {
+    try {
+        const { email } = req.body
+        const result = await forgotPasswordService(email)
+        return sendSuccess(res, null, result.message)
+    } catch (err) {
+        next(err)
+    }
+}
+
+// ══════════════════════════════════════
+// POST /api/auth/reset-password
+// ══════════════════════════════════════
+export const resetPassword = async (req, res, next) => {
+    try {
+        const { email, otp, password } = req.body
+        const result = await resetPasswordService(email, otp, password)
+        return sendSuccess(res, null, result.message)
+    } catch (err) {
+        next(err)
+    }
+}
+
+// ══════════════════════════════════════
+// POST /api/auth/verify-otp
+// ══════════════════════════════════════
+export const verifyOtp = async (req, res, next) => {
+    try {
+        const { email, otp } = req.body
+        const result = await verifyOtpService(email, otp)
+        return sendSuccess(res, null, result.message)
     } catch (err) {
         next(err)
     }

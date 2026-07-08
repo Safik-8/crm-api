@@ -1,6 +1,13 @@
-// src/modules/branch/branch.service.js
+// src/modules/branch/branch.services.js
 
-import prisma from "../../config/db.js"
+import {
+  createBranch,
+  findBranchByCodeInCompany,
+  findBranchById,
+  findBranches,
+  countBranches,
+  updateBranch
+} from "./branch.repository.js"
 import {
   ValidationError,
   NotFoundError,
@@ -8,6 +15,7 @@ import {
   ForbiddenError
 } from "../../utils/AppError.js"
 import { hashPassword } from "../../utils/passwordUtils.js"
+import prisma from "../../config/db.js"
 
 // ══════════════════════════════════════
 // SCOPE GUARD
@@ -22,30 +30,22 @@ const assertCompanyScope = (actor, targetCompanyId) => {
 
 // ── ROLE CREATION RULES ───────────────────────────────────
 const ROLE_CREATION_RULES = {
-  SUPER_ADMIN: ["SUPER_ADMIN", "CEO", "BRANCH_ADMIN", "MANAGER", "ISE"],
-  BRANCH_ADMIN: ["MANAGER", "ISE"],
-  MANAGER: [],
-  CEO: [],
+  SUPER_ADMIN: ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER", "BDE", "ISE"],
+  COMPANY_ADMIN: ["BRANCH_MANAGER", "BDE", "ISE"],
+  BRANCH_MANAGER: ["BDE", "ISE"],
+  BDE: [],
   ISE: [],
 }
 
 // ── ROLES THAT NEED BRANCH ────────────────────────────────
-const ROLES_NEED_BRANCH = ["BRANCH_ADMIN", "MANAGER", "ISE"]
+const ROLES_NEED_BRANCH = ["BRANCH_MANAGER", "BDE", "ISE"]
 
-
-// ══════════════════════════════════════
-// CREATE BRANCH
-// ══════════════════════════════════════
+/**
+ * Creates and registers a new branch inside a company.
+ */
 export const createBranchService = async (data, actor) => {
-
-  const { companyId, name, code, status = "ACTIVE" } = data
-
-  // Validate
-  const errors = []
-  if (!companyId) errors.push({ field: "companyId", message: "Company is required" })
-  if (!name) errors.push({ field: "name", message: "Branch name is required" })
-  if (!code) errors.push({ field: "code", message: "Branch code is required" })
-  if (errors.length > 0) throw new ValidationError("Validation failed", errors)
+  const { companyId, name, code, address, location, status = "ACTIVE" } = data
+  const formattedCode = code.toUpperCase().trim()
 
   // Scope check — cannot create branch in another company
   assertCompanyScope(actor, Number(companyId))
@@ -60,31 +60,25 @@ export const createBranchService = async (data, actor) => {
   }
 
   // Check code unique within company
-  const existing = await prisma.branch.findFirst({
-    where: { companyId: Number(companyId), code: code.toUpperCase() }
-  })
-  if (existing) throw new ConflictError("Branch code already exists in this company", "code")
+  const existing = await findBranchByCodeInCompany(Number(companyId), formattedCode)
+  if (existing) {
+    throw new ConflictError("Branch code already exists in this company", "code")
+  }
 
-  const branch = await prisma.branch.create({
-    data: {
-      companyId: Number(companyId),
-      name,
-      code: code.toUpperCase(),
-      status
-    },
-    include: {
-      company: { select: { id: true, name: true } }
-    }
+  return createBranch({
+    companyId: Number(companyId),
+    name: name.trim(),
+    code: formattedCode,
+    address: address?.trim() || null,
+    location: location?.trim() || null,
+    status
   })
-
-  return branch
 }
 
-// ══════════════════════════════════════
-// GET BRANCHES BY COMPANY
-// ══════════════════════════════════════
+/**
+ * Fetches all branches in a company (raw list for dropdowns).
+ */
 export const getBranchesService = async (query, actor) => {
-
   const { company_id } = query
 
   // ── 1. DETERMINE COMPANY SCOPE ─────────────────────────
@@ -103,18 +97,24 @@ export const getBranchesService = async (query, actor) => {
     assertCompanyScope(actor, Number(company_id))
   }
 
-  // ── 3. CHECK COMPANY EXISTS (IMPORTANT 🔥)
+  // ── 3. CHECK COMPANY EXISTS
   const company = await prisma.company.findUnique({
     where: { id: scopedCompanyId }
   })
-
   if (!company) {
     throw new NotFoundError("Company")
   }
 
-  // ── 4. FETCH ALL BRANCHES (NO PAGINATION) ──────────────
-  const branches = await prisma.branch.findMany({
-    where: { companyId: scopedCompanyId },
+  // ── 4. FETCH ALL BRANCHES
+  const where = { companyId: scopedCompanyId }
+
+  // If the actor is not a system or company administrator, lock views to their own branch
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    where.id = actor.branchId
+  }
+
+  const branches = await findBranches({
+    where,
     orderBy: { createdAt: "desc" },
     include: {
       company: { select: { id: true, name: true } },
@@ -122,21 +122,16 @@ export const getBranchesService = async (query, actor) => {
     }
   })
 
-  // ── 5. RETURN ─────────────────────────────────────────
   return {
     branches,
     total: branches.length
   }
 }
 
-// ── GET BRANCHES WITH PAGINATION ──────────────────────────────
-// GET /branches/paginated?company_id=1&page=1&limit=10&search=main&status=ACTIVE
-// Used for: tables, lists with filters
-
-
-
+/**
+ * Lists branches with pagination, search, and sorting.
+ */
 export const getBranchesPaginatedService = async (query, actor) => {
-
   const {
     company_id,
     status,
@@ -145,7 +140,7 @@ export const getBranchesPaginatedService = async (query, actor) => {
     limit = 10,
   } = query
 
-  // determine company scope
+  // Determine company scope
   const scopedCompanyId = actor.primaryRole === "SUPER_ADMIN"
     ? Number(company_id)
     : actor.companyId
@@ -156,20 +151,20 @@ export const getBranchesPaginatedService = async (query, actor) => {
     ])
   }
 
-  // non super admin scope check
+  // Non super admin scope check
   if (actor.primaryRole !== "SUPER_ADMIN" && company_id) {
     if (Number(company_id) !== actor.companyId) {
       throw new ForbiddenError("Access denied")
     }
   }
 
-  // company exists check
+  // Company exists check
   const company = await prisma.company.findUnique({
     where: { id: scopedCompanyId }
   })
   if (!company) throw new NotFoundError("Company")
 
-  // build where
+  // Build filters
   const where = { companyId: scopedCompanyId }
   if (status) where.status = status
 
@@ -177,17 +172,24 @@ export const getBranchesPaginatedService = async (query, actor) => {
     where.OR = [
       { name: { contains: search, mode: "insensitive" } },
       { code: { contains: search, mode: "insensitive" } },
-      { city: { contains: search, mode: "insensitive" } },
+      { address: { contains: search, mode: "insensitive" } },
+      { location: { contains: search, mode: "insensitive" } },
     ]
   }
 
-  // pagination
-  const skip = (parseInt(page) - 1) * parseInt(limit)
-  const take = parseInt(limit)
+  // If the actor is not a system or company administrator, lock views to their own branch
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    where.id = actor.branchId
+  }
 
-  // parallel query — data + count
+  // Pagination parameters
+  const parsedPage = Math.max(1, Number(page))
+  const parsedLimit = Math.max(1, Number(limit))
+  const skip = (parsedPage - 1) * parsedLimit
+
+  // Fetch from Repository
   const [branches, total] = await Promise.all([
-    prisma.branch.findMany({
+    findBranches({
       where,
       orderBy: { createdAt: "desc" },
       include: {
@@ -195,162 +197,198 @@ export const getBranchesPaginatedService = async (query, actor) => {
         _count: { select: { users: true } }
       },
       skip,
-      take,
+      take: parsedLimit,
     }),
-    prisma.branch.count({ where }),
+    countBranches(where),
   ])
 
   return {
     branches,
     total,
-    page: parseInt(page),
-    limit: parseInt(limit),
-    totalPages: Math.ceil(total / parseInt(limit)),
-    hasNext: parseInt(page) < Math.ceil(total / parseInt(limit)),
-    hasPrev: parseInt(page) > 1,
+    page: parsedPage,
+    limit: parsedLimit,
+    totalPages: Math.ceil(total / parsedLimit),
+    hasNext: parsedPage < Math.ceil(total / parsedLimit),
+    hasPrev: parsedPage > 1,
   }
 }
 
-
-// ══════════════════════════════════════
-// GET SINGLE BRANCH
-// ══════════════════════════════════════
+/**
+ * Fetches a single branch details by ID.
+ */
 export const getBranchByIdService = async (id, actor) => {
-
-  const branch = await prisma.branch.findUnique({
-    where: { id: Number(id) },
-    include: {
-      company: { select: { id: true, name: true } },
-      _count: { select: { users: true } }
-    }
-  })
-
+  const branch = await findBranchById(Number(id))
   if (!branch) throw new NotFoundError("Branch")
 
   // Scope check
   assertCompanyScope(actor, branch.companyId)
+
+  // Branch level scope check
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    if (branch.id !== actor.branchId) {
+      throw new ForbiddenError("You do not have access to view this branch")
+    }
+  }
 
   return branch
 }
 
-// ══════════════════════════════════════
-// UPDATE BRANCH
-// ══════════════════════════════════════
+/**
+ * Updates branch operational details.
+ */
 export const updateBranchService = async (id, data, actor) => {
+  const { name, address, location, status } = data
 
-  const { name, status } = data
-
-  const branch = await prisma.branch.findUnique({
-    where: { id: Number(id) }
-  })
+  const branch = await findBranchById(Number(id))
   if (!branch) throw new NotFoundError("Branch")
 
   // Scope check
   assertCompanyScope(actor, branch.companyId)
 
-  const updated = await prisma.branch.update({
-    where: { id: Number(id) },
-    data: {
-      ...(name && { name }),
-      ...(status && { status })
-    },
-    include: {
-      company: { select: { id: true, name: true } }
+  // Branch level scope check
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    if (branch.id !== actor.branchId) {
+      throw new ForbiddenError("You do not have permission to modify this branch")
+    }
+  }
+
+  return updateBranch(Number(id), {
+    ...(name && { name: name.trim() }),
+    ...(address !== undefined && { address: address?.trim() || null }),
+    ...(location !== undefined && { location: location?.trim() || null }),
+    ...(status && { status })
+  })
+}
+
+/**
+ * Registers a new user and assigns them to a branch.
+ */
+export const assignUserToBranchService = async (branchId, data, actor) => {
+  const { name, email, password, primaryRole, secondaryRoles = [] } = data
+  const formattedEmail = email.toLowerCase().trim()
+
+  // ── 1. VERIFY TARGET BRANCH EXISTS
+  const branch = await findBranchById(Number(branchId))
+  if (!branch) throw new NotFoundError("Branch")
+
+  // ── 2. ENFORCE MULTI-TENANCY SCOPING
+  assertCompanyScope(actor, branch.companyId)
+
+  // Non-administrators (like Branch Managers) can only onboard users within their own branch
+  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+    if (branch.id !== actor.branchId) {
+      throw new ForbiddenError("You can only onboard users within your assigned branch")
+    }
+  }
+
+  // ── 3. DEDUPLICATE AND RESOLVE REQUESTED ROLES
+  // Combine primary and secondary role selections to load them in one DB query
+  const uniqueRoleNames = Array.from(new Set([primaryRole, ...secondaryRoles]))
+
+  const rolesFromDb = await prisma.role.findMany({
+    where: {
+      name: { in: uniqueRoleNames },
+      OR: [
+        { companyId: null }, // Global/System roles
+        { companyId: branch.companyId } // Tenant-scoped custom roles
+      ]
     }
   })
 
-  return updated
-}
-
-// ══════════════════════════════════════════════════════════
-// ASSIGN USER TO BRANCH
-// Creates new user and assigns them to this branch
-// ══════════════════════════════════════════════════════════
-export const assignUserToBranchService = async (branchId, data, actor) => {
-
-  const { name, email, password, roleName } = data
-
-  // ── VALIDATE ─────────────────────────────────────────
-  const errors = []
-  if (!name) errors.push({ field: "name", message: "Name is required" })
-  if (!email) errors.push({ field: "email", message: "Email is required" })
-  if (!password) errors.push({ field: "password", message: "Password is required" })
-  if (!roleName) errors.push({ field: "roleName", message: "Role is required" })
-  if (errors.length > 0) throw new ValidationError("Validation failed", errors)
-
-  // ── CHECK BRANCH EXISTS ───────────────────────────────
-  const branch = await prisma.branch.findUnique({
-    where: { id: Number(branchId) },
-    include: { company: true }
-  })
-  if (!branch) throw new NotFoundError("Branch")
-
-  // ── SCOPE GUARD ───────────────────────────────────────
-  assertCompanyScope(actor, branch.companyId)
-
-  // ── ROLE CREATION GUARD ───────────────────────────────
-  const allowedToCreate = ROLE_CREATION_RULES[actor.primaryRole] ?? []
-  if (!allowedToCreate.includes(roleName)) {
-    throw new ForbiddenError(
-      `${actor.primaryRole} cannot create user with role ${roleName}`
-    )
+  // Ensure all requested roles were found in the database
+  if (rolesFromDb.length !== uniqueRoleNames.length) {
+    const foundNames = rolesFromDb.map(r => r.name)
+    const missing = uniqueRoleNames.filter(name => !foundNames.includes(name))
+    throw new NotFoundError(`Roles not found: ${missing.join(", ")}`)
   }
 
-  // ── ROLE NEEDS BRANCH CHECK ───────────────────────────
-  if (!ROLES_NEED_BRANCH.includes(roleName)) {
-    throw new ValidationError(
-      `Role ${roleName} cannot be assigned to a branch directly`,
-      [{ field: "roleName", message: "Use BRANCH_ADMIN, MANAGER, or ISE" }]
-    )
+  // Find the database record corresponding to the primary role
+  const primaryRoleDb = rolesFromDb.find(r => r.name === primaryRole)
+
+  // ── 4. RUN SECURITY & HIERARCHY GUARDS (RANK CHECK)
+  // The creator cannot assign any role (primary or secondary) that has an equal or higher rank than their own
+  for (const role of rolesFromDb) {
+    if (role.rank >= actor.primaryRoleRank) {
+      throw new ForbiddenError(
+        `Cannot assign role "${role.name}" (rank ${role.rank}) with equal or higher rank than your own (${actor.primaryRoleRank})`
+      )
+    }
   }
 
-  // ── CHECK ROLE EXISTS ─────────────────────────────────
-  const role = await prisma.role.findUnique({
-    where: { name: roleName }
-  })
-  if (!role) throw new NotFoundError("Role")
+  // ── 5. ENFORCE PRIMARY ROLE IS HIGHEST OR EQUAL RANK
+  // The rank of the primary role must be greater than or equal to the rank of all secondary roles
+  for (const role of rolesFromDb) {
+    if (role.name !== primaryRole && role.rank > primaryRoleDb.rank) {
+      throw new ValidationError(
+        "Invalid secondary roles selection",
+        [{ field: "secondaryRoles", message: `Secondary role "${role.name}" (rank ${role.rank}) cannot have a higher rank than the primary role "${primaryRole}" (rank ${primaryRoleDb.rank})` }]
+      )
+    }
+  }
 
-  // ── CHECK EMAIL UNIQUE ────────────────────────────────
+  // ── 6. ENFORCE BRANCH ELIGIBILITY
+  // Roles with rank >= 80 (except COMPANY_ADMIN) cannot be assigned directly to a branch, as they are higher-level scopes
+  for (const role of rolesFromDb) {
+    if (role.rank >= 80 && role.name !== "COMPANY_ADMIN") {
+      throw new ValidationError(
+        `Role "${role.name}" cannot be assigned to a branch directly`,
+        [{ field: "primaryRole", message: "Only roles with rank lower than Company Admin (rank 80) can be assigned to a branch" }]
+      )
+    }
+  }
+
+  // ── 6. VERIFY EMAIL UNIQUENESS
   const existingUser = await prisma.user.findUnique({
-    where: { email }
+    where: { email: formattedEmail }
   })
   if (existingUser) throw new ConflictError("Email already registered", "email")
 
-  // ── HASH PASSWORD ─────────────────────────────────────
+  // ── 7. ENCRYPT CREDENTIALS
   const hashedPassword = await hashPassword(password)
 
-  // ── CREATE USER + ASSIGN ROLE IN TRANSACTION ──────────
+  // ── 8. EXECUTE ATOMIC TRANSACTION (ALL-OR-NOTHING WRITE)
   const result = await prisma.$transaction(async (tx) => {
-
-    // Create user
+    // A. Create the User profile
+    // Scoped to the branch unless their primary role is Company Admin (which has company-wide scope)
     const user = await tx.user.create({
       data: {
-        name: name,
-        email: email,
+        name: name.trim(),
+        email: formattedEmail,
         passwordHash: hashedPassword,
         companyId: branch.companyId,
-        branchId: Number(branchId),
+        branchId: primaryRole === "COMPANY_ADMIN" ? null : Number(branchId),
         status: "ACTIVE"
       }
     })
 
-    // Assign role
-    await tx.userRole.create({
-      data: {
+    // B. Build UserRole mapping entries for both primary and secondary roles
+    const userRoleMappings = rolesFromDb.map(role => {
+      const isPrimary = role.name === primaryRole
+      // Scope role to branch if it is not a company-wide admin role
+      const roleBranchId = role.name === "COMPANY_ADMIN" ? null : Number(branchId)
+      
+      return {
         userId: user.id,
         roleId: role.id,
         companyId: branch.companyId,
-        branchId: Number(branchId),
-        isPrimary: true,
+        branchId: roleBranchId,
+        isPrimary,
         assignedBy: actor.id
       }
     })
 
+    // C. Bulk write role associations
+    await tx.userRole.createMany({
+      data: userRoleMappings
+    })
+
     return user
+  }, {
+    timeout: 30000 // 30s connection window limit
   })
 
-  // ── RETURN SAFE USER ──────────────────────────────────
-  const safeUser = await prisma.user.findUnique({
+  // ── 9. RETURN SANITIZED RESPONSE PAYLOAD
+  return prisma.user.findUnique({
     where: { id: result.id },
     select: {
       id: true,
@@ -368,7 +406,4 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
       }
     }
   })
-
-  return safeUser
 }
-
