@@ -9,6 +9,7 @@ import {
     verifyOtpService
 } from "./auth.services.js"
 import { sendSuccess } from "../../utils/response.js"
+import { parseUserAgent } from "../../utils/userAgentParser.js"
 import dotenv from "dotenv"
 dotenv.config()
 
@@ -34,7 +35,10 @@ export const login = async (req, res, next) => {
     try {
         const { email, password } = req.body
 
-        const result = await loginUserService(email, password)
+        const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.headers["x-real-ip"] || req.ip || req.socket.remoteAddress || ""
+        const metadata = parseUserAgent(req.headers, ip)
+
+        const result = await loginUserService(email, password, metadata)
 
         // Set tokens in httpOnly cookies
         res.cookie("accessToken", result.accessToken, ACCESS_COOKIE_OPTIONS)
@@ -67,7 +71,10 @@ export const refresh = async (req, res, next) => {
             req.body?.refreshToken ||
             bearerToken
 
-        const result = await refreshTokenService(refreshToken)
+        const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.headers["x-real-ip"] || req.ip || req.socket.remoteAddress || ""
+        const metadata = parseUserAgent(req.headers, ip)
+
+        const result = await refreshTokenService(refreshToken, metadata)
 
         // Set new access token in cookie
         res.cookie("accessToken", result.accessToken, ACCESS_COOKIE_OPTIONS)

@@ -67,12 +67,17 @@ export const updateUserLastLogin = async (id) => {
  * @param {object} [tx=prisma]
  * @returns {Promise<object>}
  */
-export const createRefreshToken = async (userId, token, expiresAt, tx = prisma) => {
+export const createRefreshToken = async (userId, token, expiresAt, metadata = {}, tx = prisma) => {
   return tx.refreshToken.create({
     data: {
       userId,
       token,
       expiresAt,
+      browser: metadata.browser || null,
+      os: metadata.os || null,
+      deviceName: metadata.deviceName || null,
+      ipAddress: metadata.ipAddress || null,
+      lastActive: new Date()
     }
   })
 }

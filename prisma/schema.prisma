@@ -24,13 +24,17 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  branches    Branch[]
-  users       User[]
-  userRoles   UserRole[]
+  branches       Branch[]
+  users          User[]
+  userRoles      UserRole[]
   pipelines      Pipeline[]
   leadSources    LeadSource[]
   roles          Role[]
   passwordResets PasswordReset[]
+  teams          Team[]          // NEW-S2
+  courses        Course[]        // NEW-S2
+  userProfiles   UserProfile[]   // NEW-S2
+  auditLogs      AuditLog[]      // NEW-S2
 
   @@map("companies")
 }
@@ -51,6 +55,8 @@ model Branch {
   userRoles          UserRole[]
   pipelines          Pipeline[]
   dailyBranchReports DailyBranchReport[]
+  teams              Team[]              // NEW-S2
+  userProfiles       UserProfile[]       // NEW-S2
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -59,7 +65,7 @@ model Branch {
 }
 
 // ══════════════════════════════════════
-// USERS ROLES & PERMISSIONS
+// USERS, ROLES & PERMISSIONS
 // ══════════════════════════════════════
 
 model User {
@@ -74,6 +80,26 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
+  // ── NEW-S2 fields (additive, nullable) ──
+  firstName          String?   @map("first_name")
+  lastName           String?   @map("last_name")
+  // NOTE: existing name field is KEPT for backward compatibility.
+  // App layer must sync: name = ${firstName} ${lastName}.trim()
+  // on every create/update so existing code reading .name keeps working.
+
+  mobileNumber       String?   @unique @map("mobile_number")
+  employeeId         String?   @unique @map("employee_id")
+  joiningDate        DateTime? @map("joining_date")
+  profilePhoto       String?   @map("profile_photo")
+  // FIX #1: profilePhoto lives ONLY here, not duplicated on UserProfile
+
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  // FIX #3: needed for Task 1.8 "force password change on next login"
+  // set true on admin-triggered reset, cleared after successful login
+
+  reportingManagerId Int?      @map("reporting_manager_id")
+
+  // ── Sprint 1 relations (unchanged) ──
   company                   Company?            @relation(fields: [companyId], references: [id])
   branch                    Branch?             @relation(fields: [branchId], references: [id])
   userRoles                 UserRole[]          @relation("UserToUserRole")
@@ -87,8 +113,23 @@ model User {
   createdRoles              Role[]              @relation("RoleCreatedBy")
   passwordResets            PasswordReset[]
 
+  // ── NEW-S2 relations ──
+  reportingManager    User?          @relation("UserReportingManager", fields: [reportingManagerId], references: [id])
+  subordinates        User[]         @relation("UserReportingManager")
+  profile             UserProfile?
+  settings            UserSettings?
+  ownedTeams          Team[]         @relation("TeamBDE")
+  createdTeams        Team[]         @relation("TeamCreatedBy")
+  updatedTeams        Team[]         @relation("TeamUpdatedBy")
+  teamMemberships     TeamMember[]   @relation("TeamMemberUser")
+  teamAssignmentsMade TeamMember[]   @relation("TeamMemberAssignedBy")
+  createdCourses      Course[]       @relation("CourseCreatedBy")
+  updatedCourses      Course[]       @relation("CourseUpdatedBy")
+  auditLogsPerformed  AuditLog[]     @relation("AuditPerformedBy")
+
   @@index([companyId])
   @@index([branchId])
+  @@index([reportingManagerId]) // NEW-S2 — FIX #10: index for hierarchy queries
   @@map("users")
 }
 
@@ -152,11 +193,16 @@ model Permission {
 }
 
 model RefreshToken {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @map("user_id")
-  token     String   @unique
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id         Int       @id @default(autoincrement())
+  userId     Int       @map("user_id")
+  token      String    @unique
+  browser    String?
+  os         String?
+  deviceName String?
+  ipAddress  String?   @map("ip_address")
+  lastActive DateTime? @default(now()) @map("last_active")
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -182,14 +228,9 @@ model PasswordReset {
   @@map("password_resets")
 }
 
-// ══════════════════════════════════════════════════════════
-// SPRINT 2 — ADD TO BOTTOM OF schema.prisma
-// ══════════════════════════════════════════════════════════
-
-// ── LEAD SOURCE ────────────────────────────────────────────
-// Proper table instead of raw String on Prospect
-// companyId = null means global/system default for all companies
-// Ensures consistent values in reports and dropdowns
+// ══════════════════════════════════════
+// LEAD SOURCE
+// ══════════════════════════════════════
 
 model LeadSource {
   id        Int       @id @default(autoincrement())
@@ -208,9 +249,6 @@ model LeadSource {
 // ══════════════════════════════════════
 // PIPELINE MANAGEMENT
 // ══════════════════════════════════════
-
-// Pipeline belongs to a branch
-// One branch can have multiple pipelines
 
 model Pipeline {
   id          Int      @id @default(autoincrement())
@@ -233,12 +271,8 @@ model Pipeline {
   @@map("pipelines")
 }
 
-// ══════════════════════════════════════
-// STAGE MASTER
 // Global stages shared across all pipelines
 // is_default = true means "Prospect" stage
-// ══════════════════════════════════════
-
 model Stage {
   id          Int      @id @default(autoincrement())
   name        String   @unique
@@ -249,17 +283,12 @@ model Stage {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  pipelineStages   PipelineStage[]
-  leads            Lead[]
+  pipelineStages     PipelineStage[]
+  leads              Lead[]
   leadsPreviousStage Lead[] @relation("LeadPreviousStage")
 
   @@map("stages")
 }
-
-// ══════════════════════════════════════
-// PIPELINE STAGES MAPPING
-// Links stages to pipelines with order
-// ══════════════════════════════════════
 
 model PipelineStage {
   id         Int @id @default(autoincrement())
@@ -280,22 +309,22 @@ model PipelineStage {
 // ══════════════════════════════════════
 
 model Lead {
-  id            Int      @id @default(autoincrement())
-  pipelineId    Int      @map("pipeline_id")
-  stageId       Int      @map("stage_id")
-  previousStageId Int?   @map("previous_stage_id")
-  stageChangedById Int?  @map("stage_changed_by_id")
-  stageChangedAt DateTime? @map("stage_changed_at")
-  assignedToId  Int?     @map("assigned_to")
-  name          String
-  mobile        String
-  date          DateTime
-  interestedFor String?  @map("interested_for")
-  isDeleted     Boolean  @default(false) @map("is_deleted")
-  createdById   Int      @map("created_by")
-  updatedById   Int?     @map("updated_by")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id               Int       @id @default(autoincrement())
+  pipelineId       Int       @map("pipeline_id")
+  stageId          Int       @map("stage_id")
+  previousStageId  Int?      @map("previous_stage_id")
+  stageChangedById Int?      @map("stage_changed_by_id")
+  stageChangedAt   DateTime? @map("stage_changed_at")
+  assignedToId     Int?      @map("assigned_to")
+  name             String
+  mobile           String
+  date             DateTime
+  interestedFor    String?   @map("interested_for")
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  createdById      Int       @map("created_by")
+  updatedById      Int?      @map("updated_by")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   pipeline       Pipeline      @relation(fields: [pipelineId], references: [id])
   stage          Stage         @relation(fields: [stageId], references: [id])
@@ -334,9 +363,9 @@ model LeadComment {
   @@map("lead_comments")
 }
 
-//===========================================================================================
-// daily_branch_reports
-//===========================================================================================
+// ══════════════════════════════════════
+// DAILY BRANCH REPORTS
+// ══════════════════════════════════════
 
 model DailyBranchReport {
   id Int @id @default(autoincrement())
@@ -366,4 +395,180 @@ model DailyBranchReport {
   @@index([branchId])
   @@index([createdById])
   @@map("daily_branch_reports")
+}
+
+// ══════════════════════════════════════════════════════════════
+// SPRINT 2 — NEW TABLES
+// ══════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════
+// USER PROFILE — extended personal info (1:1 with User)
+// ══════════════════════════════════════
+
+model UserProfile {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @unique @map("user_id")
+  companyId        Int?     @map("company_id")   // denormalized for tenant isolation
+  branchId         Int?     @map("branch_id")    // denormalized for tenant isolation
+
+  address          String?
+  city             String?
+  state            String?
+  country          String?
+  pincode          String?                        // FIX #11: postal/zip code
+  emergencyContact String?  @map("emergency_contact")
+
+  // FIX #1: profilePhoto intentionally NOT here — lives only on User
+
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user    User     @relation(fields: [userId], references: [id])
+  company Company? @relation(fields: [companyId], references: [id])
+  branch  Branch?  @relation(fields: [branchId], references: [id])
+
+  @@index([companyId])
+  @@index([branchId])
+  @@map("user_profiles")
+}
+
+// ══════════════════════════════════════
+// USER SETTINGS — Task 2.6 notification/session/security preferences
+// FIX #12: was missing entirely
+// ══════════════════════════════════════
+
+model UserSettings {
+  id                      Int      @id @default(autoincrement())
+  userId                  Int      @unique @map("user_id")
+
+  notificationPreferences Json?    @map("notification_preferences")
+  sessionPreferences      Json?    @map("session_preferences")
+  securitySettings        Json?    @map("security_settings")
+
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_settings")
+}
+
+// ══════════════════════════════════════
+// TEAM MANAGEMENT
+// ══════════════════════════════════════
+
+model Team {
+  id          Int      @id @default(autoincrement())
+  companyId   Int      @map("company_id")
+  branchId    Int      @map("branch_id")
+  name        String   @map("team_name")
+  code        String   @map("team_code")
+  bdeId       Int      @map("bde_id")             // team owner — exactly one BDE
+  status      String   @default("ACTIVE")
+  isDeleted   Boolean  @default(false) @map("is_deleted")
+  createdById Int      @map("created_by")
+  updatedById Int?     @map("updated_by")          // FIX A: relation now defined
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company   Company      @relation(fields: [companyId], references: [id])
+  branch    Branch       @relation(fields: [branchId], references: [id])
+  bde       User         @relation("TeamBDE", fields: [bdeId], references: [id])
+  createdBy User         @relation("TeamCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?        @relation("TeamUpdatedBy", fields: [updatedById], references: [id]) // FIX A
+  members   TeamMember[]
+
+  // FIX #4: team_code unique PER COMPANY, not globally
+  @@unique([companyId, code])
+  @@unique([branchId, name])       // team name unique within a branch
+  @@index([companyId])
+  @@index([branchId])
+  @@index([bdeId])
+  @@map("teams")
+}
+
+model TeamMember {
+  id             Int       @id @default(autoincrement())
+  teamId         Int       @map("team_id")
+  userId         Int       @map("user_id")
+  memberRole     String    @map("member_role")     // "BDE" | "ISE"
+  assignedDate   DateTime  @default(now()) @map("assigned_date")
+  assignedById   Int?      @map("assigned_by_id")
+  // FIX #6: records WHO made the assignment — audit trail
+
+  removedAt      DateTime? @map("removed_at")
+  // FIX #5: single source of truth for membership state.
+  // removedAt IS NULL  → active member
+  // removedAt IS SET   → removed member (history preserved)
+  // Dropped redundant status + isDeleted fields
+
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  team       Team  @relation(fields: [teamId], references: [id])
+  user       User  @relation("TeamMemberUser", fields: [userId], references: [id])
+  assignedBy User? @relation("TeamMemberAssignedBy", fields: [assignedById], references: [id])
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+// ══════════════════════════════════════
+// COURSE / PRODUCT MASTER
+// ══════════════════════════════════════
+
+model Course {
+  id             Int      @id @default(autoincrement())
+  companyId      Int      @map("company_id")
+  name           String   @map("course_name")
+  code           String   @map("course_code")
+  description    String?                              // FIX #9: was missing
+  category       String
+  parentCategory String?  @map("parent_category")
+  price          Decimal  @db.Decimal(10, 2)
+  duration       String?
+  status         String   @default("ACTIVE")
+  isDeleted      Boolean  @default(false) @map("is_deleted")
+  createdById    Int      @map("created_by")
+  updatedById    Int?     @map("updated_by")           // FIX A: relation now defined
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  company   Company @relation(fields: [companyId], references: [id])
+  createdBy User    @relation("CourseCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?   @relation("CourseUpdatedBy", fields: [updatedById], references: [id]) // FIX A
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([category])
+  @@map("courses")
+}
+
+// ══════════════════════════════════════
+// GENERIC AUDIT LOG
+// ══════════════════════════════════════
+
+model AuditLog {
+  id            Int      @id @default(autoincrement())
+  companyId     Int?     @map("company_id")
+  // FIX #7: added for tenant-scoped queries without entity joins
+
+  entityType    String   @map("entity_type")   // "USER" | "TEAM" | "COURSE" | "ROLE" ...
+  entityId      Int      @map("entity_id")
+  action        String                          // "CREATE" | "UPDATE" | "STATUS_CHANGE" | "PASSWORD_RESET" | "MANAGER_CHANGE" | "MEMBER_REMOVE" ...
+
+  oldValue      Json?    @map("old_value")      // FIX #8: native Json, not varchar
+  newValue      Json?    @map("new_value")      // FIX #8: native Json, not varchar
+
+  performedById Int?     @map("performed_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  company     Company? @relation(fields: [companyId], references: [id])
+  performedBy User?    @relation("AuditPerformedBy", fields: [performedById], references: [id])
+
+  @@index([companyId])
+  @@index([entityType, entityId])
+  @@index([performedById])
+  @@map("audit_logs")
 }
