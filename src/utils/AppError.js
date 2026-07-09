@@ -93,6 +93,12 @@ export class NoRoleError extends AppError {
   }
 }
 
+export class ForcedPasswordChangeError extends AppError {
+  constructor() {
+    super("You must change your password on first login or reset.", 403, "FORCED_PASSWORD_CHANGE")
+  }
+}
+
 export class PermissionDeniedError extends AppError {
   constructor(module, action) {    
     super(

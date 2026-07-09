@@ -1,5 +1,5 @@
 // src/modules/auth/auth.services.js
-
+import prisma from "../../config/db.js"
 import {
   findUserByEmail,
   findUserById,
@@ -159,6 +159,7 @@ export const loginUserService = async (email, password) => {
       primaryRoleRank : primaryUserRole.role.rank ?? 0,
       roles           : allRoles,
       permissions     : permissionsMap,
+      mustChangePassword: user.mustChangePassword,
     }
   }
 }
@@ -305,6 +306,7 @@ export const refreshTokenService = async (refreshToken) => {
       primaryRoleRank : primaryUserRole.role.rank ?? 0,
       roles           : allRoles,
       permissions     : permissionsMap,
+      mustChangePassword: user.mustChangePassword,
     }
   }
 }
@@ -419,4 +421,30 @@ export const verifyOtpService = async (email, otp) => {
   }
 
   return { success: true, message: "OTP verified successfully" }
+}
+
+// ══════════════════════════════════════
+// CHANGE PASSWORD SERVICE (SELF SERVICE)
+// ══════════════════════════════════════
+export const changePasswordService = async (userId, currentPassword, newPassword) => {
+  // Find user
+  const user = await findUserById(userId)
+  if (!user) {
+    throw new NotFoundError("User not found")
+  }
+
+  // Verify current password
+  const isValid = await bcrypt.compare(currentPassword, user.passwordHash)
+  if (!isValid) {
+    throw new UnauthorizedError("Incorrect current password")
+  }
+
+  // Hash new password
+  const salt = await bcrypt.genSalt(10)
+  const passwordHash = await bcrypt.hash(newPassword, salt)
+
+  // Update password and clear force flag
+  await updateUserPassword(userId, passwordHash, false)
+
+  return { success: true, message: "Password updated successfully" }
 }

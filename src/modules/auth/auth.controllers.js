@@ -6,7 +6,8 @@ import {
     logoutService,
     forgotPasswordService,
     resetPasswordService,
-    verifyOtpService
+    verifyOtpService,
+    changePasswordService
 } from "./auth.services.js"
 import { sendSuccess } from "../../utils/response.js"
 import dotenv from "dotenv"
@@ -146,6 +147,21 @@ export const verifyOtp = async (req, res, next) => {
     try {
         const { email, otp } = req.body
         const result = await verifyOtpService(email, otp)
+        return sendSuccess(res, null, result.message)
+    } catch (err) {
+        next(err)
+    }
+}
+
+// ══════════════════════════════════════
+// POST /api/auth/change-password
+// ══════════════════════════════════════
+export const changePassword = async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body
+        const userId = req.user.id
+
+        const result = await changePasswordService(userId, currentPassword, newPassword)
         return sendSuccess(res, null, result.message)
     } catch (err) {
         next(err)

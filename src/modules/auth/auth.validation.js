@@ -54,6 +54,15 @@ export const verifyOtpSchema = z.object({
     .length(6, "OTP must be exactly 6 characters")
 })
 
+// Schema to validate self-service change password input
+export const changePasswordSchema = z.object({
+  currentPassword: z.string({ required_error: "Current password is required" })
+    .nonempty("Current password is required"),
+  newPassword: z.string({ required_error: "New password is required" })
+    .nonempty("New password is required")
+    .min(6, "New password must be at least 6 characters")
+})
+
 /**
  * Express middleware to validate request body against a Zod schema.
  * Formats any validation errors to match the project's native ValidationError shape.
