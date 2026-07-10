@@ -376,10 +376,121 @@ export const initializeSystem = async () => {
         }
 
 
-        // Add this at the end of initializeSystem() in src/config/initSystem.js
+        // ── STEP 5: SEED DEFAULT COMPANY HIERARCHY ──────────
+        // Only seed if no companies exist yet
+        const companyCount = await prisma.company.count();
+        if (companyCount === 0) {
+            console.log("No companies found. Seeding default StackDot company and hierarchy...");
+            
+            // 1. Create Default Company
+            const stackdotCompany = await prisma.company.create({
+                data: {
+                    name: "StackDot",
+                    code: "STACKDOT",
+                    status: "ACTIVE"
+                }
+            });
 
+            // 2. Create Default Branch
+            const mainBranch = await prisma.branch.create({
+                data: {
+                    companyId: stackdotCompany.id,
+                    name: "Headquarters",
+                    code: "HQ-01",
+                    address: "Main Office",
+                    location: "Rajkot, Gujarat",
+                    status: "ACTIVE"
+                }
+            });
 
+            // Retrieve System Roles for assigning reporting authority based on rank
+            const companyAdminRole = await prisma.role.findFirst({ where: { name: ROLE_NAMES.COMPANY_ADMIN, companyId: null } });
+            const branchManagerRole = await prisma.role.findFirst({ where: { name: ROLE_NAMES.BRANCH_MANAGER, companyId: null } });
+            const bdeRole = await prisma.role.findFirst({ where: { name: ROLE_NAMES.BDE, companyId: null } });
+            const iseRole = await prisma.role.findFirst({ where: { name: ROLE_NAMES.ISE, companyId: null } });
 
+            const defaultPasswordHash = await hashPassword("password123");
+
+            // 3. Create Users in Rank Order (establishing reportingManagerId hierarchy)
+            
+            // Tier 1: Company Admin (Rank 80)
+            const defaultAdmin = await prisma.user.create({
+                data: {
+                    name: "Dinesh Baraiya",
+                    firstName: "Dinesh",
+                    lastName: "Baraiya",
+                    email: "admin@stackdot.in",
+                    employeeId: "EMP-00001",
+                    passwordHash: defaultPasswordHash,
+                    status: "ACTIVE",
+                    companyId: stackdotCompany.id,
+                    branchId: mainBranch.id, // Usually company admins might not have branch, but for org chart let's assign
+                    reportingManagerId: null // Top of hierarchy
+                }
+            });
+            await prisma.userRole.create({
+                data: { userId: defaultAdmin.id, roleId: companyAdminRole.id, companyId: stackdotCompany.id, isPrimary: true }
+            });
+
+            // Tier 2: Branch Manager (Rank 60) - Reports to Company Admin
+            const defaultManager = await prisma.user.create({
+                data: {
+                    name: "Jeet Jagani",
+                    firstName: "Jeet",
+                    lastName: "Jagani",
+                    email: "manager@stackdot.in",
+                    employeeId: "EMP-00002",
+                    passwordHash: defaultPasswordHash,
+                    status: "ACTIVE",
+                    companyId: stackdotCompany.id,
+                    branchId: mainBranch.id,
+                    reportingManagerId: defaultAdmin.id // Rank 60 reports to Rank 80
+                }
+            });
+            await prisma.userRole.create({
+                data: { userId: defaultManager.id, roleId: branchManagerRole.id, companyId: stackdotCompany.id, branchId: mainBranch.id, isPrimary: true, assignedBy: defaultAdmin.id }
+            });
+
+            // Tier 3: BDE (Rank 40) - Reports to Branch Manager
+            const defaultBDE = await prisma.user.create({
+                data: {
+                    name: "Vivek Godhani",
+                    firstName: "Vivek",
+                    lastName: "Godhani",
+                    email: "bde@stackdot.in",
+                    employeeId: "EMP-00003",
+                    passwordHash: defaultPasswordHash,
+                    status: "ACTIVE",
+                    companyId: stackdotCompany.id,
+                    branchId: mainBranch.id,
+                    reportingManagerId: defaultManager.id // Rank 40 reports to Rank 60
+                }
+            });
+            await prisma.userRole.create({
+                data: { userId: defaultBDE.id, roleId: bdeRole.id, companyId: stackdotCompany.id, branchId: mainBranch.id, isPrimary: true, assignedBy: defaultManager.id }
+            });
+
+            // Tier 4: ISE (Rank 20) - Reports to BDE
+            const defaultISE = await prisma.user.create({
+                data: {
+                    name: "Pratik Vaghela",
+                    firstName: "Pratik",
+                    lastName: "Vaghela",
+                    email: "ise@stackdot.in",
+                    employeeId: "EMP-00004",
+                    passwordHash: defaultPasswordHash,
+                    status: "ACTIVE",
+                    companyId: stackdotCompany.id,
+                    branchId: mainBranch.id,
+                    reportingManagerId: defaultBDE.id // Rank 20 reports to Rank 40
+                }
+            });
+            await prisma.userRole.create({
+                data: { userId: defaultISE.id, roleId: iseRole.id, companyId: stackdotCompany.id, branchId: mainBranch.id, isPrimary: true, assignedBy: defaultBDE.id }
+            });
+
+            console.log("✅ Default StackDot Hierarchy Seeded Successfully!");
+        }
     } catch (error) {
         console.error("System initialization failed:", error)
         throw error
