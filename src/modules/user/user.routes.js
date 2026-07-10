@@ -7,7 +7,8 @@ import {
   getUserById,
   updateUser,
   toggleUserStatus,
-  resetUserPassword
+  resetUserPassword,
+  getAssignableRoles
 } from "./user.controllers.js"
 import {
   createUserSchema,
@@ -36,6 +37,14 @@ router.get(
   "/",
   hasPermission("USER", "canView"),
   getUsers
+)
+
+// GET /api/users/assignable-roles — roles an actor can assign when creating a user
+// Requires only USER:canCreate (accessible to Branch Managers)
+router.get(
+  "/assignable-roles",
+  hasPermission("USER", "canCreate"),
+  getAssignableRoles
 )
 
 // GET /api/users/:id — fetch complete details of a single user

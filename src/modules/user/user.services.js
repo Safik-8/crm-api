@@ -8,7 +8,8 @@ import {
   findUsers,
   countUsers,
   updateUserPassword,
-  createAuditLog
+  createAuditLog,
+  findAssignableRoles
 } from "./user.repository.js"
 import {
   ValidationError,
@@ -59,6 +60,12 @@ const checkCircularReporting = async (userId, managerId) => {
   }
 }
 
+// Helper to extract the rank of a user from their userRoles array
+const getUserRank = (user) => {
+  const primaryRole = user.userRoles?.find(ur => ur.isPrimary) || user.userRoles?.[0]
+  return primaryRole?.role?.rank ?? 0
+}
+
 // Service to onboard a new user
 export const createUserService = async (data, actor) => {
   const { companyId, branchId, roleId, reportingManagerId, email, mobileNumber, employeeId } = data
@@ -87,10 +94,7 @@ export const createUserService = async (data, actor) => {
 
   // Creator cannot assign roles equal or higher rank than their own
   if (actor.primaryRole !== "SUPER_ADMIN") {
-    const actorRole = await prisma.role.findFirst({
-      where: { name: actor.primaryRole, companyId: actor.companyId }
-    })
-    const actorRank = actorRole ? actorRole.rank : 0
+    const actorRank = actor.primaryRoleRank ?? 0
     if (role.rank >= actorRank) {
       throw new ForbiddenError(`Cannot onboard a user with equal or higher authority rank (${role.rank}) than your own (${actorRank})`)
     }
@@ -126,10 +130,10 @@ export const createUserService = async (data, actor) => {
     }
 
     // Manager role rank must be strictly higher than subordinate role rank
-    const managerRole = manager.userRoles[0]?.role
-    if (managerRole && managerRole.rank <= role.rank) {
+    const managerRank = getUserRank(manager)
+    if (managerRank <= role.rank) {
       throw new ValidationError("Invalid reporting structure", [
-        { field: "reportingManagerId", message: `Manager role rank (${managerRole.rank}) must be higher than employee role rank (${role.rank})` }
+        { field: "reportingManagerId", message: `Manager role rank (${managerRank}) must be higher than employee role rank (${role.rank})` }
       ])
     }
   }
@@ -212,21 +216,23 @@ export const updateUserService = async (id, data, actor) => {
   assertCompanyScope(actor, user.companyId)
 
   // Branch Manager Scope check
-  if (actor.primaryRole === "BRANCH_MANAGER" && user.branchId !== actor.branchId) {
-    throw new ForbiddenError("You can only edit users within your assigned branch")
+  if (actor.primaryRole === "BRANCH_MANAGER") {
+    if (user.branchId !== actor.branchId) {
+      throw new ForbiddenError("You can only edit users within your assigned branch")
+    }
+    // Cannot change the employee's branch to a different one
+    if (branchId && Number(branchId) !== actor.branchId) {
+      throw new ForbiddenError("You cannot change an employee's branch assignment")
+    }
   }
 
   const { firstName, lastName, mobileNumber, branchId, roleId, reportingManagerId, status } = data
 
   // Rank Guard: Actor cannot update a user who has equal or higher rank than the actor
-  const currentRole = user.userRoles[0]?.role
-  const currentRank = currentRole ? currentRole.rank : 0
+  const currentRank = getUserRank(user)
 
   if (actor.primaryRole !== "SUPER_ADMIN") {
-    const actorRole = await prisma.role.findFirst({
-      where: { name: actor.primaryRole, companyId: actor.companyId }
-    })
-    const actorRank = actorRole ? actorRole.rank : 0
+    const actorRank = actor.primaryRoleRank ?? 0
 
     if (currentRank >= actorRank) {
       throw new ForbiddenError(`You do not have permission to edit users with equal or higher rank than yourself`)
@@ -275,10 +281,10 @@ export const updateUserService = async (id, data, actor) => {
       throw new ValidationError("Reporting manager mismatch", [{ field: "reportingManagerId", message: "Manager must belong to same company" }])
     }
 
-    const managerRole = manager.userRoles[0]?.role
-    if (managerRole && finalRole && managerRole.rank <= finalRole.rank) {
+    const managerRank = getUserRank(manager)
+    if (finalRole && managerRank <= finalRole.rank) {
       throw new ValidationError("Invalid reporting structure", [
-        { field: "reportingManagerId", message: `Manager role rank (${managerRole.rank}) must be higher than employee role rank (${finalRole.rank})` }
+        { field: "reportingManagerId", message: `Manager role rank (${managerRank}) must be higher than employee role rank (${finalRole.rank})` }
       ])
     }
   }
@@ -415,14 +421,10 @@ export const resetUserPasswordService = async (id, actor) => {
     throw new ForbiddenError("You do not have permission to reset passwords in other branches")
   }
 
-  const currentRole = user.userRoles[0]?.role
-  const currentRank = currentRole ? currentRole.rank : 0
+  const currentRank = getUserRank(user)
 
   if (actor.primaryRole !== "SUPER_ADMIN") {
-    const actorRole = await prisma.role.findFirst({
-      where: { name: actor.primaryRole, companyId: actor.companyId }
-    })
-    const actorRank = actorRole ? actorRole.rank : 0
+    const actorRank = actor.primaryRoleRank ?? 0
     if (currentRank >= actorRank) {
       throw new ForbiddenError("You cannot reset credentials for a user with equal or higher rank than yourself")
     }
@@ -462,14 +464,10 @@ export const toggleUserStatusService = async (id, status, actor) => {
     throw new ForbiddenError("You can only toggle status of users inside your assigned branch")
   }
 
-  const currentRole = user.userRoles[0]?.role
-  const currentRank = currentRole ? currentRole.rank : 0
+  const currentRank = getUserRank(user)
 
   if (actor.primaryRole !== "SUPER_ADMIN") {
-    const actorRole = await prisma.role.findFirst({
-      where: { name: actor.primaryRole, companyId: actor.companyId }
-    })
-    const actorRank = actorRole ? actorRole.rank : 0
+    const actorRank = actor.primaryRoleRank ?? 0
     if (currentRank >= actorRank) {
       throw new ForbiddenError("You cannot modify status for a user with equal or higher rank than yourself")
     }
@@ -502,4 +500,13 @@ export const toggleUserStatusService = async (id, status, actor) => {
   }
 
   return updatedUser
+}
+
+/**
+ * Returns the list of roles the actor is permitted to assign when creating a new user.
+ * Enforces rank hierarchy: the actor can only assign roles with a strictly lower rank.
+ * Company-scoped: returns system-wide roles + roles specific to the actor's company.
+ */
+export const getAssignableRolesService = async (actor) => {
+  return findAssignableRoles(actor.primaryRoleRank, actor.companyId)
 }

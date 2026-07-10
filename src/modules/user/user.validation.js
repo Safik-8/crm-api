@@ -32,6 +32,12 @@ export const createUserSchema = z.object({
     required_error: "Role ID is required"
   }).int().positive(),
   reportingManagerId: z.number().int().positive().nullable().optional(),
+  address: z.string().trim().optional().nullable(),
+  city: z.string().trim().optional().nullable(),
+  state: z.string().trim().optional().nullable(),
+  country: z.string().trim().optional().nullable(),
+  pincode: z.string().trim().optional().nullable(),
+  emergencyContact: z.string().trim().optional().nullable(),
 })
 
 // Schema for editing an existing user
@@ -42,7 +48,13 @@ export const updateUserSchema = z.object({
   branchId: z.number().int().positive().optional(),
   roleId: z.number().int().positive().optional(),
   reportingManagerId: z.number().int().positive().nullable().optional(),
-  status: z.enum(["ACTIVE", "INACTIVE"]).optional()
+  status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  address: z.string().trim().optional().nullable(),
+  city: z.string().trim().optional().nullable(),
+  state: z.string().trim().optional().nullable(),
+  country: z.string().trim().optional().nullable(),
+  pincode: z.string().trim().optional().nullable(),
+  emergencyContact: z.string().trim().optional().nullable(),
 }).refine(data => Object.keys(data).length > 0, {
   message: "At least one field must be provided for update"
 })
