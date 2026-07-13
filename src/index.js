@@ -23,6 +23,7 @@ import roleRoutes from "./modules/role/role.routes.js"
 import userRoutes from "./modules/user/user.routes.js"
 import { initializeSystem } from "./config/initSystem.js"
 import dailyBranchReportRoutes from "./modules/daily_branch_reports/dailyBranchReport.routes.js"
+import courseRoutes from "./modules/course/course.routes.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
 dotenv.config({ quiet: true })
@@ -89,6 +90,7 @@ app.use("/api/leads", leadRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/daily-branch-reports", dailyBranchReportRoutes);
+app.use("/api/courses", courseRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════
