@@ -51,6 +51,26 @@ export const authenticate = async (req, res, next) => {
 
     if (!user)                   return next(new UnauthorizedError("User not found"))
     if (user.status !== "ACTIVE") return next(new AccountInactiveError())
+
+    // ── SESSION REVOCATION & LAST ACTIVE TRACKING ──
+    const refreshToken = req.cookies?.refreshToken
+    if (refreshToken) {
+      const activeSession = await prisma.refreshToken.findUnique({
+        where: { token: refreshToken }
+      })
+      if (!activeSession) {
+        return next(new UnauthorizedError("Session has been revoked or expired"))
+      }
+
+      // Throttle updating lastActive to once per minute to avoid DB write spam
+      const oneMinuteAgo = new Date(Date.now() - 60 * 1000)
+      if (!activeSession.lastActive || activeSession.lastActive < oneMinuteAgo) {
+        await prisma.refreshToken.update({
+          where: { id: activeSession.id },
+          data: { lastActive: new Date() }
+        }).catch(() => {})
+      }
+    }
     if (user.companyId && user.company?.status !== "ACTIVE") {
       return next(new ForbiddenError("Your company is currently inactive. Access denied."))
     }
@@ -100,6 +120,9 @@ export const authenticate = async (req, res, next) => {
       id              : user.id,
       name            : user.name,
       email           : user.email,
+      firstName       : user.firstName,
+      lastName        : user.lastName,
+      profilePhoto    : user.profilePhoto,
       companyId       : user.companyId,
       branchId        : user.branchId,
       company         : user.company,

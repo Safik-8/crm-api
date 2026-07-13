@@ -1,5 +1,7 @@
 // src/modules/auth/auth.services.js
 import prisma from "../../config/db.js"
+
+
 import {
   findUserByEmail,
   findUserById,
@@ -35,7 +37,7 @@ dotenv.config()
 // ══════════════════════════════════════
 // LOGIN SERVICE
 // ══════════════════════════════════════
-export const loginUserService = async (email, password) => {
+export const loginUserService = async (email, password, metadata = {}) => {
 
   // ── 1. VALIDATE INPUT WITH ZOD ──────────────────────────
   const validation = loginSchema.safeParse({ email, password })
@@ -83,11 +85,11 @@ export const loginUserService = async (email, password) => {
     const key = `${ur.role.name}_${ur.companyId}_${ur.branchId}`
     if (!uniqueRolesMap.has(key)) {
       uniqueRolesMap.set(key, {
-        name      : ur.role.name,
-        rank      : ur.role.rank ?? 0,
-        companyId : ur.companyId,
-        branchId  : ur.branchId,
-        isPrimary : ur.isPrimary,
+        name: ur.role.name,
+        rank: ur.role.rank ?? 0,
+        companyId: ur.companyId,
+        branchId: ur.branchId,
+        isPrimary: ur.isPrimary,
       })
     }
   })
@@ -99,42 +101,56 @@ export const loginUserService = async (email, password) => {
     ur.role.rolePermissions.forEach(rp => {
       if (!permissionsMap[rp.module]) {
         permissionsMap[rp.module] = {
-          canView   : false,
-          canCreate : false,
-          canEdit   : false,
-          canDelete : false,
+          canView: false,
+          canCreate: false,
+          canEdit: false,
+          canDelete: false,
           canArchive: false,
         }
       }
-      if (rp.canView)   permissionsMap[rp.module].canView   = true
+      if (rp.canView) permissionsMap[rp.module].canView = true
       if (rp.canCreate) permissionsMap[rp.module].canCreate = true
-      if (rp.canEdit)   permissionsMap[rp.module].canEdit   = true
+      if (rp.canEdit) permissionsMap[rp.module].canEdit = true
       if (rp.canDelete) permissionsMap[rp.module].canDelete = true
       if (rp.canArchive) permissionsMap[rp.module].canArchive = true
     })
   })
 
   // ── 10. GENERATE TOKENS ────────────────────────────────
-  const accessToken  = generateAccessToken({
-    userId          : user.id,
-    email           : user.email,
-    name            : user.name,
-    companyId       : user.companyId,
-    branchId        : user.branchId,
-    primaryRole     : primaryUserRole.role.name,
-    primaryRoleRank : primaryUserRole.role.rank ?? 0,
-    roles           : allRoles,
-    permissions     : permissionsMap,
+  const accessToken = generateAccessToken({
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    companyId: user.companyId,
+    branchId: user.branchId,
+    primaryRole: primaryUserRole.role.name,
+    primaryRoleRank: primaryUserRole.role.rank ?? 0,
+    roles: allRoles,
+    permissions: permissionsMap,
   })
   const refreshToken = generateRefreshToken({
-    userId    : user.id,
+    userId: user.id,
   })
 
-  // ── 11. SAVE REFRESH TOKEN TO DB ───────────────────────
   const expiresAt = new Date()
   expiresAt.setDate(expiresAt.getDate() + 7)
 
-  await createRefreshToken(user.id, refreshToken, expiresAt)
+  // Clean up expired and duplicate sessions on successful login
+  await prisma.refreshToken.deleteMany({
+    where: {
+      OR: [
+        { expiresAt: { lt: new Date() } },
+        {
+          userId: user.id,
+          browser: metadata.browser || undefined,
+          os: metadata.os || undefined,
+          deviceName: metadata.deviceName || undefined
+        }
+      ]
+    }
+  })
+
+  await createRefreshToken(user.id, refreshToken, expiresAt, metadata)
 
   // ── 12. UPDATE LAST LOGIN ──────────────────────────────
   await updateUserLastLogin(user.id)
@@ -167,7 +183,7 @@ export const loginUserService = async (email, password) => {
 // ══════════════════════════════════════
 // REFRESH TOKEN SERVICE
 // ══════════════════════════════════════
-export const refreshTokenService = async (refreshToken) => {
+export const refreshTokenService = async (refreshToken, metadata = {}) => {
   // ── 1. VALIDATE WITH ZOD ───────────────────────────────
   const validation = refreshSchema.safeParse({ refreshToken })
   if (!validation.success) {
@@ -183,7 +199,7 @@ export const refreshTokenService = async (refreshToken) => {
   try {
     const { verifyRefreshToken } = await import("../../utils/tokenUtils.js")
     payload = verifyRefreshToken(refreshToken)
-  } catch(err) {
+  } catch (err) {
     throw new UnauthorizedError("Invalid or expired refresh token")
   }
 
@@ -227,11 +243,11 @@ export const refreshTokenService = async (refreshToken) => {
     user.userRoles.find(ur => ur.isPrimary) ?? user.userRoles[0]
 
   const allRoles = user.userRoles.map(ur => ({
-    name      : ur.role.name,
-    rank      : ur.role.rank ?? 0,
-    companyId : ur.companyId,
-    branchId  : ur.branchId,
-    isPrimary : ur.isPrimary,
+    name: ur.role.name,
+    rank: ur.role.rank ?? 0,
+    companyId: ur.companyId,
+    branchId: ur.branchId,
+    isPrimary: ur.isPrimary,
   }))
 
   const permissionsMap = {}
@@ -246,9 +262,9 @@ export const refreshTokenService = async (refreshToken) => {
           canArchive: false,
         }
       }
-      if (rp.canView)   permissionsMap[rp.module].canView = true
+      if (rp.canView) permissionsMap[rp.module].canView = true
       if (rp.canCreate) permissionsMap[rp.module].canCreate = true
-      if (rp.canEdit)   permissionsMap[rp.module].canEdit = true
+      if (rp.canEdit) permissionsMap[rp.module].canEdit = true
       if (rp.canDelete) permissionsMap[rp.module].canDelete = true
       if (rp.canArchive) permissionsMap[rp.module].canArchive = true
     })
@@ -261,15 +277,15 @@ export const refreshTokenService = async (refreshToken) => {
 
     // Generate new tokens
     const newAccessToken = generateAccessToken({
-      userId          : user.id,
-      email           : user.email,
-      name            : user.name,
-      companyId       : user.companyId,
-      branchId        : user.branchId,
-      primaryRole     : primaryUserRole.role.name,
-      primaryRoleRank : primaryUserRole.role.rank ?? 0,
-      roles           : allRoles,
-      permissions     : permissionsMap,
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      companyId: user.companyId,
+      branchId: user.branchId,
+      primaryRole: primaryUserRole.role.name,
+      primaryRoleRank: primaryUserRole.role.rank ?? 0,
+      roles: allRoles,
+      permissions: permissionsMap,
     })
 
     const newRefreshToken = generateRefreshToken({
@@ -279,7 +295,7 @@ export const refreshTokenService = async (refreshToken) => {
     // Save new refresh token to DB
     const expiresAt = new Date()
     expiresAt.setDate(expiresAt.getDate() + 7)
-    await createRefreshToken(user.id, newRefreshToken, expiresAt, tx)
+    await createRefreshToken(user.id, newRefreshToken, expiresAt, metadata, tx)
 
     return { newAccessToken, newRefreshToken }
   }, {
