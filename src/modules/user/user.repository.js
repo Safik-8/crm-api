@@ -296,3 +296,23 @@ export const createAuditLog = async (data, tx = prisma) => {
     }
   })
 }
+
+/**
+ * Fetches roles an actor is allowed to assign to a new user.
+ * Filters by: active status, rank strictly below actor's rank,
+ * and company scope (global system roles + actor's own company roles).
+ */
+export const findAssignableRoles = async (actorRank, companyId) => {
+  return prisma.role.findMany({
+    where: {
+      status: "ACTIVE",
+      rank: { lt: actorRank },
+      OR: [
+        { companyId: companyId ?? null },
+        { companyId: null }
+      ]
+    },
+    orderBy: { rank: "desc" },
+    select: { id: true, name: true, rank: true, isSystem: true, status: true }
+  })
+}

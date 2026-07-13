@@ -1,11 +1,10 @@
-// src/modules/user/user.controllers.js
-
 import {
   createUserService,
   updateUserService,
   getUsersService,
   resetUserPasswordService,
-  toggleUserStatusService
+  toggleUserStatusService,
+  getAssignableRolesService
 } from "./user.services.js"
 import { findUserById } from "./user.repository.js"
 import { NotFoundError } from "../../utils/AppError.js"
@@ -52,5 +51,17 @@ export const resetUserPassword = async (req, res, next) => {
   try {
     const result = await resetUserPasswordService(req.params.id, req.user)
     return sendSuccess(res, result, "Password reset successfully. Please share the temporary password.")
+  } catch (err) { next(err) }
+}
+
+/**
+ * GET /api/users/assignable-roles
+ * Returns roles the current actor is allowed to assign when onboarding a user.
+ * Requires USER:canCreate permission (accessible to Branch Managers).
+ */
+export const getAssignableRoles = async (req, res, next) => {
+  try {
+    const roles = await getAssignableRolesService(req.user)
+    return sendSuccess(res, { roles }, "Assignable roles fetched successfully")
   } catch (err) { next(err) }
 }
