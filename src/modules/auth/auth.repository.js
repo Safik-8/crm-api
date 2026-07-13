@@ -157,11 +157,11 @@ export const markPasswordResetVerified = async (resetId) => {
 }
 
 /**
- * Update a user's password hash.
+ * Update a user's password hash and optionally clear the forced-change flag.
  */
-export const updateUserPassword = async (userId, passwordHash) => {
+export const updateUserPassword = async (userId, passwordHash, mustChangePassword = false) => {
   return prisma.user.update({
     where: { id: userId },
-    data: { passwordHash }
+    data: { passwordHash, mustChangePassword }
   })
 }

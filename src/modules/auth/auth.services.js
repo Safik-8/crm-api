@@ -160,21 +160,22 @@ export const loginUserService = async (email, password, metadata = {}) => {
     accessToken,
     refreshToken,
     user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      status: user.status,
-      companyId: user.companyId,
-      companyName: user.company?.name ?? null,
-      companyCode: user.company?.code ?? null,
-      company: user.company,
-      branchId: user.branchId,
-      branchName: user.branch?.name ?? null,
-      branchCode: user.branch?.code ?? null,
-      primaryRole: primaryUserRole.role.name,
-      primaryRoleRank: primaryUserRole.role.rank ?? 0,
-      roles: allRoles,
-      permissions: permissionsMap,
+      id              : user.id,
+      name            : user.name,
+      email           : user.email,
+      status          : user.status,
+      companyId       : user.companyId,
+      companyName     : user.company?.name    ?? null,
+      companyCode     : user.company?.code    ?? null,
+      company         : user.company,
+      branchId        : user.branchId,
+      branchName      : user.branch?.name     ?? null,
+      branchCode      : user.branch?.code     ?? null,
+      primaryRole     : primaryUserRole.role.name,
+      primaryRoleRank : primaryUserRole.role.rank ?? 0,
+      roles           : allRoles,
+      permissions     : permissionsMap,
+      mustChangePassword: user.mustChangePassword,
     }
   }
 }
@@ -307,20 +308,21 @@ export const refreshTokenService = async (refreshToken, metadata = {}) => {
     accessToken: newAccessToken,
     refreshToken: newRefreshToken,
     user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      companyId: user.companyId,
-      companyName: user.company?.name ?? null,
-      companyCode: user.company?.code ?? null,
-      company: user.company,
-      branchId: user.branchId,
-      branchName: user.branch?.name ?? null,
-      branchCode: user.branch?.code ?? null,
-      primaryRole: primaryUserRole.role.name,
-      primaryRoleRank: primaryUserRole.role.rank ?? 0,
-      roles: allRoles,
-      permissions: permissionsMap,
+      id              : user.id,
+      name            : user.name,
+      email           : user.email,
+      companyId       : user.companyId,
+      companyName     : user.company?.name ?? null,
+      companyCode     : user.company?.code ?? null,
+      company         : user.company,
+      branchId        : user.branchId,
+      branchName      : user.branch?.name ?? null,
+      branchCode      : user.branch?.code ?? null,
+      primaryRole     : primaryUserRole.role.name,
+      primaryRoleRank : primaryUserRole.role.rank ?? 0,
+      roles           : allRoles,
+      permissions     : permissionsMap,
+      mustChangePassword: user.mustChangePassword,
     }
   }
 }
@@ -435,4 +437,30 @@ export const verifyOtpService = async (email, otp) => {
   }
 
   return { success: true, message: "OTP verified successfully" }
+}
+
+// ══════════════════════════════════════
+// CHANGE PASSWORD SERVICE (SELF SERVICE)
+// ══════════════════════════════════════
+export const changePasswordService = async (userId, currentPassword, newPassword) => {
+  // Find user
+  const user = await findUserById(userId)
+  if (!user) {
+    throw new NotFoundError("User not found")
+  }
+
+  // Verify current password
+  const isValid = await bcrypt.compare(currentPassword, user.passwordHash)
+  if (!isValid) {
+    throw new UnauthorizedError("Incorrect current password")
+  }
+
+  // Hash new password
+  const salt = await bcrypt.genSalt(10)
+  const passwordHash = await bcrypt.hash(newPassword, salt)
+
+  // Update password and clear force flag
+  await updateUserPassword(userId, passwordHash, false)
+
+  return { success: true, message: "Password updated successfully" }
 }

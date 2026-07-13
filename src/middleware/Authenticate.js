@@ -7,7 +7,8 @@ import {
   TokenInvalidError,
   AccountInactiveError,
   NoRoleError,
-  ForbiddenError
+  ForbiddenError,
+  ForcedPasswordChangeError
 } from "../utils/AppError.js"
 import prisma from "../config/db.js"
 
@@ -72,6 +73,17 @@ export const authenticate = async (req, res, next) => {
     }
     if (user.companyId && user.company?.status !== "ACTIVE") {
       return next(new ForbiddenError("Your company is currently inactive. Access denied."))
+    }
+    if (user.mustChangePassword) {
+      const isAllowedPath = [
+        "/change-password",
+        "/logout",
+        "/refresh"
+      ].some(path => req.originalUrl.includes(path));
+
+      if (!isAllowedPath) {
+        return next(new ForcedPasswordChangeError())
+      }
     }
     if (!user.userRoles?.length) return next(new NoRoleError())
 

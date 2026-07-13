@@ -1,9 +1,9 @@
 // src/modules/auth/auth.routes.js
 
 import { Router } from "express"
-import { login, refresh, logout, getMe, forgotPassword, resetPassword, verifyOtp } from "./auth.controllers.js"
+import { login, refresh, logout, getMe, forgotPassword, resetPassword, verifyOtp, changePassword } from "./auth.controllers.js"
 import { authenticate } from "../../middleware/Authenticate.js"
-import { validateBody, loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyOtpSchema } from "./auth.validation.js"
+import { validateBody, loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyOtpSchema, changePasswordSchema } from "./auth.validation.js"
 
 const router = Router()
 
@@ -14,5 +14,6 @@ router.get("/auth/me", authenticate, getMe)
 router.post("/auth/forgot-password", validateBody(forgotPasswordSchema), forgotPassword)
 router.post("/auth/verify-otp", validateBody(verifyOtpSchema), verifyOtp)
 router.post("/auth/reset-password", validateBody(resetPasswordSchema), resetPassword)
+router.post("/auth/change-password", authenticate, validateBody(changePasswordSchema), changePassword)
 
 export default router

@@ -83,8 +83,8 @@ model User {
   // ── NEW-S2 fields (additive, nullable) ──
   firstName          String?   @map("first_name")
   lastName           String?   @map("last_name")
-  // NOTE: existing name field is KEPT for backward compatibility.
-  // App layer must sync: name = ${firstName} ${lastName}.trim()
+  // NOTE: existing `name` field is KEPT for backward compatibility.
+  // App layer must sync: name = `${firstName} ${lastName}`.trim()
   // on every create/update so existing code reading .name keeps working.
 
   mobileNumber       String?   @unique @map("mobile_number")
