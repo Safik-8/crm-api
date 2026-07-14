@@ -20,6 +20,7 @@ import {
 import { hashPassword } from "../../utils/passwordUtils.js"
 import prisma from "../../config/db.js"
 import crypto from "crypto"
+import { parsePagination, parseSorting, buildSearchFilter } from "../../utils/queryHelpers.js"
 
 // Helper to assert company-level multitenancy
 const assertCompanyScope = (actor, targetCompanyId) => {
@@ -324,15 +325,9 @@ export const updateUserService = async (id, data, actor) => {
 
 // Service to query paginated users with filters
 export const getUsersService = async (query, actor) => {
-  const {
-    companyId,
-    branchId,
-    roleId,
-    status,
-    search,
-    page = 1,
-    limit = 10
-  } = query
+  const { companyId, branchId, roleId, status } = query;
+  const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSorting(query, ["name", "email", "employeeId", "status", "createdAt"]);
 
   // Scopes resolving
   const scopedCompanyId = actor.primaryRole === "SUPER_ADMIN"
@@ -361,24 +356,15 @@ export const getUsersService = async (query, actor) => {
   }
 
   // Search keyword parsing
-  if (search?.trim()) {
-    where.OR = [
-      { name: { contains: search, mode: "insensitive" } },
-      { email: { contains: search, mode: "insensitive" } },
-      { employeeId: { contains: search, mode: "insensitive" } },
-      { mobileNumber: { contains: search, mode: "insensitive" } }
-    ]
+  const searchFilter = buildSearchFilter(query.search, ["name", "email", "employeeId", "mobileNumber"]);
+  if (searchFilter) {
+    where.OR = searchFilter.OR;
   }
-
-  // Pagination parameters
-  const parsedPage = Math.max(1, Number(page))
-  const parsedLimit = Math.max(1, Number(limit))
-  const skip = (parsedPage - 1) * parsedLimit
 
   const [users, total] = await Promise.all([
     findUsers({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy,
       include: {
         company: { select: { id: true, name: true } },
         branch: { select: { id: true, name: true } },
@@ -392,7 +378,7 @@ export const getUsersService = async (query, actor) => {
         }
       },
       skip,
-      take: parsedLimit
+      take: limit
     }),
     countUsers(where)
   ])
@@ -400,11 +386,11 @@ export const getUsersService = async (query, actor) => {
   return {
     users,
     total,
-    page: parsedPage,
-    limit: parsedLimit,
-    totalPages: Math.ceil(total / parsedLimit),
-    hasNext: parsedPage < Math.ceil(total / parsedLimit),
-    hasPrev: parsedPage > 1
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+    hasNext: page < Math.ceil(total / limit),
+    hasPrev: page > 1
   }
 }
 
