@@ -135,18 +135,10 @@ export const loginUserService = async (email, password, metadata = {}) => {
   const expiresAt = new Date()
   expiresAt.setDate(expiresAt.getDate() + 7)
 
-  // Clean up expired and duplicate sessions on successful login
+  // Clean up expired sessions on successful login
   await prisma.refreshToken.deleteMany({
     where: {
-      OR: [
-        { expiresAt: { lt: new Date() } },
-        {
-          userId: user.id,
-          browser: metadata.browser || undefined,
-          os: metadata.os || undefined,
-          deviceName: metadata.deviceName || undefined
-        }
-      ]
+      expiresAt: { lt: new Date() }
     }
   })
 
