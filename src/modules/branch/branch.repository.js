@@ -39,7 +39,12 @@ export const findBranchById = async (id, tx = prisma) => {
     where: { id },
     include: {
       company: { select: { id: true, name: true } },
-      _count: { select: { users: true } }
+      _count: {
+        select: {
+          users: true,
+          teams: { where: { isDeleted: false } }
+        }
+      }
     }
   })
 }

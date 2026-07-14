@@ -22,10 +22,7 @@ export const changePasswordSchema = z.object({
   currentPassword: z.string({ required_error: "Current password is required" })
     .min(1, "Current password is required"),
   newPassword: z.string({ required_error: "New password is required" })
-    .min(8, "Password must be at least 8 characters long")
-    .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
-    .regex(/[0-9]/, "Password must contain at least one number")
-    .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character"),
+    .min(6, "New password must be at least 6 characters long"),
   confirmPassword: z.string({ required_error: "Confirm password is required" })
     .min(1, "Confirm password is required")
 }).refine((data) => data.newPassword === data.confirmPassword, {
