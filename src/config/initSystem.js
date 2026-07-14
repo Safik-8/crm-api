@@ -3,9 +3,9 @@
 import prisma from "./db.js"
 import { hashPassword } from "../utils/passwordUtils.js"
 import {
-  ROLE_NAMES,
-  ROLE_RANKS,
-  MODULES,
+    ROLE_NAMES,
+    ROLE_RANKS,
+    MODULES,
 } from "./roleConstants.js"
 
 // ══════════════════════════════════════
@@ -15,11 +15,11 @@ import {
 // isSystem = true locks rank & name, prevents deletion
 // ══════════════════════════════════════
 const ROLES = [
-  { name: ROLE_NAMES.SUPER_ADMIN,    rank: ROLE_RANKS.SUPER_ADMIN,    isSystem: true, status: "ACTIVE", description: "Super Admin - Full system access" },
-  { name: ROLE_NAMES.COMPANY_ADMIN,  rank: ROLE_RANKS.COMPANY_ADMIN,  isSystem: true, status: "ACTIVE", description: "Company Admin - Company wide full access" },
-  { name: ROLE_NAMES.BRANCH_MANAGER, rank: ROLE_RANKS.BRANCH_MANAGER, isSystem: true, status: "ACTIVE", description: "Branch Manager - Full branch access and approvals" },
-  { name: ROLE_NAMES.BDE,            rank: ROLE_RANKS.BDE,            isSystem: true, status: "ACTIVE", description: "Business Development Executive - Client acquisition and follow-ups" },
-  { name: ROLE_NAMES.ISE,            rank: ROLE_RANKS.ISE,            isSystem: true, status: "ACTIVE", description: "Inside Sales Executive - Support and lead nurture" },
+    { name: ROLE_NAMES.SUPER_ADMIN, rank: ROLE_RANKS.SUPER_ADMIN, isSystem: true, status: "ACTIVE", description: "Super Admin - Full system access" },
+    { name: ROLE_NAMES.COMPANY_ADMIN, rank: ROLE_RANKS.COMPANY_ADMIN, isSystem: true, status: "ACTIVE", description: "Company Admin - Company wide full access" },
+    { name: ROLE_NAMES.BRANCH_MANAGER, rank: ROLE_RANKS.BRANCH_MANAGER, isSystem: true, status: "ACTIVE", description: "Branch Manager - Full branch access and approvals" },
+    { name: ROLE_NAMES.BDE, rank: ROLE_RANKS.BDE, isSystem: true, status: "ACTIVE", description: "Business Development Executive - Client acquisition and follow-ups" },
+    { name: ROLE_NAMES.ISE, rank: ROLE_RANKS.ISE, isSystem: true, status: "ACTIVE", description: "Inside Sales Executive - Support and lead nurture" },
 ]
 
 // ══════════════════════════════════════
@@ -173,8 +173,8 @@ export const initializeSystem = async () => {
             .map(r => {
                 const existing = roleByName.get(r.name)
                 if (!existing) return null
-                const descChanged   = (existing.description || "") !== (r.description || "")
-                const rankChanged   = existing.rank !== r.rank
+                const descChanged = (existing.description || "") !== (r.description || "")
+                const rankChanged = existing.rank !== r.rank
                 const statusChanged = existing.status !== r.status
                 if (!descChanged && !rankChanged && !statusChanged) return null
                 return { id: existing.id, description: r.description, rank: r.rank, status: r.status }
@@ -381,7 +381,7 @@ export const initializeSystem = async () => {
         const companyCount = await prisma.company.count();
         if (companyCount === 0) {
             console.log("No companies found. Seeding default StackDot company and hierarchy...");
-            
+
             // 1. Create Default Company
             const stackdotCompany = await prisma.company.create({
                 data: {
@@ -412,7 +412,7 @@ export const initializeSystem = async () => {
             const defaultPasswordHash = await hashPassword("password123");
 
             // 3. Create Users in Rank Order (establishing reportingManagerId hierarchy)
-            
+
             // Tier 1: Company Admin (Rank 80)
             const defaultAdmin = await prisma.user.create({
                 data: {

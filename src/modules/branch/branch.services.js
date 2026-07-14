@@ -118,7 +118,12 @@ export const getBranchesService = async (query, actor) => {
     orderBy: { createdAt: "desc" },
     include: {
       company: { select: { id: true, name: true } },
-      _count: { select: { users: true } }
+      _count: {
+        select: {
+          users: true,
+          teams: { where: { isDeleted: false } }
+        }
+      }
     }
   })
 
@@ -194,7 +199,12 @@ export const getBranchesPaginatedService = async (query, actor) => {
       orderBy: { createdAt: "desc" },
       include: {
         company: { select: { id: true, name: true } },
-        _count: { select: { users: true } }
+        _count: {
+          select: {
+            users: true,
+            teams: { where: { isDeleted: false } }
+          }
+        }
       },
       skip,
       take: parsedLimit,

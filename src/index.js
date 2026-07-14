@@ -26,6 +26,7 @@ import dailyBranchReportRoutes from "./modules/daily_branch_reports/dailyBranchR
 import userProfileRoutes from "./modules/userprofile/userprofile.routes.js"
 
 import courseRoutes from "./modules/course/course.routes.js"
+import teamRoutes from "./modules/team/team.routes.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
 dotenv.config({ quiet: true })
@@ -95,6 +96,7 @@ app.use("/api/daily-branch-reports", dailyBranchReportRoutes);
 app.use("/api/user-profile", userProfileRoutes);
 
 app.use("/api/courses", courseRoutes);
+app.use("/api/teams", teamRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════
