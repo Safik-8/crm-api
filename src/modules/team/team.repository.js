@@ -247,9 +247,24 @@ export const updateTeamAndLog = async (teamId, companyId, updates, oldValue, act
  */
 export const softDeleteTeamAndLog = async (teamId, companyId, actorId) => {
   return prisma.$transaction(async (tx) => {
+    const existingTeam = await tx.team.findUnique({
+      where: { id: teamId }
+    });
+    if (!existingTeam) {
+      throw new Error("Team not found");
+    }
+
+    const originalName = existingTeam.name;
+    const originalCode = existingTeam.code;
+
+    const archivedName = `${originalName} (archived-${existingTeam.id})`;
+    const archivedCode = `${originalCode}-archived-${existingTeam.id}`;
+
     const team = await tx.team.update({
       where: { id: teamId },
       data: {
+        name: archivedName,
+        code: archivedCode,
         isDeleted: true,
         updatedById: actorId
       }
@@ -261,7 +276,13 @@ export const softDeleteTeamAndLog = async (teamId, companyId, actorId) => {
         entityType: "TEAM",
         entityId: teamId,
         action: "DELETE",
-        newValue: { isDeleted: true },
+        newValue: {
+          isDeleted: true,
+          originalName,
+          originalCode,
+          archivedName,
+          archivedCode
+        },
         performedById: actorId
       }
     });

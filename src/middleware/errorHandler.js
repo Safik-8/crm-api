@@ -22,9 +22,23 @@ export const errorHandler = (err, req, res, next) => {
 
   // Prisma — unique constraint
   if (err.code === "P2002") {
-    const field = err.meta?.target?.[0] || "field"
-    const error = new ConflictError(`${field} already exists`, field)
-    return res.status(error.statusCode).json(error.toJSON())
+    let field = err.meta?.target?.[0] || "field";
+    
+    // Map composite database index targets to clean frontend fields
+    const targetStr = Array.isArray(err.meta?.target) ? err.meta.target.join(",") : String(err.meta?.target || "");
+    if (targetStr.includes("team_code") || targetStr.includes("code")) {
+      field = "code";
+    } else if (targetStr.includes("team_name") || targetStr.includes("name")) {
+      field = "name";
+    } else if (targetStr.includes("branch_id") || targetStr.includes("branchId")) {
+      field = "branchId";
+    } else if (targetStr.includes("company_id") || targetStr.includes("companyId")) {
+      field = "companyId";
+    }
+
+    const cleanFieldName = field === "code" ? "Team code" : field === "name" ? "Team name" : field;
+    const error = new ConflictError(`${cleanFieldName} already exists`, field);
+    return res.status(error.statusCode).json(error.toJSON());
   }
 
   // Prisma — record not found
