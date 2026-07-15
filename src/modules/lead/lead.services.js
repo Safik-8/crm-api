@@ -437,219 +437,608 @@ export const getLeadCommentsService = async (leadId, actor) => {
 // PASS 2: Only runs when every row passes — inserts all via createLeadService.
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor) => {
+// Helper function to find the closest matching string (for suggestions)
+const findClosestMatch = (str, list) => {
+  if (!str) return null;
+  let closest = null;
+  let minDistance = Infinity;
+  const getLevenshteinDistance = (a, b) => {
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= b.length; i++) {
+      for (let j = 1; j <= a.length; j++) {
+        if (b.charAt(i - 1) === a.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+          );
+        }
+      }
+    }
+    return matrix[b.length][a.length];
+  };
+  for (const item of list) {
+    const dist = getLevenshteinDistance(str.toLowerCase().trim(), item.toLowerCase().trim());
+    if (dist < minDistance && dist < 4) { // Only suggest if edit distance is small
+      minDistance = dist;
+      closest = item;
+    }
+  }
+  return closest;
+};
+
+export const importLeadsFromExcelService = async (
+  fileBuffer,
+  pipelineId,
+  actor,
+  commit = false,
+  fileName = "import.xlsx",
+  overrideCompanyId = null,
+  overrideBranchId = null
+) => {
   if (!fileBuffer) throw new BadRequestError("No file provided");
 
-  const pid = Number(pipelineId);
-  if (!Number.isInteger(pid) || pid < 1) throw new BadRequestError("pipelineId is required");
+  let companyId = overrideCompanyId || actor.companyId;
+  let branchId  = overrideBranchId || actor.branchId;
 
-  // ── Parse Excel ───────────────────────────────────────────────────────────
+  // Backend validation of selected scopes:
+  if (actor.primaryRole === "SUPER_ADMIN") {
+    if (!companyId || !branchId) {
+      throw new BadRequestError("Company and Branch scope must be selected.");
+    }
+    const resolvedBranch = await prisma.branch.findFirst({
+      where: { id: Number(branchId), companyId: Number(companyId), status: "ACTIVE" }
+    });
+    if (!resolvedBranch) {
+      throw new BadRequestError("Selected Branch does not belong to the selected Company or is inactive.");
+    }
+  } else if (actor.primaryRole === "COMPANY_ADMIN") {
+    companyId = actor.companyId;
+    if (!branchId) {
+      throw new BadRequestError("Branch scope must be selected.");
+    }
+    const resolvedBranch = await prisma.branch.findFirst({
+      where: { id: Number(branchId), companyId: Number(companyId), status: "ACTIVE" }
+    });
+    if (!resolvedBranch) {
+      throw new BadRequestError("Selected Branch does not belong to your company or is inactive.");
+    }
+  } else {
+    // BDE or Manager: force their own company and branch scope!
+    companyId = actor.companyId;
+    branchId = actor.branchId;
+  }
+
+  if (!branchId) {
+    throw new BadRequestError("Your account is not associated with a branch, and no active branch could be resolved. Cannot import leads.");
+  }
+
+  // ── Parse Excel/CSV ───────────────────────────────────────────────────────
   let rows;
   try {
     const workbook = XLSX.read(fileBuffer, { type: "buffer", cellDates: true });
     const sheet    = workbook.Sheets[workbook.SheetNames[0]];
     rows           = XLSX.utils.sheet_to_json(sheet, { defval: "" });
   } catch {
-    throw new BadRequestError("Failed to parse Excel file. Make sure it is a valid .xlsx / .xls file.");
+    throw new BadRequestError("Failed to parse file. Make sure it is a valid Excel (.xlsx) or CSV (.csv) file.");
   }
 
-  if (!rows || rows.length === 0) throw new BadRequestError("Excel file is empty or has no data rows");
+  if (!rows || rows.length === 0) throw new BadRequestError("File is empty or has no data rows");
 
-  // ── Column definitions ────────────────────────────────────────────────────
-  const ALLOWED_COLUMNS = [
-    { key: "name",         aliases: ["name"],                                                                            required: true  },
-    { key: "mobile",       aliases: ["phone number", "phonenumber", "phone", "mobile"],                                  required: true  },
-    { key: "date",         aliases: ["date"],                                                                            required: true  },
-    { key: "interestedFor",aliases: ["interested at", "interestedat", "interested_at", "interested for", "interested in", "interestedin"], required: false },
-    { key: "assignTo",     aliases: ["assign to", "assignto", "assigned to", "assignedto"],                              required: false }
+  // 1. Limit row count to protect performance (e.g. max 1000 rows)
+  if (rows.length > 1000) {
+    throw new BadRequestError("File exceeds the limit of 1000 rows per import run.");
+  }
+
+  // ── Column headers mapping ────────────────────────────────────────────────
+  const REQUIRED_HEADERS = [
+    { key: "name",   aliases: ["lead name", "name"] },
+    { key: "mobile", aliases: ["mobile number", "mobile", "phone number", "phone"] },
+    { key: "source", aliases: ["lead source", "source"] },
+    { key: "course", aliases: ["interested course/product", "interested course", "course", "product", "interested for"] }
   ];
 
-  const ALL_KNOWN_ALIASES = new Set(ALLOWED_COLUMNS.flatMap((c) => c.aliases));
+  const OPTIONAL_HEADERS = [
+    { key: "email",           aliases: ["email", "email address"] },
+    { key: "alternateMobile", aliases: ["alternate contact", "alternate mobile", "alternate contact number", "secondary mobile"] },
+    { key: "budget",          aliases: ["budget"] },
+    { key: "city",            aliases: ["city"] },
+    { key: "state",           aliases: ["state"] },
+    { key: "country",         aliases: ["country"] },
+    { key: "notes",           aliases: ["notes", "remark", "remarks"] },
+    { key: "assignedTo",      aliases: ["assigned to", "assignedto", "owner", "assignee"] }
+  ];
 
-  const findCol = (rowKeys, aliases) => {
-    const lower = rowKeys.map((k) => ({ orig: k, low: String(k).toLowerCase().trim() }));
-    for (const alias of aliases) {
-      const found = lower.find((k) => k.low === alias);
-      if (found) return found.orig;
+  const sheetKeys = Object.keys(rows[0]);
+  const normalizeHeader = (h) => String(h).toLowerCase().trim().replace(/[\s\-_]/g, " ");
+  
+  const findColumnKey = (headerList) => {
+    for (const h of headerList) {
+      const found = sheetKeys.find((k) => h.aliases.includes(normalizeHeader(k)));
+      if (found) return { fileKey: found, appKey: h.key };
     }
     return null;
   };
 
-  const sheetKeys     = Object.keys(rows[0]);
-  const meaningfulKeys = sheetKeys.filter((k) => !String(k).startsWith("__EMPTY") && String(k).trim() !== "");
+  // Verify required headers (role-aware)
+  const columnMapping = {};
+  const missingHeaders = [];
+  for (const h of REQUIRED_HEADERS) {
+    const matched = findColumnKey([h]);
+    if (matched) {
+      columnMapping[matched.appKey] = matched.fileKey;
+    } else {
+      missingHeaders.push(h.aliases[0]);
+    }
+  }
 
-  const unknownCols = meaningfulKeys.filter((k) => !ALL_KNOWN_ALIASES.has(String(k).toLowerCase().trim()));
-  if (unknownCols.length > 0) {
+  if (missingHeaders.length > 0) {
     throw new BadRequestError(
-      `Excel contains unknown column(s): "${unknownCols.join('", "')}". ` +
-      `Allowed columns are: Name, Phone Number, Date, Interested At, Assign To.`
+      `File is missing required column(s): ${missingHeaders.map((m) => `"${m}"`).join(", ")}`
     );
   }
 
-  const colName       = findCol(meaningfulKeys, ALLOWED_COLUMNS[0].aliases);
-  const colMobile     = findCol(meaningfulKeys, ALLOWED_COLUMNS[1].aliases);
-  const colDate       = findCol(meaningfulKeys, ALLOWED_COLUMNS[2].aliases);
-  const colInterested = findCol(meaningfulKeys, ALLOWED_COLUMNS[3].aliases);
-  const colAssignTo   = findCol(meaningfulKeys, ALLOWED_COLUMNS[4].aliases);
-
-  if (!colName)   throw new BadRequestError('Excel is missing required column "Name"');
-  if (!colMobile) throw new BadRequestError('Excel is missing required column "Phone Number"');
-  if (!colDate)   throw new BadRequestError('Excel is missing required column "Date"');
-
-  if (!actor.branchId) {
-    throw new BadRequestError("Your account is not associated with a branch. Cannot import leads.");
+  // Map optional headers
+  for (const h of OPTIONAL_HEADERS) {
+    const matched = findColumnKey([h]);
+    if (matched) {
+      columnMapping[matched.appKey] = matched.fileKey;
+    }
   }
 
-  const branchUsers = await findBranchUsers(actor.branchId);
-  const findUserByName = (rawName) => {
-    if (!rawName) return null;
-    const needle = String(rawName).toLowerCase().trim();
-    return branchUsers.find((u) => u.name.toLowerCase().trim() === needle) ?? null;
+  // ── Pre-fetch reference data to optimize performance ──────────────────────
+  const [allCompanies, allBranches, allUsers, sources, courses, existingLeads] = await Promise.all([
+    prisma.company.findMany({ where: { status: "ACTIVE" } }),
+    prisma.branch.findMany({ where: { status: "ACTIVE" } }),
+    prisma.user.findMany({
+      where: { status: "ACTIVE" },
+      include: { userRoles: { include: { role: true } } }
+    }),
+    prisma.leadSource.findMany({ where: { isActive: true } }),
+    prisma.course.findMany({ where: { status: "ACTIVE", isDeleted: false } }),
+    prisma.lead.findMany({
+      where: { isDeleted: false },
+      select: { id: true, mobile: true, email: true, alternateMobile: true, companyId: true }
+    })
+  ]);
+
+  const sourceNames = sources.map((s) => s.name);
+  const courseNames = courses.map((c) => c.name);
+
+  const getCompanyByCode = (code) => {
+    if (!code) return null;
+    return allCompanies.find((c) => c.code.toLowerCase().trim() === code.toLowerCase().trim());
   };
 
-  const parseExcelDate = (raw) => {
-    if (raw instanceof Date) {
-      if (Number.isNaN(raw.getTime())) return null;
-      const y  = raw.getFullYear();
-      const m  = String(raw.getMonth() + 1).padStart(2, "0");
-      const d  = String(raw.getDate()).padStart(2, "0");
-      return new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+  const getBranchByCode = (code) => {
+    if (!code) return null;
+    return allBranches.find((b) => b.code.toLowerCase().trim() === code.toLowerCase().trim());
+  };
+
+  // ── Row processing & validation ──────────────────────────────────────────
+  const previewRows = [];
+  const validPayloads = [];
+  const errorReport = [];
+
+  // Intra-file duplicate tracking sets (scoped per resolved company)
+  const fileMobiles = {};
+  const fileEmails = {};
+  const fileAltMobiles = {};
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNum = i + 2; // header is row 1
+    const rowErrors = [];
+    const fieldsInError = [];
+    const suggestions = {};
+
+    // Extracts & normalize fields
+    const getVal = (appKey) => {
+      const fileKey = columnMapping[appKey];
+      if (!fileKey) return "";
+      return String(row[fileKey] ?? "").trim();
+    };
+
+    const name = getVal("name");
+    const mobile = getVal("mobile").replace(/[\s\-().+]/g, "");
+    const sourceStr = getVal("source");
+    const courseStr = getVal("course");
+    const email = getVal("email").toLowerCase();
+    const alternateMobile = getVal("alternateMobile").replace(/[\s\-().+]/g, "");
+    const budgetStr = getVal("budget");
+    const city = getVal("city");
+    const state = getVal("state");
+    const country = getVal("country");
+    const notes = getVal("notes");
+    const assignedToVal = getVal("assignedTo");
+
+    // ── 1. Role-Based Company / Branch Scope Resolution ──
+    const rowCompanyId = companyId;
+    const rowBranchId  = branchId;
+
+    // ── 2. Validate Lead Name ──
+    if (!name) {
+      rowErrors.push("Lead Name is required");
+      fieldsInError.push("name");
+    } else if (name.length > 100) {
+      rowErrors.push("Lead Name must be 100 characters or less");
+      fieldsInError.push("name");
+    } else if (/\d/.test(name)) {
+      rowErrors.push("Lead Name must not contain numbers");
+      fieldsInError.push("name");
     }
 
-    const str = String(raw).trim();
-    if (!str) return null;
-
-    let m1 = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-    if (m1) {
-      const d = new Date(`${m1[1]}-${m1[2].padStart(2,"0")}-${m1[3].padStart(2,"0")}T00:00:00.000Z`);
-      return Number.isNaN(d.getTime()) ? null : d;
+    // ── 3. Validate Mobile Number ──
+    if (!mobile) {
+      rowErrors.push("Mobile Number is required");
+      fieldsInError.push("mobile");
+    } else if (!/^\d{10}$/.test(mobile)) {
+      rowErrors.push("Mobile Number must be exactly 10 digits");
+      fieldsInError.push("mobile");
+    } else if (/^(\d)\1{9}$/.test(mobile)) {
+      rowErrors.push("Mobile Number is not valid (all digits same)");
+      fieldsInError.push("mobile");
     }
 
-    let m2 = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-    if (m2) {
-      const d = new Date(`${m2[3]}-${m2[2].padStart(2,"0")}-${m2[1].padStart(2,"0")}T00:00:00.000Z`);
-      return Number.isNaN(d.getTime()) ? null : d;
-    }
-
-    let m3 = str.match(/^(\d{1,2})[-\s]([A-Za-z]{3,9})[-\s](\d{4})$/);
-    if (m3) {
-      const d = new Date(`${m3[1]} ${m3[2]} ${m3[3]}`);
-      if (!Number.isNaN(d.getTime())) {
-        const y  = d.getFullYear();
-        const mo = String(d.getMonth() + 1).padStart(2, "0");
-        const dy = String(d.getDate()).padStart(2, "0");
-        return new Date(`${y}-${mo}-${dy}T00:00:00.000Z`);
+    // ── 4. Validate Source under resolved company scope ──
+    let matchedSource = null;
+    if (!sourceStr) {
+      rowErrors.push("Lead Source is required");
+      fieldsInError.push("source");
+    } else if (rowCompanyId) {
+      matchedSource = sources.find(
+        (s) =>
+          (s.name.toLowerCase().trim() === sourceStr.toLowerCase().trim() || String(s.id) === sourceStr) &&
+          (s.companyId === null || s.companyId === rowCompanyId)
+      );
+      if (!matchedSource) {
+        rowErrors.push(`Lead Source "${sourceStr}" does not exist or is inactive for the resolved company`);
+        fieldsInError.push("source");
+        const closest = findClosestMatch(sourceStr, sourceNames);
+        if (closest) suggestions.source = closest;
       }
     }
 
-    return null;
-  };
-
-  const existingMobiles = await findExistingMobiles(actor.companyId);
-
-  // ── PASS 1 — Validate ALL rows ────────────────────────────────────────────
-  const normalize        = (v) => String(v || "").trim();
-  const validatedRows    = [];
-  const validationErrors = [];
-  const seenInFile       = new Set();
-
-  for (let i = 0; i < rows.length; i++) {
-    const row      = rows[i];
-    const rowNum   = i + 2;
-    const rowErrors = [];
-
-    const rawName      = normalize(row[colName]);
-    const rawDate      = row[colDate];
-    const rawInterested = colInterested ? normalize(row[colInterested]) : "";
-    const rawAssignTo   = colAssignTo   ? normalize(row[colAssignTo])   : "";
-
-    if (!rawName) rowErrors.push("Name is required");
-    else if (rawName.length > 100) rowErrors.push("Name must be 100 characters or less");
-    else if (/\d/.test(rawName)) rowErrors.push("Name must not contain numbers");
-
-    const rawMobileStr = (() => {
-      const v = row[colMobile];
-      if (v === "" || v === null || v === undefined) return "";
-      if (typeof v === "number") return Math.round(v).toString();
-      return String(v).trim();
-    })();
-
-    const mobileClean = rawMobileStr.replace(/[\s\-().+]/g, "");
-
-    if (!mobileClean) rowErrors.push("Phone Number is required");
-    else if (!/^\d+$/.test(mobileClean)) rowErrors.push(`Phone Number must contain digits only — got "${rawMobileStr}"`);
-    else if (mobileClean.length !== 10) rowErrors.push(`Phone Number must be exactly 10 digits — got ${mobileClean.length} digit(s)`);
-    else if (/^(\d)\1{9}$/.test(mobileClean)) rowErrors.push(`Phone Number "${mobileClean}" is not valid — all digits are the same`);
-    else if (existingMobiles.has(mobileClean)) rowErrors.push(`Phone Number "${mobileClean}" is already registered in the system`);
-    else if (seenInFile.has(mobileClean)) rowErrors.push(`Phone Number "${mobileClean}" appears more than once in this Excel file`);
-    else seenInFile.add(mobileClean);
-
-    let parsedDate = null;
-    if (!rawDate && rawDate !== 0) rowErrors.push("Date is required");
-    else {
-      parsedDate = parseExcelDate(rawDate);
-      if (!parsedDate) rowErrors.push(`Date "${rawDate}" is not a valid date. Use formats: YYYY-MM-DD, DD-MM-YYYY, or DD/MM/YYYY.`);
+    // ── 5. Validate Course under resolved company scope ──
+    let matchedCourse = null;
+    if (!courseStr) {
+      rowErrors.push("Interested Course/Product is required");
+      fieldsInError.push("course");
+    } else if (rowCompanyId) {
+      matchedCourse = courses.find(
+        (c) =>
+          (c.name.toLowerCase().trim() === courseStr.toLowerCase().trim() || String(c.id) === courseStr) &&
+          c.companyId === rowCompanyId
+      );
+      if (!matchedCourse) {
+        rowErrors.push(`Course "${courseStr}" does not exist or is inactive for the resolved company`);
+        fieldsInError.push("course");
+        const closest = findClosestMatch(courseStr, courseNames);
+        if (closest) suggestions.course = closest;
+      }
     }
 
-    if (rawInterested && rawInterested.length > 200) rowErrors.push("Interested At must be 200 characters or less");
-
-    let assignedToId = null;
-    if (rawAssignTo) {
-      const matchedUser = findUserByName(rawAssignTo);
-      if (!matchedUser) rowErrors.push(`Assign To: "${rawAssignTo}" does not match any active user in your branch.`);
-      else assignedToId = matchedUser.id;
+    // ── 6. Validate Email (optional, format check) ──
+    if (email) {
+      if (email.length > 255) {
+        rowErrors.push("Email must be 255 characters or less");
+        fieldsInError.push("email");
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        rowErrors.push("Email address is not in a valid format");
+        fieldsInError.push("email");
+      }
     }
 
-    if (rowErrors.length > 0) {
-      validationErrors.push({ row: rowNum, data: { name: rawName, mobile: rawMobileStr }, errors: rowErrors });
+    // ── 7. Validate Alternate Mobile (optional, format check) ──
+    if (alternateMobile) {
+      if (!/^\d{10}$/.test(alternateMobile)) {
+        rowErrors.push("Alternate Contact must be exactly 10 digits");
+        fieldsInError.push("alternateMobile");
+      } else if (/^(\d)\1{9}$/.test(alternateMobile)) {
+        rowErrors.push("Alternate Contact is not valid (all digits same)");
+        fieldsInError.push("alternateMobile");
+      } else if (alternateMobile === mobile) {
+        rowErrors.push("Alternate Contact must not be identical to primary Mobile Number");
+        fieldsInError.push("alternateMobile");
+      }
+    }
+
+    // ── 8. Validate Budget (optional, decimal check) ──
+    let budget = null;
+    if (budgetStr) {
+      const parsedBudget = parseFloat(budgetStr);
+      if (Number.isNaN(parsedBudget) || parsedBudget < 0) {
+        rowErrors.push("Budget must be a non-negative number");
+        fieldsInError.push("budget");
+      } else {
+        budget = parsedBudget;
+      }
+    }
+
+    // ── 9. Trim & check City/State/Country ──
+    if (city && city.length > 100) {
+      rowErrors.push("City must be 100 characters or less");
+      fieldsInError.push("city");
+    }
+    if (state && state.length > 100) {
+      rowErrors.push("State must be 100 characters or less");
+      fieldsInError.push("state");
+    }
+    if (country && country.length > 100) {
+      rowErrors.push("Country must be 100 characters or less");
+      fieldsInError.push("country");
+    }
+
+    // ── 10. Notes check ──
+    if (notes && notes.length > 1000) {
+      rowErrors.push("Notes must be 1000 characters or less");
+      fieldsInError.push("notes");
+    }
+
+    // ── 11. Optional "Assigned To" (lead owner) Validation ──
+    let resolvedAssignedToId = null;
+    if (assignedToVal && rowCompanyId) {
+      const targetUser = allUsers.find(
+        (u) =>
+          u.email.toLowerCase().trim() === assignedToVal.toLowerCase().trim() ||
+          (u.employeeId && u.employeeId.toLowerCase().trim() === assignedToVal.toLowerCase().trim())
+      );
+
+      if (!targetUser) {
+        rowErrors.push(`Assigned user "${assignedToVal}" does not exist or is inactive`);
+        fieldsInError.push("assignedTo");
+      } else if (targetUser.companyId !== rowCompanyId) {
+        rowErrors.push(`User "${assignedToVal}" does not belong to the resolved Company`);
+        fieldsInError.push("assignedTo");
+      } else if (rowBranchId && targetUser.branchId !== rowBranchId) {
+        rowErrors.push(`User "${assignedToVal}" does not belong to the resolved Branch`);
+        fieldsInError.push("assignedTo");
+      } else {
+        resolvedAssignedToId = targetUser.id;
+      }
+    }
+
+    // ── 12. Duplicate Detection (scoped per resolved company) ──
+    let isDuplicateRow = false;
+    let duplicateReason = "";
+
+    if (rowErrors.length === 0 && rowCompanyId) {
+      // Initialize intra-file tracking sets for this company if not existing
+      if (!fileMobiles[rowCompanyId]) fileMobiles[rowCompanyId] = new Set();
+      if (!fileEmails[rowCompanyId]) fileEmails[rowCompanyId] = new Set();
+      if (!fileAltMobiles[rowCompanyId]) fileAltMobiles[rowCompanyId] = new Set();
+
+      // Check database duplicates within company scope
+      const dbDupeMobile = existingLeads.some((l) => l.mobile === mobile && l.companyId === rowCompanyId);
+      const dbDupeEmail = email && existingLeads.some((l) => l.email && l.email.toLowerCase().trim() === email.toLowerCase().trim() && l.companyId === rowCompanyId);
+      const dbDupeAlt = alternateMobile && existingLeads.some((l) => l.alternateMobile === alternateMobile && l.companyId === rowCompanyId);
+
+      if (mobile && dbDupeMobile) {
+        isDuplicateRow = true;
+        duplicateReason = `Mobile number "${mobile}" already exists in the system under this company`;
+      } else if (email && dbDupeEmail) {
+        isDuplicateRow = true;
+        duplicateReason = `Email "${email}" already exists in the system under this company`;
+      } else if (alternateMobile && dbDupeAlt) {
+        isDuplicateRow = true;
+        duplicateReason = `Alternate contact "${alternateMobile}" already exists in the system under this company`;
+      }
+
+      // Check intra-file duplicates
+      if (!isDuplicateRow) {
+        if (mobile && fileMobiles[rowCompanyId].has(mobile)) {
+          isDuplicateRow = true;
+          duplicateReason = `Duplicate mobile number "${mobile}" found in this file for this company`;
+        } else if (email && fileEmails[rowCompanyId].has(email)) {
+          isDuplicateRow = true;
+          duplicateReason = `Duplicate email "${email}" found in this file for this company`;
+        } else if (alternateMobile && fileAltMobiles[rowCompanyId].has(alternateMobile)) {
+          isDuplicateRow = true;
+          duplicateReason = `Duplicate alternate contact "${alternateMobile}" found in this file for this company`;
+        }
+      }
+
+      // Track inside current file sets for next rows
+      if (mobile) fileMobiles[rowCompanyId].add(mobile);
+      if (email) fileEmails[rowCompanyId].add(email);
+      if (alternateMobile) fileAltMobiles[rowCompanyId].add(alternateMobile);
+    }
+
+    const hasError = rowErrors.length > 0;
+    const isSkipped = hasError || isDuplicateRow;
+
+    if (isSkipped) {
+      errorReport.push({
+        row: rowNum,
+        name,
+        mobile: mobile || getVal("mobile"),
+        type: hasError ? "validation" : "duplicate",
+        reason: hasError ? rowErrors.join(", ") : duplicateReason,
+        fields: fieldsInError,
+        suggestions: Object.keys(suggestions).length > 0 ? suggestions : undefined
+      });
     } else {
-      validatedRows.push({
+      validPayloads.push({
         rowNum,
         payload: {
-          pipelineId:    pid,
-          name:          rawName,
-          mobile:        mobileClean,
-          date:          parsedDate.toISOString(),
-          interestedFor: rawInterested || undefined,
-          assignedToId
+          companyId: rowCompanyId,
+          branchId: rowBranchId,
+          pipelineId: pipelineId ? Number(pipelineId) : null,
+          name,
+          mobile,
+          email: email || null,
+          alternateMobile: alternateMobile || null,
+          sourceId: matchedSource.id,
+          courseId: matchedCourse.id,
+          priority: "MEDIUM",
+          budget,
+          city: city || null,
+          state: state || null,
+          country: country || null,
+          notes: notes || null,
+          assignedToId: resolvedAssignedToId || null
         }
+      });
+    }
+
+    // Keep first 10 rows for preview list
+    if (i < 10) {
+      previewRows.push({
+        rowNum,
+        name,
+        mobile: mobile || getVal("mobile"),
+        source: sourceStr,
+        course: courseStr,
+        email,
+        status: hasError ? "INVALID" : isDuplicateRow ? "DUPLICATE" : "VALID",
+        errors: hasError ? rowErrors : isDuplicateRow ? [duplicateReason] : []
       });
     }
   }
 
-  // Abort entirely if any row failed
-  if (validationErrors.length > 0) {
+  const successCount = validPayloads.length;
+  const duplicateCount = errorReport.filter((e) => e.type === "duplicate").length;
+  const failureCount = errorReport.filter((e) => e.type === "validation").length;
+
+  // If preview mode, return preview stats and row samples
+  if (!commit) {
     return {
-      total:     rows.length,
-      created:   0,
-      skipped:   validationErrors.length,
-      succeeded: [],
-      failed:    validationErrors,
-      message:   `Import aborted — ${validationErrors.length} row(s) have errors. Fix all errors and re-upload. No data was saved.`
+      totalRows: rows.length,
+      successCount,
+      failureCount,
+      duplicateCount,
+      previewRows,
+      errorReport: errorReport.slice(0, 100),
+      message: `Preview generated. ${successCount} rows valid, ${duplicateCount} duplicate(s), ${failureCount} failure(s).`
     };
   }
 
-  // ── PASS 2 — Insert all valid rows ────────────────────────────────────────
-  const succeeded    = [];
-  const insertErrors = [];
+  // ── Commit Phase: Atomic All-or-Nothing Check ──
+  const createdLeads = [];
+  
+  if (errorReport.length > 0) {
+    // Write entry to LeadImportLog table as FAILED
+    const importLog = await prisma.leadImportLog.create({
+      data: {
+        companyId,
+        branchId,
+        pipelineId: pipelineId ? Number(pipelineId) : null,
+        fileName,
+        totalRows: rows.length,
+        successCount: 0,
+        failureCount,
+        duplicateCount,
+        status: "FAILED",
+        errorReport: errorReport,
+        createdById: actor.id
+      }
+    });
 
-  for (const { rowNum, payload } of validatedRows) {
-    try {
-      const lead = await createLeadService(payload, actor);
-      succeeded.push({ row: rowNum, leadId: lead.id, name: lead.name, mobile: lead.mobile });
-    } catch (err) {
-      const messages = err.errors
-        ? err.errors.map((e) => e.message)
-        : [err.message ?? "Unknown error"];
-      insertErrors.push({ row: rowNum, data: { name: payload.name, mobile: payload.mobile }, errors: messages });
-    }
+    return {
+      id: importLog.id,
+      fileName,
+      totalRows: rows.length,
+      successCount: 0,
+      failureCount,
+      duplicateCount,
+      status: "FAILED",
+      errorReport: errorReport,
+      message: `Import rejected — ${errorReport.length} row(s) contain errors or duplicates. Fix all errors and re-upload. No data was saved.`
+    };
   }
 
+  // If 100% valid, proceed with creation in a single transaction
+  if (successCount > 0) {
+    await prisma.$transaction(async (tx) => {
+      for (const { payload } of validPayloads) {
+        const lead = await createLeadService(payload, actor);
+        createdLeads.push(lead.id);
+      }
+    });
+  }
+
+  // Record operation to LeadImportLog table as COMPLETED
+  const importLog = await prisma.leadImportLog.create({
+    data: {
+      companyId,
+      branchId,
+      pipelineId: pipelineId ? Number(pipelineId) : null,
+      fileName,
+      totalRows: rows.length,
+      successCount,
+      failureCount: 0,
+      duplicateCount: 0,
+      status: "COMPLETED",
+      errorReport: [],
+      createdById: actor.id
+    }
+  });
+
   return {
-    total:     rows.length,
-    created:   succeeded.length,
-    skipped:   insertErrors.length,
-    succeeded,
-    failed:    insertErrors
+    id: importLog.id,
+    fileName,
+    totalRows: rows.length,
+    successCount,
+    failureCount: 0,
+    duplicateCount: 0,
+    status: "COMPLETED",
+    message: `Import complete. ${successCount} lead(s) successfully created.`
   };
 };
+
+export const getLeadImportLogsService = async (actor) => {
+  const companyId = actor.companyId;
+  const branchId  = actor.branchId;
+  if (!branchId) throw new BadRequestError("No branch scope associated with your account");
+
+  return prisma.leadImportLog.findMany({
+    where: { companyId, branchId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      createdBy: { select: { id: true, name: true } }
+    }
+  });
+};
+
+export const getImportErrorsCsvService = async (logId, actor) => {
+  const id = Number(logId);
+  if (!id) throw new BadRequestError("Invalid log ID");
+
+  const log = await prisma.leadImportLog.findUnique({
+    where: { id }
+  });
+
+  if (!log) throw new NotFoundError("Import Log");
+
+  if (log.companyId !== actor.companyId || log.branchId !== actor.branchId) {
+    throw new ForbiddenError("You do not have access to this import log");
+  }
+
+  const errors = Array.isArray(log.errorReport) ? log.errorReport : [];
+
+  let csv = "Row Number,Lead Name,Mobile Number,Type,Reason,Suggested Correction\n";
+  for (const err of errors) {
+    const rowNum = err.row || "";
+    const name = `"${(err.name || "").replace(/"/g, '""')}"`;
+    const mobile = `"${(err.mobile || "").replace(/"/g, '""')}"`;
+    const type = `"${(err.type || "").replace(/"/g, '""')}"`;
+    const reason = `"${(err.reason || "").replace(/"/g, '""')}"`;
+
+    let suggestion = "";
+    if (err.suggestions) {
+      suggestion = Object.entries(err.suggestions)
+        .map(([k, v]) => `${k}: Use "${v}"`)
+        .join("; ");
+    }
+    suggestion = `"${suggestion.replace(/"/g, '""')}"`;
+
+    csv += `${rowNum},${name},${mobile},${type},${reason},${suggestion}\n`;
+  }
+
+  return csv;
+};
+
+

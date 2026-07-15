@@ -14,7 +14,9 @@ import {
   updateLeadStage,
   addLeadComment,
   getLeadComments,
-  importLeadsFromExcel
+  importLeadsFromExcel,
+  getLeadImportLogs,
+  downloadImportErrors
 } from "./lead.controllers.js";
 import {
   createLeadSchema,
@@ -33,16 +35,17 @@ router.use(authenticate);
 router.get("/branch-users", hasPermission("LEAD", "canCreate"), getBranchUsersForLead);
 router.get("/form-data",    hasPermission("LEAD", "canCreate"), getLeadFormData);
 
+// ── Bulk Excel import & logs ─────────────────────────────────────────────────
+router.post("/import-excel",       hasPermission("LEAD", "canCreate"), importLeadsFromExcel);
+router.get( "/import-logs",        hasPermission("LEAD", "canCreate"), getLeadImportLogs);
+router.get( "/import-logs/:id/errors", hasPermission("LEAD", "canCreate"), downloadImportErrors);
+
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 router.post(  "/",    hasPermission("LEAD", "canCreate"), validateBody(createLeadSchema), createLead);
 router.get(   "/",    hasPermission("LEAD", "canView"),   getLeads);
 router.get(   "/:id", hasPermission("LEAD", "canView"),   getLeadById);
 router.put(   "/:id", hasPermission("LEAD", "canEdit"),   validateBody(updateLeadSchema), updateLead);
 router.delete("/:id", hasPermission("LEAD", "canDelete"), deleteLead);
-
-// ── Bulk Excel import ─────────────────────────────────────────────────────────
-router.post("/import-excel", hasPermission("LEAD", "canCreate"), importLeadsFromExcel);
-
 // ── Kanban stage update (drag-drop) ──────────────────────────────────────────
 router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), validateBody(updateLeadStageSchema), updateLeadStage);
 
