@@ -537,11 +537,11 @@ export const importLeadsFromExcelService = async (
   const REQUIRED_HEADERS = [
     { key: "name",   aliases: ["lead name", "name"] },
     { key: "mobile", aliases: ["mobile number", "mobile", "phone number", "phone"] },
-    { key: "source", aliases: ["lead source", "source"] },
-    { key: "course", aliases: ["interested course/product", "interested course", "course", "product", "interested for"] }
+    { key: "source", aliases: ["lead source", "source"] }
   ];
 
   const OPTIONAL_HEADERS = [
+    { key: "course",          aliases: ["interested course/product", "interested course", "course", "product", "interested for"] },
     { key: "email",           aliases: ["email", "email address"] },
     { key: "alternateMobile", aliases: ["alternate contact", "alternate mobile", "alternate contact number", "secondary mobile"] },
     { key: "budget",          aliases: ["budget"] },
@@ -704,10 +704,7 @@ export const importLeadsFromExcelService = async (
 
     // ── 5. Validate Course under resolved company scope ──
     let matchedCourse = null;
-    if (!courseStr) {
-      rowErrors.push("Interested Course/Product is required");
-      fieldsInError.push("course");
-    } else if (rowCompanyId) {
+    if (courseStr && rowCompanyId) {
       matchedCourse = courses.find(
         (c) =>
           (c.name.toLowerCase().trim() === courseStr.toLowerCase().trim() || String(c.id) === courseStr) &&
@@ -872,7 +869,7 @@ export const importLeadsFromExcelService = async (
           email: email || null,
           alternateMobile: alternateMobile || null,
           sourceId: matchedSource.id,
-          courseId: matchedCourse.id,
+          courseId: matchedCourse ? matchedCourse.id : null,
           priority: "MEDIUM",
           budget,
           city: city || null,
