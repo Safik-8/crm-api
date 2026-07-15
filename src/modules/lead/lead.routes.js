@@ -1,41 +1,53 @@
-import { Router } from "express"
-import { authenticate } from "../../middleware/Authenticate.js"
-import { hasPermission } from "../../middleware/hasPermission.js"
+// src/modules/lead/lead.routes.js
+
+import { Router } from "express";
+import { authenticate } from "../../middleware/Authenticate.js";
+import { hasPermission } from "../../middleware/hasPermission.js";
 import {
-  addLeadComment,
-  createLead,
-  deleteLead,
   getBranchUsersForLead,
-  getLeadComments,
+  getLeadFormData,
+  createLead,
   getLeads,
-  importLeadsFromExcel,
+  getLeadById,
   updateLead,
-  updateLeadStage
-} from "./lead.controller.js"
+  deleteLead,
+  updateLeadStage,
+  addLeadComment,
+  getLeadComments,
+  importLeadsFromExcel
+} from "./lead.controllers.js";
+import {
+  createLeadSchema,
+  updateLeadSchema,
+  updateLeadStageSchema,
+  addCommentSchema,
+  validateBody
+} from "./lead.validation.js";
 
-const router = Router()
+const router = Router();
 
-router.use(authenticate)
+// All routes require authentication
+router.use(authenticate);
 
-// Dropdown — must be before /:id routes to avoid param conflict
-router.get("/branch-users", hasPermission("LEAD", "canCreate"), getBranchUsersForLead)
+// ── Dropdown helpers — must be registered BEFORE /:id routes ─────────────────
+router.get("/branch-users", hasPermission("LEAD", "canCreate"), getBranchUsersForLead);
+router.get("/form-data",    hasPermission("LEAD", "canCreate"), getLeadFormData);
 
-router.post("/", hasPermission("LEAD", "canCreate"), createLead)
-router.get("/", hasPermission("LEAD", "canView"), getLeads)
+// ── CRUD ──────────────────────────────────────────────────────────────────────
+router.post(  "/",    hasPermission("LEAD", "canCreate"), validateBody(createLeadSchema), createLead);
+router.get(   "/",    hasPermission("LEAD", "canView"),   getLeads);
+router.get(   "/:id", hasPermission("LEAD", "canView"),   getLeadById);
+router.put(   "/:id", hasPermission("LEAD", "canEdit"),   validateBody(updateLeadSchema), updateLead);
+router.delete("/:id", hasPermission("LEAD", "canDelete"), deleteLead);
 
-// Bulk import from Excel
-router.post("/import-excel", hasPermission("LEAD", "canCreate"), importLeadsFromExcel)
+// ── Bulk Excel import ─────────────────────────────────────────────────────────
+router.post("/import-excel", hasPermission("LEAD", "canCreate"), importLeadsFromExcel);
 
-// Update / delete lead — check proper edit/delete permissions
-router.put("/:id", hasPermission("LEAD", "canEdit"), updateLead)
-router.delete("/:id", hasPermission("LEAD", "canDelete"), deleteLead)
+// ── Kanban stage update (drag-drop) ──────────────────────────────────────────
+router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), validateBody(updateLeadStageSchema), updateLeadStage);
 
-// stage updates (move card between columns)
-router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), updateLeadStage)
+// ── Comments ──────────────────────────────────────────────────────────────────
+router.post("/:id/comments", hasPermission("ACTIVITY", "canCreate"), validateBody(addCommentSchema), addLeadComment);
+router.get( "/:id/comments", hasPermission("ACTIVITY", "canView"),   getLeadComments);
 
-// comments
-router.post("/:id/comments", hasPermission("ACTIVITY", "canCreate"), addLeadComment)
-router.get("/:id/comments", hasPermission("ACTIVITY", "canView"), getLeadComments)
-
-export default router
-
+export default router;

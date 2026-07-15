@@ -35,6 +35,9 @@ model Company {
   courses        Course[]        // NEW-S2
   userProfiles   UserProfile[]   // NEW-S2
   auditLogs      AuditLog[]      // NEW-S2
+  leads          Lead[]
+  leadStatuses   LeadStatus[]
+  leadImportLogs LeadImportLog[]
 
   @@map("companies")
 }
@@ -57,6 +60,8 @@ model Branch {
   dailyBranchReports DailyBranchReport[]
   teams              Team[]              // NEW-S2
   userProfiles       UserProfile[]       // NEW-S2
+  leads              Lead[]
+  leadImportLogs     LeadImportLog[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -126,6 +131,13 @@ model User {
   createdCourses      Course[]       @relation("CourseCreatedBy")
   updatedCourses      Course[]       @relation("CourseUpdatedBy")
   auditLogsPerformed  AuditLog[]     @relation("AuditPerformedBy")
+
+  // ── Sprint 3 relations ──
+  updatedLeads      Lead[]          @relation("UserUpdatedLeads")
+  deletedLeads      Lead[]          @relation("UserDeletedLeads")
+  leadNoteCreated   LeadNote[]      @relation("LeadNoteCreatedBy")
+  leadNoteUpdated   LeadNote[]      @relation("LeadNoteUpdatedBy")
+  leadImportLogs    LeadImportLog[] @relation("LeadImportLogCreatedBy")
 
   @@index([companyId])
   @@index([branchId])
@@ -233,16 +245,20 @@ model PasswordReset {
 // ══════════════════════════════════════
 
 model LeadSource {
-  id        Int       @id @default(autoincrement())
-  companyId Int?      @map("company_id")
-  name      String
-  isActive  Boolean   @default(true) @map("is_active")
-  deletedAt DateTime? @map("deleted_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id          Int       @id @default(autoincrement())
+  companyId   Int?      @map("company_id")   // null = global system source
+  name        String
+  description String?                        // FIX: Task 2.3 — was missing
+  isActive    Boolean   @default(true) @map("is_active")
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")  // FIX: was missing
 
   company Company? @relation(fields: [companyId], references: [id])
+  leads   Lead[]
 
   @@unique([companyId, name])
+  @@index([companyId])
   @@map("lead_sources")
 }
 
@@ -261,10 +277,11 @@ model Pipeline {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  branch  Branch          @relation(fields: [branchId], references: [id])
-  company Company         @relation(fields: [companyId], references: [id])
-  stages  PipelineStage[]
-  leads   Lead[]
+  branch         Branch          @relation(fields: [branchId], references: [id])
+  company        Company         @relation(fields: [companyId], references: [id])
+  stages         PipelineStage[]
+  leads          Lead[]
+  leadImportLogs LeadImportLog[]
 
   @@index([branchId])
   @@index([companyId])
@@ -310,36 +327,181 @@ model PipelineStage {
 
 model Lead {
   id               Int       @id @default(autoincrement())
-  pipelineId       Int       @map("pipeline_id")
-  stageId          Int       @map("stage_id")
+
+  // ── TENANT SCOPE (direct — no pipeline join required) ──────────
+  companyId        Int?      @map("company_id")
+  branchId         Int?      @map("branch_id")
+
+  // ── PIPELINE (optional — Kanban view only) ──────────────────────
+  // A lead can exist without a pipeline (list view entry)
+  // A lead enters a pipeline when added to Kanban board
+  pipelineId       Int?      @map("pipeline_id")
+  stageId          Int?      @map("stage_id")
   previousStageId  Int?      @map("previous_stage_id")
   stageChangedById Int?      @map("stage_changed_by_id")
   stageChangedAt   DateTime? @map("stage_changed_at")
+
+  // ── MANDATORY RELATIONS ─────────────────────────────────────────
+  sourceId         Int?      @map("source_id")   // mandatory at app layer
+  courseId         Int?      @map("course_id")    // mandatory at app layer
+  statusId         Int?      @map("status_id")    // mandatory at app layer; nullable for migration safety
+
+  // ── ASSIGNMENT ──────────────────────────────────────────────────
   assignedToId     Int?      @map("assigned_to")
+  teamId           Int?      @map("team_id")
+
+  // ── MANDATORY CONTACT ───────────────────────────────────────────
   name             String
   mobile           String
-  date             DateTime
-  interestedFor    String?   @map("interested_for")
+
+  // ── OPTIONAL CONTACT ────────────────────────────────────────────
+  email            String?
+  alternateMobile  String?   @map("alternate_mobile")
+
+  // ── LEAD DETAILS ────────────────────────────────────────────────
+  priority         String    @default("MEDIUM")   // "HIGH" | "MEDIUM" | "LOW"
+  budget           Decimal?  @db.Decimal(10, 2)
+  city             String?
+  state            String?
+  country          String?
+  notes            String?   @db.Text             // quick single-field note on lead
+
+  // ── DUPLICATE TRACKING (Task 7) ─────────────────────────────────
+  isDuplicate      Boolean   @default(false) @map("is_duplicate")
+  duplicateOfId    Int?      @map("duplicate_of_id")  // self-reference to original lead
+
+  // ── BACKWARD COMPAT ─────────────────────────────────────────────
+  date             DateTime  @default(now())
+  interestedFor    String?   @map("interested_for")  // DEPRECATED: kept for Kanban, use courseId
+
+  // ── SOFT DELETE (Task 1.6) ──────────────────────────────────────
   isDeleted        Boolean   @default(false) @map("is_deleted")
+  deletedById      Int?      @map("deleted_by")
+  deletedAt        DateTime? @map("deleted_at")
+
+  // ── AUDIT ───────────────────────────────────────────────────────
   createdById      Int       @map("created_by")
   updatedById      Int?      @map("updated_by")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  pipeline       Pipeline      @relation(fields: [pipelineId], references: [id])
-  stage          Stage         @relation(fields: [stageId], references: [id])
+  // ── RELATIONS ───────────────────────────────────────────────────
+  company        Company?      @relation(fields: [companyId], references: [id])
+  branch         Branch?       @relation(fields: [branchId], references: [id])
+  pipeline       Pipeline?     @relation(fields: [pipelineId], references: [id])
+  stage          Stage?        @relation(fields: [stageId], references: [id])
   previousStage  Stage?        @relation("LeadPreviousStage", fields: [previousStageId], references: [id])
   stageChangedBy User?         @relation("UserStageChangedLeads", fields: [stageChangedById], references: [id])
-  createdBy      User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
+  source         LeadSource?   @relation(fields: [sourceId], references: [id])
+  course         Course?       @relation(fields: [courseId], references: [id])
+  status         LeadStatus?   @relation(fields: [statusId], references: [id])
   assignedTo     User?         @relation("UserAssignedLeads", fields: [assignedToId], references: [id])
+  team           Team?         @relation(fields: [teamId], references: [id])
+  duplicateOf    Lead?         @relation("LeadDuplicate", fields: [duplicateOfId], references: [id])
+  duplicates     Lead[]        @relation("LeadDuplicate")
+  createdBy      User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
+  updatedBy      User?         @relation("UserUpdatedLeads", fields: [updatedById], references: [id])
+  deletedBy      User?         @relation("UserDeletedLeads", fields: [deletedById], references: [id])
   comments       LeadComment[]
+  leadNotes      LeadNote[]
 
+  // ── INDEXES ─────────────────────────────────────────────────────
+  @@index([companyId])
+  @@index([branchId])
   @@index([pipelineId])
   @@index([stageId])
   @@index([previousStageId])
+  @@index([sourceId])
+  @@index([courseId])
+  @@index([statusId])
   @@index([assignedToId])
+  @@index([teamId])
+  @@index([mobile])                    // fast single-field lookup
+  @@index([email])                     // fast email duplicate detection
+  @@index([alternateMobile])           // FIX: Task 7.4 alternate contact dup detection
+  @@index([companyId, mobile])         // compound: duplicate check within company scope
+  @@index([isDuplicate])               // filter duplicates fast
+  @@index([createdAt])                 // date range filter
   @@map("leads")
 }
+
+// ══════════════════════════════════════
+// LEAD STATUS MASTER
+// ══════════════════════════════════════
+
+model LeadStatus {
+  id            Int      @id @default(autoincrement())
+  companyId     Int?     @map("company_id")       // null = global system status
+  name          String                             // "New", "Open", "Contacted"
+  code          String                             // "NEW", "OPEN", "CONTACTED"
+  displayColor  String   @map("display_color")    // hex: "#3b82f6"
+  sequenceOrder Int      @default(0) @map("sequence_order")
+  isDefault     Boolean  @default(false) @map("is_default")  // auto-assigned on lead create
+  isSystem      Boolean  @default(false) @map("is_system")   // prevents deletion
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  company Company? @relation(fields: [companyId], references: [id])
+  leads   Lead[]
+
+  @@unique([companyId, code])   // same code allowed per-company, no cross-company collision
+  @@index([companyId])
+  @@map("lead_statuses")
+}
+
+// ══════════════════════════════════════
+// LEAD NOTES
+// ══════════════════════════════════════
+
+model LeadNote {
+  id          Int      @id @default(autoincrement())
+  leadId      Int      @map("lead_id")
+  note        String   @db.Text
+  isDeleted   Boolean  @default(false) @map("is_deleted")
+  createdById Int      @map("created_by")
+  updatedById Int?     @map("updated_by")    // FIX: who last edited this note
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  lead      Lead  @relation(fields: [leadId], references: [id])
+  createdBy User  @relation("LeadNoteCreatedBy", fields: [createdById], references: [id])
+  updatedBy User? @relation("LeadNoteUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([leadId])
+  @@map("lead_notes")
+}
+
+// ══════════════════════════════════════
+// LEAD IMPORT LOGS
+// ══════════════════════════════════════
+
+model LeadImportLog {
+  id             Int      @id @default(autoincrement())
+  companyId      Int      @map("company_id")
+  branchId       Int      @map("branch_id")
+  pipelineId     Int?     @map("pipeline_id")   // optional: set when imported via Kanban
+  fileName       String   @map("file_name")
+  totalRows      Int      @map("total_rows")
+  successCount   Int      @default(0) @map("success_count")
+  failureCount   Int      @default(0) @map("failure_count")
+  duplicateCount Int      @default(0) @map("duplicate_count")  // rows flagged as duplicate
+  status         String   @default("COMPLETED") // "COMPLETED" | "PARTIAL" | "FAILED"
+  errorReport    Json?    @map("error_report")  // full downloadable error data (Task 4.7)
+  createdById    Int      @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  branch    Branch    @relation(fields: [branchId], references: [id])
+  pipeline  Pipeline? @relation(fields: [pipelineId], references: [id])
+  createdBy User      @relation("LeadImportLogCreatedBy", fields: [createdById], references: [id])
+
+  @@index([companyId])
+  @@index([branchId])
+  @@index([createdById])
+  @@map("lead_import_logs")
+}
+
 
 // ══════════════════════════════════════
 // LEAD COMMENT
@@ -477,6 +639,7 @@ model Team {
   createdBy User         @relation("TeamCreatedBy", fields: [createdById], references: [id])
   updatedBy User?        @relation("TeamUpdatedBy", fields: [updatedById], references: [id]) // FIX A
   members   TeamMember[]
+  leads     Lead[]
 
   // FIX #4: team_code unique PER COMPANY, not globally
   @@unique([companyId, code])
@@ -538,6 +701,7 @@ model Course {
   company   Company @relation(fields: [companyId], references: [id])
   createdBy User    @relation("CourseCreatedBy", fields: [createdById], references: [id])
   updatedBy User?   @relation("CourseUpdatedBy", fields: [updatedById], references: [id]) // FIX A
+  leads     Lead[]
 
   @@unique([companyId, code])
   @@index([companyId])
