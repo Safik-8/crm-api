@@ -18,6 +18,7 @@ import {
   ForbiddenError
 } from "../../utils/AppError.js";
 import prisma from "../../config/db.js";
+import { parsePagination, parseSorting, buildSearchFilter } from "../../utils/queryHelpers.js";
 
 /**
  * Asserts that the actor is authorized to interact with the target company's scope.
@@ -108,9 +109,8 @@ export const createCourseService = async (data, actor) => {
  * @returns {Promise<object>} Paginated result object
  */
 export const getCoursesService = async (query, actor) => {
-  const page = Math.max(1, parseInt(query.page) || 1);
-  const limit = Math.max(1, parseInt(query.limit) || 10);
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSorting(query, ["name", "code", "price", "category", "status", "createdAt"]);
 
   // 1. Establish tenant scope. Non-Super Admins can only query their own company.
   const targetCompanyId = actor.primaryRole === "SUPER_ADMIN"
@@ -124,12 +124,9 @@ export const getCoursesService = async (query, actor) => {
   };
 
   // Search keyword (matches name or code case-insensitively)
-  if (query.search) {
-    const searchTrimmed = query.search.trim();
-    where.OR = [
-      { name: { contains: searchTrimmed, mode: "insensitive" } },
-      { code: { contains: searchTrimmed, mode: "insensitive" } }
-    ];
+  const searchFilter = buildSearchFilter(query.search, ["name", "code"]);
+  if (searchFilter) {
+    where.OR = searchFilter.OR;
   }
 
   // Filter: status (ACTIVE/INACTIVE)
@@ -165,7 +162,7 @@ export const getCoursesService = async (query, actor) => {
       where,
       skip,
       take: limit,
-      orderBy: { createdAt: "desc" }
+      orderBy
     })
   ]);
 

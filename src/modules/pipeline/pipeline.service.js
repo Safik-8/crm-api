@@ -1,6 +1,6 @@
 import prisma from "../../config/db.js"
 import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
-import { getBranchUsersByBranchId, leadStageLogInclude } from "../lead/lead.service.js"
+import { getBranchUsersByBranchId, leadStageLogInclude } from "../lead/lead.repository.js"
 
 const normalizeName = (name) => String(name || "").trim()
 const normalizeTextFilter = (value) => {
@@ -219,8 +219,12 @@ export const createPipelineService = async (data, actor) => {
 export const listPipelinesService = async (query, actor) => {
   const where = { isDeleted: false }
 
-  if (actor.companyId) where.companyId = actor.companyId
-  if (actor.branchId) where.branchId = actor.branchId
+  if (actor.companyId) {
+    where.companyId = actor.companyId;
+  } else if (query?.companyId) {
+    where.companyId = Number(query.companyId);
+  }
+  if (actor.branchId) where.branchId = actor.branchId;
 
   const listSearch = normalizeTextFilter(query?.search ?? query?.leadName ?? query?.name ?? query?.q)
   if (listSearch) {
