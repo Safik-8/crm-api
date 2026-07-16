@@ -836,11 +836,11 @@ export const importLeadsFromExcelService = async (
   const REQUIRED_HEADERS = [
     { key: "name",   aliases: ["lead name", "name"] },
     { key: "mobile", aliases: ["mobile number", "mobile", "phone number", "phone"] },
-    { key: "source", aliases: ["lead source", "source"] }
+    { key: "source", aliases: ["lead source", "source"] },
+    { key: "course", aliases: ["interested course/product", "interested course", "course", "product", "interested for"] }
   ];
 
   const OPTIONAL_HEADERS = [
-    { key: "course",          aliases: ["interested course/product", "interested course", "course", "product", "interested for"] },
     { key: "email",           aliases: ["email", "email address"] },
     { key: "alternateMobile", aliases: ["alternate contact", "alternate mobile", "alternate contact number", "secondary mobile"] },
     { key: "budget",          aliases: ["budget"] },
@@ -895,11 +895,6 @@ export const importLeadsFromExcelService = async (
     return String(row[fileKey] ?? "").trim();
   };
 
-  // ── Check if any row has blank Course ──
-  const hasAnyBlankCourse = rows.some((row) => {
-    return !getRowVal(row, "course");
-  });
-
   // ── Pre-fetch reference data to optimize performance ──────────────────────
   const [allCompanies, allBranches, allUsers, sources, courses, existingLeads] = await Promise.all([
     prisma.company.findMany({ where: { status: "ACTIVE" } }),
@@ -931,15 +926,6 @@ export const importLeadsFromExcelService = async (
 
   const sourceNames = sources.filter(s => s.isActive).map((s) => s.name);
   const courseNames = courses.filter(c => c.status === "ACTIVE").map((c) => c.name);
-
-  // Check default course if needed
-  const defaultCourse = courses.find(
-    (c) => c.name.toLowerCase().trim() === "other" && c.status === "ACTIVE"
-  );
-
-  if (hasAnyBlankCourse && !defaultCourse) {
-    throw new BadRequestError("This company has no default course configured. Either a default must be set up, or every row must explicitly specify a valid course so none are left blank.");
-  }
 
   // ── Row processing & validation ──────────────────────────────────────────
   const previewRows = [];
@@ -1024,7 +1010,8 @@ export const importLeadsFromExcelService = async (
     // ── 5. Validate Course under resolved company scope ──
     let matchedCourse = null;
     if (!courseStr) {
-      matchedCourse = defaultCourse;
+      rowErrors.push("Interested Course/Product is required");
+      fieldsInError.push("course");
     } else if (rowCompanyId) {
       const normalizeCompare = (str) => String(str).toLowerCase().replace(/\s+/g, "");
       const normalizedCourseStr = normalizeCompare(courseStr);
