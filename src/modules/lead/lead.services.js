@@ -1005,9 +1005,10 @@ export const importLeadsFromExcelService = async (
       rowErrors.push("Lead Source is required");
       fieldsInError.push("source");
     } else if (rowCompanyId) {
-      const normalizedSourceStr = sourceStr.toLowerCase().trim();
+      const normalizeCompare = (str) => String(str).toLowerCase().replace(/\s+/g, "");
+      const normalizedSourceStr = normalizeCompare(sourceStr);
       matchedSource = sources.find(
-        (s) => s.name.toLowerCase().trim() === normalizedSourceStr || String(s.id) === sourceStr
+        (s) => normalizeCompare(s.name) === normalizedSourceStr || String(s.id) === sourceStr
       );
       if (!matchedSource) {
         rowErrors.push("Lead Source was not recognized as a valid source for this company.");
@@ -1025,9 +1026,10 @@ export const importLeadsFromExcelService = async (
     if (!courseStr) {
       matchedCourse = defaultCourse;
     } else if (rowCompanyId) {
-      const normalizedCourseStr = courseStr.toLowerCase().trim();
+      const normalizeCompare = (str) => String(str).toLowerCase().replace(/\s+/g, "");
+      const normalizedCourseStr = normalizeCompare(courseStr);
       matchedCourse = courses.find(
-        (c) => c.name.toLowerCase().trim() === normalizedCourseStr || String(c.id) === courseStr
+        (c) => normalizeCompare(c.name) === normalizedCourseStr || String(c.id) === courseStr
       );
       if (!matchedCourse) {
         rowErrors.push("Course was not recognized as a valid course for this company.");
