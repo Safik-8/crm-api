@@ -927,9 +927,9 @@ export const importLeadsFromExcelService = async (
   const sourceNames = sources.filter(s => s.isActive).map((s) => s.name);
   const courseNames = courses.filter(c => c.status === "ACTIVE").map((c) => c.name);
 
-  // Ensure "Other" course exists for the resolved company scope
+  // Ensure "Other" course exists and is ACTIVE for the resolved company scope
   let otherCourse = courses.find(
-    (c) => c.name.toLowerCase().trim() === "other" && c.companyId === Number(companyId)
+    (c) => c.name.toLowerCase().trim() === "other" && c.companyId === Number(companyId) && c.status === "ACTIVE"
   );
 
   if (!otherCourse) {
@@ -937,15 +937,27 @@ export const importLeadsFromExcelService = async (
     const prefix = companyObj ? (companyObj.code || companyObj.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4)) : "CRS";
     const otherCode = `${prefix}-OTHER`.toUpperCase();
 
-    const existingCodeCourse = await prisma.course.findFirst({
-      where: { companyId: Number(companyId), code: otherCode }
+    const existingCourse = await prisma.course.findFirst({
+      where: {
+        companyId: Number(companyId),
+        OR: [
+          { name: "Other" },
+          { code: otherCode }
+        ]
+      }
     });
 
-    if (existingCodeCourse) {
+    if (existingCourse) {
       otherCourse = await prisma.course.update({
-        where: { id: existingCodeCourse.id },
+        where: { id: existingCourse.id },
         data: { name: "Other", status: "ACTIVE", isDeleted: false }
       });
+      const idx = courses.findIndex(c => c.id === existingCourse.id);
+      if (idx !== -1) {
+        courses[idx] = otherCourse;
+      } else {
+        courses.push(otherCourse);
+      }
     } else {
       otherCourse = await prisma.course.create({
         data: {
@@ -957,9 +969,53 @@ export const importLeadsFromExcelService = async (
           createdById: actor.id
         }
       });
+      courses.push(otherCourse);
     }
-    courses.push(otherCourse);
-    courseNames.push(otherCourse.name);
+    if (!courseNames.includes(otherCourse.name)) {
+      courseNames.push(otherCourse.name);
+    }
+  }
+
+  // Ensure "Other" lead source exists and is ACTIVE for the resolved company scope
+  let otherSource = sources.find(
+    (s) => s.name.toLowerCase().trim() === "other" && (s.companyId === null || s.companyId === Number(companyId)) && s.isActive === true
+  );
+
+  if (!otherSource) {
+    const existingSource = await prisma.leadSource.findFirst({
+      where: {
+        name: "Other",
+        OR: [
+          { companyId: null },
+          { companyId: Number(companyId) }
+        ]
+      }
+    });
+
+    if (existingSource) {
+      otherSource = await prisma.leadSource.update({
+        where: { id: existingSource.id },
+        data: { isActive: true, deletedAt: null }
+      });
+      const idx = sources.findIndex(s => s.id === existingSource.id);
+      if (idx !== -1) {
+        sources[idx] = otherSource;
+      } else {
+        sources.push(otherSource);
+      }
+    } else {
+      otherSource = await prisma.leadSource.create({
+        data: {
+          companyId: Number(companyId),
+          name: "Other",
+          isActive: true
+        }
+      });
+      sources.push(otherSource);
+    }
+    if (!sourceNames.includes(otherSource.name)) {
+      sourceNames.push(otherSource.name);
+    }
   }
 
   // ── Row processing & validation ──────────────────────────────────────────
