@@ -927,6 +927,41 @@ export const importLeadsFromExcelService = async (
   const sourceNames = sources.filter(s => s.isActive).map((s) => s.name);
   const courseNames = courses.filter(c => c.status === "ACTIVE").map((c) => c.name);
 
+  // Ensure "Other" course exists for the resolved company scope
+  let otherCourse = courses.find(
+    (c) => c.name.toLowerCase().trim() === "other" && c.companyId === Number(companyId)
+  );
+
+  if (!otherCourse) {
+    const companyObj = allCompanies.find((c) => c.id === Number(companyId));
+    const prefix = companyObj ? (companyObj.code || companyObj.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4)) : "CRS";
+    const otherCode = `${prefix}-OTHER`.toUpperCase();
+
+    const existingCodeCourse = await prisma.course.findFirst({
+      where: { companyId: Number(companyId), code: otherCode }
+    });
+
+    if (existingCodeCourse) {
+      otherCourse = await prisma.course.update({
+        where: { id: existingCodeCourse.id },
+        data: { name: "Other", status: "ACTIVE", isDeleted: false }
+      });
+    } else {
+      otherCourse = await prisma.course.create({
+        data: {
+          companyId: Number(companyId),
+          name: "Other",
+          code: otherCode,
+          category: "General",
+          price: 0,
+          createdById: actor.id
+        }
+      });
+    }
+    courses.push(otherCourse);
+    courseNames.push(otherCourse.name);
+  }
+
   // ── Row processing & validation ──────────────────────────────────────────
   const previewRows = [];
   const validPayloads = [];
