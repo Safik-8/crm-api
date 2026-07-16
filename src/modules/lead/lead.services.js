@@ -6,13 +6,15 @@ import {
   BadRequestError,
   ForbiddenError,
   NotFoundError,
-  ValidationError
+  ValidationError,
+  DuplicateLeadWarningError
 } from "../../utils/AppError.js";
 import { parsePagination, parseSorting, buildSearchFilter } from "../../utils/queryHelpers.js";
 import {
   findBranchUsers,
   findLeadFormData,
   checkLeadDuplicate,
+  findDuplicateLead,
   findDefaultLeadStatus,
   findLeadById,
   findLeadByIdWithDetail,
@@ -26,12 +28,55 @@ import {
   createLeadComment,
   findLeadComments,
   createAuditLog,
-  findExistingMobiles
+  findExistingMobiles,
+  createLeadNote,
+  findLeadNotes,
+  findLeadNoteById,
+  updateLeadNote
 } from "./lead.repository.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// SCOPE GUARDS
+// SCOPE GUARDS & HIERARCHY RESOLVERS
 // ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recursively fetch all subordinate user IDs for a reporting manager.
+ */
+export const getSubordinateIds = async (managerId, companyId) => {
+  if (!companyId) return [];
+  const users = await prisma.user.findMany({
+    where: { companyId, status: "ACTIVE" },
+    select: { id: true, reportingManagerId: true }
+  });
+
+  const managerToSubordinates = {};
+  users.forEach(u => {
+    if (u.reportingManagerId) {
+      if (!managerToSubordinates[u.reportingManagerId]) {
+        managerToSubordinates[u.reportingManagerId] = [];
+      }
+      managerToSubordinates[u.reportingManagerId].push(u.id);
+    }
+  });
+
+  const ids = [];
+  const visited = new Set([managerId]);
+  const queue = [managerId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const subs = managerToSubordinates[current];
+    if (subs) {
+      for (const subId of subs) {
+        if (!visited.has(subId)) {
+          visited.add(subId);
+          ids.push(subId);
+          queue.push(subId);
+        }
+      }
+    }
+  }
+  return ids;
+};
 
 /**
  * Build Prisma where clause scoped to actor's company + branch.
@@ -44,10 +89,10 @@ const actorScope = (actor) => {
 };
 
 /**
- * Assert that an existing lead belongs to the actor's tenant.
+ * Assert that an existing lead belongs to the actor's tenant and hierarchy.
  * Supports both new-style (direct companyId/branchId) and legacy (pipeline-scoped) leads.
  */
-const assertLeadScope = (actor, lead) => {
+const assertLeadScope = async (actor, lead) => {
   // New-style: direct tenant columns
   if (lead.companyId && actor.companyId && lead.companyId !== actor.companyId) {
     throw new ForbiddenError("Lead does not belong to your company");
@@ -65,7 +110,22 @@ const assertLeadScope = (actor, lead) => {
       throw new ForbiddenError("Lead does not belong to your branch");
     }
   }
+
+  // HRABAC Check: If user rank is BDE/ISE (< 60), restrict to self + subordinates
+  if (actor.primaryRoleRank < 60) {
+    const subordinates = await getSubordinateIds(actor.id, actor.companyId);
+    const allowedUserIds = new Set([actor.id, ...subordinates]);
+
+    const assignedToId = lead.assignedToId;
+    const createdById  = lead.createdById;
+
+    const hasAccess = allowedUserIds.has(assignedToId) || allowedUserIds.has(createdById);
+    if (!hasAccess) {
+      throw new ForbiddenError("You do not have permission to access this lead");
+    }
+  }
 };
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET BRANCH USERS
@@ -94,17 +154,57 @@ export const createLeadService = async (data, actor) => {
   const companyId = actor.companyId ?? (data.companyId ? Number(data.companyId) : null);
   const branchId  = actor.branchId  ?? (data.branchId ? Number(data.branchId) : null);
 
-  // 1. Duplicate mobile check within company scope
+  // 1. Duplicate check across mobile, email, alternate mobile within company scope
+  let duplicate = null;
   if (companyId) {
-    const duplicate = await checkLeadDuplicate(data.mobile, companyId);
+    duplicate = await findDuplicateLead({
+      mobile: data.mobile,
+      email: data.email,
+      alternateMobile: data.alternateMobile,
+      companyId
+    });
+
     if (duplicate) {
-      throw new ValidationError("Validation failed", [
-        { field: "mobile", message: `A lead with mobile ${data.mobile} already exists in your company` }
-      ]);
+      if (data.overrideDuplicate === true) {
+        if (actor.primaryRoleRank < 60) {
+          throw new ForbiddenError("You do not have permission to override duplicate validation");
+        }
+      } else {
+        // Find which field matched
+        const matchedField = duplicate.mobile === data.mobile || duplicate.alternateMobile === data.mobile
+          ? "mobile"
+          : duplicate.email === data.email
+          ? "email"
+          : "alternateMobile";
+
+        throw new DuplicateLeadWarningError("A lead with this contact information already exists", {
+          existingLead: {
+            name: duplicate.name,
+            owner: duplicate.assignedTo?.name || "Unassigned",
+            status: duplicate.status?.name || "None",
+            mobile: duplicate.mobile,
+            email: duplicate.email,
+            alternateMobile: duplicate.alternateMobile
+          },
+          duplicateField: matchedField
+        });
+      }
     }
   }
 
-  // 2. Pipeline resolution (optional — Kanban create passes pipelineId)
+  // 2. Routing Assignment Guards
+  if (data.assignedToId && Number(data.assignedToId) !== actor.id) {
+    const subordinates = await getSubordinateIds(actor.id, companyId);
+    if (!subordinates.includes(Number(data.assignedToId))) {
+      // Check if user has LEAD_ASSIGNMENT:canCreate permission
+      const hasAssignmentPerm = actor.permissions?.LEAD_ASSIGNMENT?.canCreate;
+      if (!hasAssignmentPerm) {
+        throw new ForbiddenError("You do not have permission to assign leads to other users");
+      }
+    }
+  }
+
+  // 3. Pipeline resolution (optional — Kanban create passes pipelineId)
   let resolvedPipelineId = null;
   let resolvedStageId    = null;
 
@@ -122,10 +222,27 @@ export const createLeadService = async (data, actor) => {
     }
   }
 
-  // 3. Status — use provided or auto-assign default
-  const resolvedStatusId = data.statusId ?? (await findDefaultLeadStatus(companyId));
+  // 4. Status — use provided, auto-assign default, or duplicate status if overridden
+  let resolvedStatusId = data.statusId;
+  let isDuplicateFlag = false;
+  let duplicateOfId = null;
 
-  // 4. Build create payload
+  if (companyId && duplicate && data.overrideDuplicate === true) {
+    isDuplicateFlag = true;
+    duplicateOfId = duplicate.id;
+    const dupStatus = await prisma.leadStatus.findFirst({
+      where: { companyId: null, code: "DUPLICATE" }
+    });
+    if (dupStatus) {
+      resolvedStatusId = dupStatus.id;
+    }
+  }
+
+  if (!resolvedStatusId) {
+    resolvedStatusId = await findDefaultLeadStatus(companyId);
+  }
+
+  // 5. Build create payload
   const now = new Date();
   const payload = {
     companyId,
@@ -151,11 +268,13 @@ export const createLeadService = async (data, actor) => {
     interestedFor:    data.interestedFor ?? data.interested_for ?? null,
     assignedToId:     data.assignedToId  ?? null,
     isDeleted:        false,
+    isDuplicate:      isDuplicateFlag,
+    duplicateOfId:    duplicateOfId,
     createdById:      actor.id,
     updatedById:      actor.id
   };
 
-  // 5. Create lead + audit log in a transaction
+  // 6. Create lead + audit log in a transaction
   return prisma.$transaction(async (tx) => {
     const lead = await createLead(payload, tx);
 
@@ -168,6 +287,9 @@ export const createLeadService = async (data, actor) => {
     }, tx);
 
     return lead;
+  }, {
+    maxWait: 15000,
+    timeout: 30000
   });
 };
 
@@ -184,6 +306,31 @@ export const getLeadsService = async (query, actor) => {
   // Build where clause — always scoped to actor's tenant
   const where = { isDeleted: false, ...actorScope(actor) };
 
+  // Apply HRABAC Filters for roles with Rank < 60 (BDE/ISE)
+  if (actor.primaryRoleRank < 60) {
+    const subordinates = await getSubordinateIds(actor.id, actor.companyId);
+    where.OR = [
+      { assignedToId: actor.id },
+      { createdById: actor.id },
+      { assignedToId: { in: subordinates } },
+      { createdById: { in: subordinates } }
+    ];
+
+    // If explicit filter is passed, narrow down or restrict
+    if (query?.assignedToId) {
+      const filterAssignee = Number(query.assignedToId);
+      if (filterAssignee === actor.id || subordinates.includes(filterAssignee)) {
+        where.assignedToId = filterAssignee;
+      } else {
+        where.assignedToId = -1; // Not allowed: force empty results
+      }
+    }
+  } else {
+    if (query?.assignedToId) {
+      where.assignedToId = Number(query.assignedToId);
+    }
+  }
+
   // Kanban filters
   if (query?.pipelineId) where.pipelineId = Number(query.pipelineId);
   if (query?.stageId)    where.stageId    = Number(query.stageId);
@@ -193,7 +340,6 @@ export const getLeadsService = async (query, actor) => {
   if (query?.courseId)     where.courseId     = Number(query.courseId);
   if (query?.statusId)     where.statusId     = Number(query.statusId);
   if (query?.priority)     where.priority     = query.priority;
-  if (query?.assignedToId) where.assignedToId = Number(query.assignedToId);
   if (query?.isDuplicate !== undefined) where.isDuplicate = query.isDuplicate === "true";
 
   // Date range
@@ -234,7 +380,7 @@ export const getLeadByIdService = async (leadId, actor) => {
   const lead = await findLeadByIdWithDetail(id);
   if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
 
-  assertLeadScope(actor, lead);
+  await assertLeadScope(actor, lead);
   return lead;
 };
 
@@ -249,17 +395,7 @@ export const updateLeadService = async (leadId, data, actor) => {
   const lead = await findLeadById(id);
   if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
 
-  assertLeadScope(actor, lead);
-
-  // Duplicate mobile check — only if mobile actually changed
-  if (data.mobile && data.mobile !== lead.mobile && lead.companyId) {
-    const dup = await checkLeadDuplicate(data.mobile, lead.companyId, id);
-    if (dup) {
-      throw new ValidationError("Validation failed", [
-        { field: "mobile", message: `A lead with mobile ${data.mobile} already exists` }
-      ]);
-    }
-  }
+  await assertLeadScope(actor, lead);
 
   // Build update payload — only include fields that are present in data
   const updateData = { updatedById: actor.id };
@@ -277,6 +413,78 @@ export const updateLeadService = async (leadId, data, actor) => {
   if (data.state         !== undefined) updateData.state          = data.state          || null;
   if (data.notes         !== undefined) updateData.notes          = data.notes          || null;
   if (data.assignedToId  !== undefined) updateData.assignedToId   = data.assignedToId   ?? null;
+
+  // Duplicate check — only if contact details are being changed
+  if (data.mobile || data.email || data.alternateMobile) {
+    const duplicate = await findDuplicateLead({
+      mobile: data.mobile !== undefined ? data.mobile : lead.mobile,
+      email: data.email !== undefined ? data.email : lead.email,
+      alternateMobile: data.alternateMobile !== undefined ? data.alternateMobile : lead.alternateMobile,
+      companyId: lead.companyId,
+      excludeLeadId: id
+    });
+
+    if (duplicate) {
+      if (data.overrideDuplicate === true) {
+        if (actor.primaryRoleRank < 60) {
+          throw new ForbiddenError("You do not have permission to override duplicate validation");
+        }
+        updateData.isDuplicate = true;
+        updateData.duplicateOfId = duplicate.id;
+        const dupStatus = await prisma.leadStatus.findFirst({
+          where: { companyId: null, code: "DUPLICATE" }
+        });
+        if (dupStatus) {
+          updateData.statusId = dupStatus.id;
+        }
+      } else {
+        const matchedField = duplicate.mobile === data.mobile || duplicate.alternateMobile === data.mobile
+          ? "mobile"
+          : duplicate.email === data.email
+          ? "email"
+          : "alternateMobile";
+
+        throw new DuplicateLeadWarningError("A lead with this contact information already exists", {
+          existingLead: {
+            name: duplicate.name,
+            owner: duplicate.assignedTo?.name || "Unassigned",
+            status: duplicate.status?.name || "None",
+            mobile: duplicate.mobile,
+            email: duplicate.email,
+            alternateMobile: duplicate.alternateMobile
+          },
+          duplicateField: matchedField
+        });
+      }
+    }
+  }
+
+  // Routing Assignment Guards
+  if (data.assignedToId && Number(data.assignedToId) !== actor.id) {
+    const subordinates = await getSubordinateIds(actor.id, lead.companyId);
+    if (!subordinates.includes(Number(data.assignedToId))) {
+      // Check if user has LEAD_ASSIGNMENT:canEdit permission
+      const hasAssignmentPerm = actor.permissions?.LEAD_ASSIGNMENT?.canEdit;
+      if (!hasAssignmentPerm) {
+        throw new ForbiddenError("You do not have permission to assign leads to other users");
+      }
+    }
+  }
+
+  // Status transitions closure notes check
+  if (data.statusId) {
+    const targetStatus = await prisma.leadStatus.findUnique({
+      where: { id: data.statusId }
+    });
+    if (targetStatus && targetStatus.code === "CLOSED") {
+      const notesValue = data.notes !== undefined ? data.notes : lead.notes;
+      if (!notesValue || !notesValue.trim()) {
+        throw new ValidationError("Validation failed", [
+          { field: "notes", message: "A proper closure reason must be provided in notes when closing a lead" }
+        ]);
+      }
+    }
+  }
 
   // Tenant / Branch Re-assignment
   if (data.companyId !== undefined && actor.companyId === null) {
@@ -307,6 +515,9 @@ export const updateLeadService = async (leadId, data, actor) => {
     }, tx);
 
     return updated;
+  }, {
+    maxWait: 15000,
+    timeout: 30000
   });
 };
 
@@ -321,7 +532,7 @@ export const deleteLeadService = async (leadId, actor) => {
   const lead = await findLeadById(id);
   if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
 
-  assertLeadScope(actor, lead);
+  await assertLeadScope(actor, lead);
 
   return prisma.$transaction(async (tx) => {
     const deleted = await updateLead(id, {
@@ -341,6 +552,9 @@ export const deleteLeadService = async (leadId, actor) => {
     }, tx);
 
     return deleted;
+  }, {
+    maxWait: 15000,
+    timeout: 30000
   });
 };
 
@@ -357,7 +571,7 @@ export const updateLeadStageService = async (leadId, data, actor) => {
   const lead = await findLeadById(id);
   if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
 
-  assertLeadScope(actor, lead);
+  await assertLeadScope(actor, lead);
 
   // Closure lock
   if (lead.stage?.name === "Closure") {
@@ -393,6 +607,9 @@ export const updateLeadStageService = async (leadId, data, actor) => {
     }, tx);
 
     return updated;
+  }, {
+    maxWait: 15000,
+    timeout: 30000
   });
 };
 
@@ -407,7 +624,7 @@ export const addLeadCommentService = async (leadId, data, actor) => {
   const lead = await findLeadById(id);
   if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
 
-  assertLeadScope(actor, lead);
+  await assertLeadScope(actor, lead);
 
   return createLeadComment({
     leadId:      id,
@@ -425,10 +642,11 @@ export const getLeadCommentsService = async (leadId, actor) => {
   const lead = await findLeadById(id);
   if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
 
-  assertLeadScope(actor, lead);
+  await assertLeadScope(actor, lead);
 
   return findLeadComments(id);
 };
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // BULK IMPORT LEADS FROM EXCEL — All or Nothing (Two-Pass)
@@ -653,3 +871,215 @@ export const importLeadsFromExcelService = async (fileBuffer, pipelineId, actor)
     failed:    insertErrors
   };
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// LEAD NOTES CRUD
+// ──────────────────────────────────────────────────────────────────────────────
+
+export const getLeadNotesService = async (leadId, actor) => {
+  const id = Number(leadId);
+  if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
+
+  const lead = await findLeadById(id);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+  return findLeadNotes(id);
+};
+
+export const createLeadNoteService = async (leadId, data, actor) => {
+  const id = Number(leadId);
+  if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
+
+  const lead = await findLeadById(id);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+
+  if (!data.note || !data.note.trim()) {
+    throw new ValidationError("Validation failed", [{ field: "note", message: "Note text is required" }]);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const note = await createLeadNote({
+      leadId: id,
+      note: data.note.trim(),
+      createdById: actor.id
+    }, tx);
+
+    await createAuditLog({
+      companyId: lead.companyId,
+      entityId: id,
+      action: "NOTE_ADD",
+      newValue: JSON.stringify({ noteId: note.id, text: note.note }),
+      performedById: actor.id
+    }, tx);
+
+    return note;
+  }, {
+    maxWait: 15000,
+    timeout: 30000
+  });
+};
+
+export const updateLeadNoteService = async (leadId, noteId, data, actor) => {
+  const lid = Number(leadId);
+  const nid = Number(noteId);
+  if (!Number.isInteger(lid) || lid < 1) throw new BadRequestError("Invalid lead id");
+  if (!Number.isInteger(nid) || nid < 1) throw new BadRequestError("Invalid note id");
+
+  const lead = await findLeadById(lid);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+
+  const note = await findLeadNoteById(nid);
+  if (!note || note.isDeleted || note.leadId !== lid) throw new NotFoundError("Note");
+
+  // Only the creator of the note or a manager can edit it
+  if (note.createdById !== actor.id && actor.primaryRoleRank < 60) {
+    throw new ForbiddenError("You do not have permission to edit this note");
+  }
+
+  if (!data.note || !data.note.trim()) {
+    throw new ValidationError("Validation failed", [{ field: "note", message: "Note text is required" }]);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await updateLeadNote(nid, {
+      note: data.note.trim(),
+      updatedById: actor.id
+    }, tx);
+
+    await createAuditLog({
+      companyId: lead.companyId,
+      entityId: lid,
+      action: "NOTE_UPDATE",
+      oldValue: JSON.stringify({ text: note.note }),
+      newValue: JSON.stringify({ text: updated.note }),
+      performedById: actor.id
+    }, tx);
+
+    return updated;
+  }, {
+    maxWait: 15000,
+    timeout: 30000
+  });
+};
+
+export const deleteLeadNoteService = async (leadId, noteId, actor) => {
+  const lid = Number(leadId);
+  const nid = Number(noteId);
+  if (!Number.isInteger(lid) || lid < 1) throw new BadRequestError("Invalid lead id");
+  if (!Number.isInteger(nid) || nid < 1) throw new BadRequestError("Invalid note id");
+
+  const lead = await findLeadById(lid);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+
+  const note = await findLeadNoteById(nid);
+  if (!note || note.isDeleted || note.leadId !== lid) throw new NotFoundError("Note");
+
+  // Only the creator or a manager can delete it
+  if (note.createdById !== actor.id && actor.primaryRoleRank < 60) {
+    throw new ForbiddenError("You do not have permission to delete this note");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const deleted = await updateLeadNote(nid, {
+      isDeleted: true,
+      updatedById: actor.id
+    }, tx);
+
+    await createAuditLog({
+      companyId: lead.companyId,
+      entityId: lid,
+      action: "NOTE_DELETE",
+      oldValue: JSON.stringify({ noteId: nid }),
+      performedById: actor.id
+    }, tx);
+
+    return deleted;
+  }, {
+    maxWait: 15000,
+    timeout: 30000
+  });
+};
+
+// ──────────────────────────────────────────────────────────────────────────────
+// LEAD TIMELINE
+// ──────────────────────────────────────────────────────────────────────────────
+
+export const getLeadTimelineService = async (leadId, actor) => {
+  const id = Number(leadId);
+  if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
+
+  const lead = await findLeadById(id);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+
+  return prisma.auditLog.findMany({
+    where: {
+      entityType: "LEAD",
+      entityId: id
+    },
+    orderBy: { createdAt: "desc" },
+    include: {
+      performedBy: { select: { id: true, name: true } }
+    }
+  });
+};
+
+// ──────────────────────────────────────────────────────────────────────────────
+// RESTORE LEAD
+// ──────────────────────────────────────────────────────────────────────────────
+
+export const restoreLeadService = async (leadId, actor) => {
+  const id = Number(leadId);
+  if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
+
+  // Reopen deleted leads is restricted to Rank >= 60
+  if (actor.primaryRoleRank < 60) {
+    throw new ForbiddenError("You do not have permission to restore deleted leads");
+  }
+
+  const lead = await prisma.lead.findUnique({
+    where: { id }
+  });
+  if (!lead) throw new NotFoundError("Lead");
+  if (!lead.isDeleted) throw new BadRequestError("Lead is not deleted");
+
+  // Scope check
+  if (lead.companyId && actor.companyId && lead.companyId !== actor.companyId) {
+    throw new ForbiddenError("Lead does not belong to your company");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.lead.update({
+      where: { id },
+      data: {
+        isDeleted: false,
+        deletedById: null,
+        deletedAt: null,
+        updatedById: actor.id
+      }
+    });
+
+    await createAuditLog({
+      companyId: lead.companyId,
+      entityId: id,
+      action: "RESTORE",
+      oldValue: JSON.stringify({ isDeleted: true }),
+      newValue: JSON.stringify({ isDeleted: false }),
+      performedById: actor.id
+    }, tx);
+
+    return findLeadByIdWithDetail(id, tx);
+  }, {
+    maxWait: 15000,
+    timeout: 30000
+  });
+};
+
