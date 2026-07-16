@@ -145,6 +145,13 @@ export class ConflictError extends AppError {
   }
 }
 
+export class DuplicateLeadWarningError extends AppError {
+  constructor(message = "Duplicate lead detected", details = null) {
+    super(message, 400, "DUPLICATE_LEAD_WARNING", details)
+  }
+}
+
+
 export class DuplicateEmailError extends AppError {
   constructor() {
     super("Email already registered", 409, "DUPLICATE_EMAIL", { field: "email" })

@@ -38,7 +38,10 @@ export const createLeadSchema = z.object({
 
   courseId: z.preprocess(
     (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
-    z.number().int().positive().optional().nullable()
+    z
+      .number({ required_error: "Interested course is required" })
+      .int()
+      .positive("Interested course is required")
   ),
 
   statusId: z.preprocess(
@@ -101,6 +104,7 @@ export const createLeadSchema = z.object({
     (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
     z.number().int().positive().optional().nullable()
   ),
+  overrideDuplicate: z.boolean().optional(),
 });
 
 // ─── Update Lead Schema ───────────────────────────────────────────────────────
@@ -139,12 +143,12 @@ export const updateLeadSchema = z
 
     sourceId: z.preprocess(
       (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
-      z.number().int().positive().optional().nullable()
+      z.number().int().positive().optional()
     ),
 
     courseId: z.preprocess(
       (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
-      z.number().int().positive().optional().nullable()
+      z.number().int().positive().optional()
     ),
 
     statusId: z.preprocess(
@@ -185,6 +189,7 @@ export const updateLeadSchema = z
       (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
       z.number().int().positive().optional().nullable()
     ),
+    overrideDuplicate: z.boolean().optional(),
   })
   .refine(
     (data) => Object.keys(data).filter((k) => data[k] !== undefined).length > 0,
