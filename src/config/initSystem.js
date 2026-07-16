@@ -55,6 +55,7 @@ const ROLE_PERMISSIONS = {
         NOTIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        LEAD_STATUS: { canView: true, canCreate: true, canEdit: true, canDelete: true, canArchive: false },
     },
 
     COMPANY_ADMIN: {
@@ -78,6 +79,7 @@ const ROLE_PERMISSIONS = {
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        LEAD_STATUS: { canView: true, canCreate: true, canEdit: true, canDelete: false, canArchive: false },
     },
 
     BRANCH_MANAGER: {
@@ -101,6 +103,7 @@ const ROLE_PERMISSIONS = {
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
     },
 
     BDE: {
@@ -124,6 +127,7 @@ const ROLE_PERMISSIONS = {
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
     },
 
     ISE: {
@@ -147,6 +151,7 @@ const ROLE_PERMISSIONS = {
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
     },
 }
 
@@ -383,10 +388,10 @@ export const initializeSystem = async () => {
 
         // ── STEP 4.2: SEED DEFAULT GLOBAL LEAD STATUSES ──
         const defaultStatuses = [
-            { name: "New", code: "NEW", displayColor: "#3b82f6", sequenceOrder: 1, isDefault: true, isSystem: true },
-            { name: "Open", code: "OPEN", displayColor: "#10b981", sequenceOrder: 2, isDefault: false, isSystem: true },
-            { name: "Duplicate", code: "DUPLICATE", displayColor: "#6b7280", sequenceOrder: 3, isDefault: false, isSystem: true },
-            { name: "Closed", code: "CLOSED", displayColor: "#ef4444", sequenceOrder: 4, isDefault: false, isSystem: true }
+            { name: "New", code: "NEW", displayColor: "#3b82f6", sequenceOrder: 1000, isDefault: true, isSystem: true },
+            { name: "Open", code: "OPEN", displayColor: "#10b981", sequenceOrder: 2000, isDefault: false, isSystem: true },
+            { name: "Duplicate", code: "DUPLICATE", displayColor: "#6b7280", sequenceOrder: 4000, isDefault: false, isSystem: true },
+            { name: "Closed", code: "CLOSED", displayColor: "#ef4444", sequenceOrder: 7000, isDefault: false, isSystem: true }
         ]
         for (const status of defaultStatuses) {
             const existingStatus = await prisma.leadStatus.findFirst({
@@ -401,6 +406,22 @@ export const initializeSystem = async () => {
                     }
                 })
                 console.log(`✅ Default lead status seeded: ${status.name}`)
+            }
+        }
+
+        // Auto-space all global statuses in database by 1000 on startup
+        const globalStatuses = await prisma.leadStatus.findMany({
+            where: { companyId: null },
+            orderBy: { sequenceOrder: 'asc' }
+        })
+        for (let idx = 0; idx < globalStatuses.length; idx++) {
+            const targetSeq = (idx + 1) * 1000
+            if (globalStatuses[idx].sequenceOrder !== targetSeq) {
+                await prisma.leadStatus.update({
+                    where: { id: globalStatuses[idx].id },
+                    data: { sequenceOrder: targetSeq }
+                })
+                console.log(`🔄 Spaced out global status: ${globalStatuses[idx].name} to ${targetSeq}`)
             }
         }
 

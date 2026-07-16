@@ -16,6 +16,7 @@ import authRoutes from "./modules/auth/auth.routes.js"
 import companyRoutes from "./modules/company/company.routes.js"
 import branchRoutes  from "./modules/branch/branch.routes.js"
 import leadSourceRoutes from "./modules/leadsources/leadsources.routes.js"
+import leadStatusRoutes from "./modules/leadstatuses/leadstatuses.routes.js"
 import pipelineRoutes from "./modules/pipeline/pipeline.routes.js"
 import stageRoutes from "./modules/stage/stage.routes.js"
 import leadRoutes from "./modules/lead/lead.routes.js"
@@ -87,6 +88,7 @@ app.use("/api", authRoutes);
 app.use("/api/companies", companyRoutes);
 app.use("/api/branches",  branchRoutes);
 app.use("/api/lead-sources", leadSourceRoutes);
+app.use("/api/lead-statuses", leadStatusRoutes);
 app.use("/api/pipelines", pipelineRoutes);
 app.use("/api/stages", stageRoutes);
 app.use("/api/leads", leadRoutes);

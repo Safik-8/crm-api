@@ -11,10 +11,18 @@ export const createLeadSourceSchema = z.object({
   isGlobal: z.boolean().optional().default(false)
 })
 
+const booleanCoerce = z.preprocess((val) => {
+  if (typeof val === "string") {
+    if (val.toLowerCase() === "true") return true
+    if (val.toLowerCase() === "false") return false
+  }
+  return val
+}, z.boolean())
+
 export const updateLeadSourceSchema = z.object({
   name: z.string().trim().min(1, "Lead source name cannot be empty").max(100, "Lead source name must be under 100 characters").optional(),
   description: z.string().trim().max(500, "Description must be under 500 characters").optional().nullable(),
-  isActive: z.boolean().optional()
+  isActive: booleanCoerce.optional()
 })
 
 export const validateBody = (schema) => {
