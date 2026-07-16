@@ -90,7 +90,7 @@ export const getLeadFormDataService = async (actor, query = {}) => {
 // CREATE LEAD
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const createLeadService = async (data, actor) => {
+export const createLeadService = async (data, actor, txClient = prisma) => {
   const companyId = actor.companyId ?? (data.companyId ? Number(data.companyId) : null);
   const branchId  = actor.branchId  ?? (data.branchId ? Number(data.branchId) : null);
 
@@ -125,6 +125,61 @@ export const createLeadService = async (data, actor) => {
   // 3. Status — use provided or auto-assign default
   const resolvedStatusId = data.statusId ?? (await findDefaultLeadStatus(companyId));
 
+  // 3.5 Course — use provided or resolve "Other" default course for company
+  let resolvedCourseId = data.courseId ?? null;
+  let resolvedInterestedFor = data.interestedFor ?? data.interested_for ?? null;
+
+  if (!resolvedCourseId && companyId) {
+    const activeCourses = await prisma.course.findMany({
+      where: { companyId: Number(companyId), status: "ACTIVE", isDeleted: false }
+    });
+    let otherCourse = activeCourses.find(c => c.name.toLowerCase().trim() === "other");
+    if (!otherCourse) {
+      const company = await prisma.company.findUnique({
+        where: { id: Number(companyId) },
+        select: { name: true, code: true }
+      });
+      const prefix = company ? (company.code || company.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4)) : "CRS";
+      const otherCode = `${prefix}-OTHER`.toUpperCase();
+
+      const existingCodeCourse = await prisma.course.findFirst({
+        where: { companyId: Number(companyId), code: otherCode }
+      });
+
+      if (existingCodeCourse) {
+        otherCourse = await prisma.course.update({
+          where: { id: existingCodeCourse.id },
+          data: { name: "Other", status: "ACTIVE", isDeleted: false }
+        });
+      } else {
+        otherCourse = await prisma.course.create({
+          data: {
+            companyId: Number(companyId),
+            name: "Other",
+            code: otherCode,
+            category: "General",
+            price: 0,
+            createdById: actor.id
+          }
+        });
+      }
+    }
+    resolvedCourseId = otherCourse.id;
+    if (!resolvedInterestedFor) {
+      resolvedInterestedFor = "Other";
+    }
+  } else if (resolvedCourseId) {
+    if (!resolvedInterestedFor) {
+      const dbCourse = await prisma.course.findUnique({
+        where: { id: Number(resolvedCourseId) },
+        select: { name: true }
+      });
+      if (dbCourse) {
+        resolvedInterestedFor = dbCourse.name;
+      }
+    }
+  }
+
   // 4. Build create payload
   const now = new Date();
   const payload = {
@@ -140,7 +195,7 @@ export const createLeadService = async (data, actor) => {
     email:            data.email   || null,
     alternateMobile:  data.alternateMobile || null,
     sourceId:         data.sourceId,
-    courseId:         data.courseId  ?? null,
+    courseId:         resolvedCourseId,
     statusId:         resolvedStatusId,
     priority:         data.priority  ?? "MEDIUM",
     budget:           data.budget != null ? data.budget : null,
@@ -148,7 +203,7 @@ export const createLeadService = async (data, actor) => {
     state:            data.state   || null,
     country:          data.country || null,
     notes:            data.notes   || null,
-    interestedFor:    data.interestedFor ?? data.interested_for ?? null,
+    interestedFor:    resolvedInterestedFor,
     assignedToId:     data.assignedToId  ?? null,
     isDeleted:        false,
     createdById:      actor.id,
@@ -156,7 +211,7 @@ export const createLeadService = async (data, actor) => {
   };
 
   // 5. Create lead + audit log in a transaction
-  return prisma.$transaction(async (tx) => {
+  const executeQueries = async (tx) => {
     const lead = await createLead(payload, tx);
 
     await createAuditLog({
@@ -168,7 +223,13 @@ export const createLeadService = async (data, actor) => {
     }, tx);
 
     return lead;
-  });
+  };
+
+  if (typeof txClient.$transaction === "function") {
+    return txClient.$transaction(async (tx) => executeQueries(tx));
+  } else {
+    return executeQueries(txClient);
+  }
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -341,6 +402,26 @@ export const deleteLeadService = async (leadId, actor) => {
     }, tx);
 
     return deleted;
+  });
+};
+
+export const tempDeleteAllLeadsService = async (actor) => {
+  const where = { isDeleted: false };
+  if (actor.companyId) {
+    where.companyId = Number(actor.companyId);
+  }
+  if (actor.branchId) {
+    where.branchId = Number(actor.branchId);
+  }
+
+  return prisma.lead.updateMany({
+    where,
+    data: {
+      isDeleted: true,
+      deletedById: actor.id,
+      deletedAt: new Date(),
+      updatedById: actor.id
+    }
   });
 };
 
@@ -608,6 +689,41 @@ export const importLeadsFromExcelService = async (
   const sourceNames = sources.map((s) => s.name);
   const courseNames = courses.map((c) => c.name);
 
+  // Ensure "Other" course exists for the resolved company scope
+  let otherCourse = courses.find(
+    (c) => c.name.toLowerCase().trim() === "other" && c.companyId === Number(companyId)
+  );
+
+  if (!otherCourse) {
+    const companyObj = allCompanies.find((c) => c.id === Number(companyId));
+    const prefix = companyObj ? (companyObj.code || companyObj.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4)) : "CRS";
+    const otherCode = `${prefix}-OTHER`.toUpperCase();
+
+    const existingCodeCourse = await prisma.course.findFirst({
+      where: { companyId: Number(companyId), code: otherCode }
+    });
+
+    if (existingCodeCourse) {
+      otherCourse = await prisma.course.update({
+        where: { id: existingCodeCourse.id },
+        data: { name: "Other", status: "ACTIVE", isDeleted: false }
+      });
+    } else {
+      otherCourse = await prisma.course.create({
+        data: {
+          companyId: Number(companyId),
+          name: "Other",
+          code: otherCode,
+          category: "General",
+          price: 0,
+          createdById: actor.id
+        }
+      });
+    }
+    courses.push(otherCourse);
+    courseNames.push(otherCourse.name);
+  }
+
   const getCompanyByCode = (code) => {
     if (!code) return null;
     return allCompanies.find((c) => c.code.toLowerCase().trim() === code.toLowerCase().trim());
@@ -713,8 +829,23 @@ export const importLeadsFromExcelService = async (
       if (!matchedCourse) {
         rowErrors.push(`Course "${courseStr}" does not exist or is inactive for the resolved company`);
         fieldsInError.push("course");
-        const closest = findClosestMatch(courseStr, courseNames);
+        // Limit suggestions to courses belonging ONLY to this company
+        const companyCourseNames = courses
+          .filter((c) => c.companyId === rowCompanyId)
+          .map((c) => c.name);
+        const closest = findClosestMatch(courseStr, companyCourseNames);
         if (closest) suggestions.course = closest;
+      }
+    } else if (rowCompanyId) {
+      // Course is blank/empty -> Fallback to default course "Other"
+      matchedCourse = courses.find(
+        (c) =>
+          c.name.toLowerCase().trim() === "other" &&
+          c.companyId === rowCompanyId
+      );
+      if (!matchedCourse) {
+        rowErrors.push(`Default course "Other" does not exist or is inactive for the resolved company`);
+        fieldsInError.push("course");
       }
     }
 
@@ -870,6 +1001,7 @@ export const importLeadsFromExcelService = async (
           alternateMobile: alternateMobile || null,
           sourceId: matchedSource.id,
           courseId: matchedCourse ? matchedCourse.id : null,
+          interestedFor: matchedCourse ? matchedCourse.name : null,
           priority: "MEDIUM",
           budget,
           city: city || null,
@@ -890,6 +1022,13 @@ export const importLeadsFromExcelService = async (
         source: sourceStr,
         course: courseStr,
         email,
+        alternateMobile,
+        budget: budgetStr,
+        city,
+        state,
+        country,
+        notes,
+        assignedTo: assignedToVal,
         status: hasError ? "INVALID" : isDuplicateRow ? "DUPLICATE" : "VALID",
         errors: hasError ? rowErrors : isDuplicateRow ? [duplicateReason] : []
       });
@@ -951,9 +1090,11 @@ export const importLeadsFromExcelService = async (
   if (successCount > 0) {
     await prisma.$transaction(async (tx) => {
       for (const { payload } of validPayloads) {
-        const lead = await createLeadService(payload, actor);
+        const lead = await createLeadService(payload, actor, tx);
         createdLeads.push(lead.id);
       }
+    }, {
+      timeout: 30000 // 30 seconds timeout
     });
   }
 

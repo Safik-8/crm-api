@@ -11,6 +11,7 @@ import {
   getLeadById,
   updateLead,
   deleteLead,
+  tempDeleteAllLeads,
   updateLeadStage,
   addLeadComment,
   getLeadComments,
@@ -45,6 +46,7 @@ router.post(  "/",    hasPermission("LEAD", "canCreate"), validateBody(createLea
 router.get(   "/",    hasPermission("LEAD", "canView"),   getLeads);
 router.get(   "/:id", hasPermission("LEAD", "canView"),   getLeadById);
 router.put(   "/:id", hasPermission("LEAD", "canEdit"),   validateBody(updateLeadSchema), updateLead);
+router.delete("/temp-delete-all", hasPermission("LEAD", "canDelete"), tempDeleteAllLeads);
 router.delete("/:id", hasPermission("LEAD", "canDelete"), deleteLead);
 // ── Kanban stage update (drag-drop) ──────────────────────────────────────────
 router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), validateBody(updateLeadStageSchema), updateLeadStage);

@@ -9,6 +9,7 @@ import {
   getLeadByIdService,
   updateLeadService,
   deleteLeadService,
+  tempDeleteAllLeadsService,
   updateLeadStageService,
   addLeadCommentService,
   getLeadCommentsService,
@@ -76,6 +77,15 @@ export const deleteLead = async (req, res, next) => {
   try {
     const lead = await deleteLeadService(req.params.id, req.user);
     return sendSuccess(res, { lead }, "Lead deleted successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const tempDeleteAllLeads = async (req, res, next) => {
+  try {
+    const result = await tempDeleteAllLeadsService(req.user);
+    return sendSuccess(res, result, "All leads deleted successfully");
   } catch (err) {
     next(err);
   }
