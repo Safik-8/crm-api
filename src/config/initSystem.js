@@ -54,6 +54,7 @@ const ROLE_PERMISSIONS = {
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
     },
 
     COMPANY_ADMIN: {
@@ -76,6 +77,7 @@ const ROLE_PERMISSIONS = {
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
     },
 
     BRANCH_MANAGER: {
@@ -98,6 +100,7 @@ const ROLE_PERMISSIONS = {
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
     },
 
     BDE: {
@@ -120,6 +123,7 @@ const ROLE_PERMISSIONS = {
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     },
 
     ISE: {
@@ -142,6 +146,7 @@ const ROLE_PERMISSIONS = {
         REPORT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     },
 }
 
@@ -254,13 +259,14 @@ export const initializeSystem = async () => {
 
         // ── STEP 4: SEED DEFAULT GLOBAL LEAD SOURCES ──────────
         const defaultLeadSources = [
-            "Cold Call",
-            "Referral",
             "Website",
+            "Walk-in",
+            "Referral",
             "Social Media",
-            "Walk In",
-            "Exhibition",
-            "Other"
+            "Google Ads",
+            "Facebook Ads",
+            "Telecalling",
+            "Events"
         ]
         const existingLeadSources = await prisma.leadSource.findMany({
             where: { companyId: null, name: { in: defaultLeadSources } },
@@ -374,6 +380,30 @@ export const initializeSystem = async () => {
                 }
             }
         }
+
+        // ── STEP 4.2: SEED DEFAULT GLOBAL LEAD STATUSES ──
+        const defaultStatuses = [
+            { name: "New", code: "NEW", displayColor: "#3b82f6", sequenceOrder: 1, isDefault: true, isSystem: true },
+            { name: "Open", code: "OPEN", displayColor: "#10b981", sequenceOrder: 2, isDefault: false, isSystem: true },
+            { name: "Duplicate", code: "DUPLICATE", displayColor: "#6b7280", sequenceOrder: 3, isDefault: false, isSystem: true },
+            { name: "Closed", code: "CLOSED", displayColor: "#ef4444", sequenceOrder: 4, isDefault: false, isSystem: true }
+        ]
+        for (const status of defaultStatuses) {
+            const existingStatus = await prisma.leadStatus.findFirst({
+                where: { companyId: null, code: status.code }
+            })
+            if (!existingStatus) {
+                await prisma.leadStatus.create({
+                    data: {
+                        ...status,
+                        companyId: null,
+                        isActive: true
+                    }
+                })
+                console.log(`✅ Default lead status seeded: ${status.name}`)
+            }
+        }
+
 
 
         // ── STEP 5: SEED DEFAULT COMPANY HIERARCHY ──────────

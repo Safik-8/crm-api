@@ -129,17 +129,80 @@ export const findLeadFormData = async (companyId, branchId) => {
  * @param {number|null} excludeLeadId - Exclude on update
  * @param {object} tx
  */
-export const checkLeadDuplicate = async (mobile, companyId, excludeLeadId = null, tx = prisma) => {
+export const findDuplicateLead = async (params, tx = prisma) => {
+  const { mobile, email, alternateMobile, companyId, excludeLeadId } = params;
+  if (!companyId) return null;
+
+  const conditions = [];
+  if (mobile) {
+    conditions.push({ mobile });
+    conditions.push({ alternateMobile: mobile });
+  }
+  if (email && email.trim()) {
+    conditions.push({ email: email.trim() });
+  }
+  if (alternateMobile && alternateMobile.trim()) {
+    conditions.push({ alternateMobile: alternateMobile.trim() });
+    conditions.push({ mobile: alternateMobile.trim() });
+  }
+
+  if (conditions.length === 0) return null;
+
   return tx.lead.findFirst({
     where: {
-      mobile,
       companyId,
       isDeleted: false,
-      ...(excludeLeadId ? { NOT: { id: excludeLeadId } } : {})
+      ...(excludeLeadId ? { NOT: { id: excludeLeadId } } : {}),
+      OR: conditions
     },
-    select: { id: true, name: true, mobile: true }
+    include: {
+      assignedTo: { select: { name: true } },
+      status: { select: { name: true, code: true } }
+    }
   });
 };
+
+export const checkLeadDuplicate = async (mobile, companyId, excludeLeadId = null, tx = prisma) => {
+  return findDuplicateLead({ mobile, companyId, excludeLeadId }, tx);
+};
+
+export const createLeadNote = async (data, tx = prisma) => {
+  return tx.leadNote.create({
+    data,
+    include: {
+      createdBy: { select: { id: true, name: true } }
+    }
+  });
+};
+
+export const findLeadNotes = async (leadId, tx = prisma) => {
+  return tx.leadNote.findMany({
+    where: { leadId, isDeleted: false },
+    orderBy: { createdAt: "desc" },
+    include: {
+      createdBy: { select: { id: true, name: true } },
+      updatedBy: { select: { id: true, name: true } }
+    }
+  });
+};
+
+export const findLeadNoteById = async (noteId, tx = prisma) => {
+  return tx.leadNote.findUnique({
+    where: { id: noteId }
+  });
+};
+
+export const updateLeadNote = async (noteId, data, tx = prisma) => {
+  return tx.leadNote.update({
+    where: { id: noteId },
+    data,
+    include: {
+      createdBy: { select: { id: true, name: true } },
+      updatedBy: { select: { id: true, name: true } }
+    }
+  });
+};
+
 
 /**
  * Finds the default lead status for a company (falls back to global default).
@@ -279,6 +342,7 @@ export const findLeads = async (params, tx = prisma) => {
       assignedTo: { select: { id: true, name: true } },
       pipeline:   { select: { id: true, name: true } },
       stage:      { select: { id: true, name: true } },
+      createdBy:  { select: { id: true, name: true } },
       ...leadStageLogInclude
     }
   });

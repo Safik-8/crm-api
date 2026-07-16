@@ -15,7 +15,13 @@ import {
   getLeadCommentsService,
   importLeadsFromExcelService,
   getLeadImportLogsService,
-  getImportErrorsCsvService
+  getImportErrorsCsvService,
+  restoreLeadService,
+  getLeadNotesService,
+  createLeadNoteService,
+  updateLeadNoteService,
+  deleteLeadNoteService,
+  getLeadTimelineService
 } from "./lead.services.js";
 import { uploadExcel } from "./lead.upload.js";
 
@@ -155,6 +161,15 @@ export const getLeadImportLogs = async (req, res, next) => {
   }
 };
 
+export const restoreLead = async (req, res, next) => {
+  try {
+    const lead = await restoreLeadService(req.params.id, req.user);
+    return sendSuccess(res, { lead }, "Lead restored successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const downloadImportErrors = async (req, res, next) => {
   try {
     const csv = await getImportErrorsCsvService(req.params.id, req.user);
@@ -166,3 +181,47 @@ export const downloadImportErrors = async (req, res, next) => {
   }
 };
 
+export const getLeadNotes = async (req, res, next) => {
+  try {
+    const notes = await getLeadNotesService(req.params.id, req.user);
+    return sendSuccess(res, { notes }, "Notes fetched");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createLeadNote = async (req, res, next) => {
+  try {
+    const note = await createLeadNoteService(req.params.id, req.body, req.user);
+    return sendSuccess(res, { note }, "Note added successfully", 201);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateLeadNote = async (req, res, next) => {
+  try {
+    const note = await updateLeadNoteService(req.params.id, req.params.noteId, req.body, req.user);
+    return sendSuccess(res, { note }, "Note updated successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteLeadNote = async (req, res, next) => {
+  try {
+    const note = await deleteLeadNoteService(req.params.id, req.params.noteId, req.user);
+    return sendSuccess(res, { note }, "Note deleted successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getLeadTimeline = async (req, res, next) => {
+  try {
+    const timeline = await getLeadTimelineService(req.params.id, req.user);
+    return sendSuccess(res, { timeline }, "Timeline history fetched");
+  } catch (err) {
+    next(err);
+  }
+};

@@ -1,12 +1,18 @@
-// src/modules/leadSource/leadSource.service.js
+// src/modules/leadsources/leadsources.services.js
 
-import prisma from "../../config/db.js"
 import {
   ValidationError,
   NotFoundError,
   ConflictError,
   ForbiddenError
 } from "../../utils/AppError.js"
+import {
+  findLeadSourceById,
+  findDuplicateLeadSource,
+  createLeadSource,
+  findLeadSources,
+  updateLeadSource
+} from "./leadsources.repository.js"
 
 // ══════════════════════════════════════════════════════════
 // SCOPE GUARD
@@ -36,8 +42,7 @@ const assertLeadSourceScope = (actor, leadSource) => {
 // ══════════════════════════════════════════════════════════
 
 export const createLeadSourceService = async (data, actor) => {
-
-  const { name, isGlobal = false } = data
+  const { name, isGlobal = false, description } = data
 
   // Validate
   const errors = []
@@ -55,14 +60,8 @@ export const createLeadSourceService = async (data, actor) => {
     throw new ForbiddenError("Only Super Admin can create global lead sources")
   }
 
-  // Check duplicate name within same scope
-  const existing = await prisma.leadSource.findFirst({
-    where: {
-      name     : { equals: name.trim(), mode: "insensitive" },
-      companyId: companyId
-    }
-  })
-
+  // Check duplicate name within same company scope OR global scope
+  const existing = await findDuplicateLeadSource(name, companyId)
   if (existing) {
     throw new ConflictError(
       `Lead source "${name}" already exists`,
@@ -70,20 +69,12 @@ export const createLeadSourceService = async (data, actor) => {
     )
   }
 
-  const leadSource = await prisma.leadSource.create({
-    data: {
-      name     : name.trim(),
-      companyId: companyId,
-      isActive : true
-    },
-    include: {
-      company: companyId
-        ? { select: { id: true, name: true } }
-        : false
-    }
+  return createLeadSource({
+    name,
+    description,
+    companyId,
+    isActive: true
   })
-
-  return leadSource
 }
 
 // ══════════════════════════════════════════════════════════
@@ -92,7 +83,6 @@ export const createLeadSourceService = async (data, actor) => {
 // ══════════════════════════════════════════════════════════
 
 export const getLeadSourcesService = async (query, actor) => {
-
   const { search, isActive } = query
 
   // Build where:
@@ -126,25 +116,17 @@ export const getLeadSourcesService = async (query, actor) => {
     }
   }
 
-  const leadSources = await prisma.leadSource.findMany({
-    where,
-    orderBy: [
-      { companyId: "asc" },   // global first
-      { name     : "asc" }
-    ],
-    select: {
-      id: true,
-      name: true
-    }
-  })
+  const leadSources = await findLeadSources(where)
 
   // Label each as GLOBAL or COMPANY
-  const formatted = leadSources.map(ls => ({
+  return leadSources.map(ls => ({
     id: ls.id,
-    name: ls.name
+    name: ls.name,
+    description: ls.description,
+    isActive: ls.isActive,
+    companyId: ls.companyId,
+    type: ls.companyId ? "COMPANY" : "GLOBAL"
   }))
-
-  return formatted
 }
 
 // ══════════════════════════════════════════════════════════
@@ -152,13 +134,9 @@ export const getLeadSourcesService = async (query, actor) => {
 // ══════════════════════════════════════════════════════════
 
 export const updateLeadSourceService = async (id, data, actor) => {
+  const { name, isActive, description } = data
 
-  const { name, isActive } = data
-
-  const leadSource = await prisma.leadSource.findUnique({
-    where: { id: Number(id) }
-  })
-
+  const leadSource = await findLeadSourceById(id)
   if (!leadSource) throw new NotFoundError("Lead source")
 
   // Scope check
@@ -166,28 +144,32 @@ export const updateLeadSourceService = async (id, data, actor) => {
 
   // Check duplicate name if name is being changed
   if (name && name.trim() !== leadSource.name) {
-    const existing = await prisma.leadSource.findFirst({
-      where: {
-        name     : { equals: name.trim(), mode: "insensitive" },
-        companyId: leadSource.companyId,
-        id       : { not: Number(id) }
-      }
-    })
+    const existing = await findDuplicateLeadSource(name, leadSource.companyId, id)
     if (existing) {
       throw new ConflictError(`Lead source "${name}" already exists`, "name")
     }
   }
 
-  const updated = await prisma.leadSource.update({
-    where: { id: Number(id) },
-    data : {
-      ...(name     !== undefined && { name    : name.trim() }),
-      ...(isActive !== undefined && { isActive: Boolean(isActive) })
-    },
-    include: {
-      company: { select: { id: true, name: true } }
-    }
-  })
+  const updated = await updateLeadSource(id, { name, isActive, description })
+
+  return {
+    ...updated,
+    type: updated.companyId ? "COMPANY" : "GLOBAL"
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// TOGGLE LEAD SOURCE STATUS
+// ══════════════════════════════════════════════════════════
+
+export const toggleLeadSourceStatusService = async (id, actor) => {
+  const leadSource = await findLeadSourceById(id)
+  if (!leadSource) throw new NotFoundError("Lead source")
+
+  // Scope check
+  assertLeadSourceScope(actor, leadSource)
+
+  const updated = await updateLeadSource(id, { isActive: !leadSource.isActive })
 
   return {
     ...updated,
