@@ -836,11 +836,11 @@ export const importLeadsFromExcelService = async (
   const REQUIRED_HEADERS = [
     { key: "name",   aliases: ["lead name", "name"] },
     { key: "mobile", aliases: ["mobile number", "mobile", "phone number", "phone"] },
-    { key: "source", aliases: ["lead source", "source"] },
-    { key: "course", aliases: ["interested course/product", "interested course", "course", "product", "interested for"] }
+    { key: "source", aliases: ["lead source", "source"] }
   ];
 
   const OPTIONAL_HEADERS = [
+    { key: "course",          aliases: ["interested course/product", "interested course", "course", "product", "interested for"] },
     { key: "email",           aliases: ["email", "email address"] },
     { key: "alternateMobile", aliases: ["alternate contact", "alternate mobile", "alternate contact number", "secondary mobile"] },
     { key: "budget",          aliases: ["budget"] },
@@ -888,6 +888,18 @@ export const importLeadsFromExcelService = async (
     }
   }
 
+  // Helper to extract values
+  const getRowVal = (row, appKey) => {
+    const fileKey = columnMapping[appKey];
+    if (!fileKey) return "";
+    return String(row[fileKey] ?? "").trim();
+  };
+
+  // ── Check if any row has blank Course ──
+  const hasAnyBlankCourse = rows.some((row) => {
+    return !getRowVal(row, "course");
+  });
+
   // ── Pre-fetch reference data to optimize performance ──────────────────────
   const [allCompanies, allBranches, allUsers, sources, courses, existingLeads] = await Promise.all([
     prisma.company.findMany({ where: { status: "ACTIVE" } }),
@@ -896,61 +908,38 @@ export const importLeadsFromExcelService = async (
       where: { status: "ACTIVE" },
       include: { userRoles: { include: { role: true } } }
     }),
-    prisma.leadSource.findMany({ where: { isActive: true } }),
-    prisma.course.findMany({ where: { status: "ACTIVE", isDeleted: false } }),
+    prisma.leadSource.findMany({
+      where: {
+        OR: [
+          { companyId: null },
+          { companyId: Number(companyId) }
+        ],
+        deletedAt: null
+      }
+    }),
+    prisma.course.findMany({
+      where: {
+        companyId: Number(companyId),
+        isDeleted: false
+      }
+    }),
     prisma.lead.findMany({
       where: { isDeleted: false },
       select: { id: true, mobile: true, email: true, alternateMobile: true, companyId: true }
     })
   ]);
 
-  const sourceNames = sources.map((s) => s.name);
-  const courseNames = courses.map((c) => c.name);
+  const sourceNames = sources.filter(s => s.isActive).map((s) => s.name);
+  const courseNames = courses.filter(c => c.status === "ACTIVE").map((c) => c.name);
 
-  // Ensure "Other" course exists for the resolved company scope
-  let otherCourse = courses.find(
-    (c) => c.name.toLowerCase().trim() === "other" && c.companyId === Number(companyId)
+  // Check default course if needed
+  const defaultCourse = courses.find(
+    (c) => c.name.toLowerCase().trim() === "other" && c.status === "ACTIVE"
   );
 
-  if (!otherCourse) {
-    const companyObj = allCompanies.find((c) => c.id === Number(companyId));
-    const prefix = companyObj ? (companyObj.code || companyObj.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4)) : "CRS";
-    const otherCode = `${prefix}-OTHER`.toUpperCase();
-
-    const existingCodeCourse = await prisma.course.findFirst({
-      where: { companyId: Number(companyId), code: otherCode }
-    });
-
-    if (existingCodeCourse) {
-      otherCourse = await prisma.course.update({
-        where: { id: existingCodeCourse.id },
-        data: { name: "Other", status: "ACTIVE", isDeleted: false }
-      });
-    } else {
-      otherCourse = await prisma.course.create({
-        data: {
-          companyId: Number(companyId),
-          name: "Other",
-          code: otherCode,
-          category: "General",
-          price: 0,
-          createdById: actor.id
-        }
-      });
-    }
-    courses.push(otherCourse);
-    courseNames.push(otherCourse.name);
+  if (hasAnyBlankCourse && !defaultCourse) {
+    throw new BadRequestError("This company has no default course configured. Either a default must be set up, or every row must explicitly specify a valid course so none are left blank.");
   }
-
-  const getCompanyByCode = (code) => {
-    if (!code) return null;
-    return allCompanies.find((c) => c.code.toLowerCase().trim() === code.toLowerCase().trim());
-  };
-
-  const getBranchByCode = (code) => {
-    if (!code) return null;
-    return allBranches.find((b) => b.code.toLowerCase().trim() === code.toLowerCase().trim());
-  };
 
   // ── Row processing & validation ──────────────────────────────────────────
   const previewRows = [];
@@ -969,25 +958,18 @@ export const importLeadsFromExcelService = async (
     const fieldsInError = [];
     const suggestions = {};
 
-    // Extracts & normalize fields
-    const getVal = (appKey) => {
-      const fileKey = columnMapping[appKey];
-      if (!fileKey) return "";
-      return String(row[fileKey] ?? "").trim();
-    };
-
-    const name = getVal("name");
-    const mobile = getVal("mobile").replace(/[\s\-().+]/g, "");
-    const sourceStr = getVal("source");
-    const courseStr = getVal("course");
-    const email = getVal("email").toLowerCase();
-    const alternateMobile = getVal("alternateMobile").replace(/[\s\-().+]/g, "");
-    const budgetStr = getVal("budget");
-    const city = getVal("city");
-    const state = getVal("state");
-    const country = getVal("country");
-    const notes = getVal("notes");
-    const assignedToVal = getVal("assignedTo");
+    const name = getRowVal(row, "name");
+    const mobile = getRowVal(row, "mobile").replace(/[\s\-().+]/g, "");
+    const sourceStr = getRowVal(row, "source");
+    const courseStr = getRowVal(row, "course");
+    const email = getRowVal(row, "email").toLowerCase();
+    const alternateMobile = getRowVal(row, "alternateMobile").replace(/[\s\-().+]/g, "");
+    const budgetStr = getRowVal(row, "budget");
+    const city = getRowVal(row, "city");
+    const state = getRowVal(row, "state");
+    const country = getRowVal(row, "country");
+    const notes = getRowVal(row, "notes");
+    const assignedToVal = getRowVal(row, "assignedTo");
 
     // ── 1. Role-Based Company / Branch Scope Resolution ──
     const rowCompanyId = companyId;
@@ -1023,39 +1005,38 @@ export const importLeadsFromExcelService = async (
       rowErrors.push("Lead Source is required");
       fieldsInError.push("source");
     } else if (rowCompanyId) {
+      const normalizedSourceStr = sourceStr.toLowerCase().trim();
       matchedSource = sources.find(
-        (s) =>
-          (s.name.toLowerCase().trim() === sourceStr.toLowerCase().trim() || String(s.id) === sourceStr) &&
-          (s.companyId === null || s.companyId === rowCompanyId)
+        (s) => s.name.toLowerCase().trim() === normalizedSourceStr || String(s.id) === sourceStr
       );
       if (!matchedSource) {
-        rowErrors.push(`Lead Source "${sourceStr}" does not exist or is inactive for the resolved company`);
+        rowErrors.push("Lead Source was not recognized as a valid source for this company.");
         fieldsInError.push("source");
         const closest = findClosestMatch(sourceStr, sourceNames);
         if (closest) suggestions.source = closest;
+      } else if (!matchedSource.isActive) {
+        rowErrors.push("Lead Source exists but is currently inactive");
+        fieldsInError.push("source");
       }
     }
 
     // ── 5. Validate Course under resolved company scope ──
     let matchedCourse = null;
     if (!courseStr) {
-      rowErrors.push("Interested Course/Product is required");
-      fieldsInError.push("course");
+      matchedCourse = defaultCourse;
     } else if (rowCompanyId) {
+      const normalizedCourseStr = courseStr.toLowerCase().trim();
       matchedCourse = courses.find(
-        (c) =>
-          (c.name.toLowerCase().trim() === courseStr.toLowerCase().trim() || String(c.id) === courseStr) &&
-          c.companyId === rowCompanyId
+        (c) => c.name.toLowerCase().trim() === normalizedCourseStr || String(c.id) === courseStr
       );
       if (!matchedCourse) {
-        rowErrors.push(`Course "${courseStr}" does not exist or is inactive for the resolved company`);
+        rowErrors.push("Course was not recognized as a valid course for this company.");
         fieldsInError.push("course");
-        // Limit suggestions to courses belonging ONLY to this company
-        const companyCourseNames = courses
-          .filter((c) => c.companyId === rowCompanyId)
-          .map((c) => c.name);
-        const closest = findClosestMatch(courseStr, companyCourseNames);
+        const closest = findClosestMatch(courseStr, courseNames);
         if (closest) suggestions.course = closest;
+      } else if (matchedCourse.status !== "ACTIVE") {
+        rowErrors.push("Course exists but is currently inactive");
+        fieldsInError.push("course");
       }
     }
 
@@ -1192,7 +1173,7 @@ export const importLeadsFromExcelService = async (
       errorReport.push({
         row: rowNum,
         name,
-        mobile: mobile || getVal("mobile"),
+        mobile: mobile || getRowVal(row, "mobile"),
         type: hasError ? "validation" : "duplicate",
         reason: hasError ? rowErrors.join(", ") : duplicateReason,
         fields: fieldsInError,
@@ -1228,7 +1209,7 @@ export const importLeadsFromExcelService = async (
       previewRows.push({
         rowNum,
         name,
-        mobile: mobile || getVal("mobile"),
+        mobile: mobile || getRowVal(row, "mobile"),
         source: sourceStr,
         course: courseStr,
         email,
@@ -1275,8 +1256,8 @@ export const importLeadsFromExcelService = async (
         fileName,
         totalRows: rows.length,
         successCount: 0,
-        failureCount,
-        duplicateCount,
+        failureCount: errorReport.length,
+        duplicateCount: 0,
         status: "FAILED",
         errorReport: errorReport,
         createdById: actor.id
@@ -1288,8 +1269,8 @@ export const importLeadsFromExcelService = async (
       fileName,
       totalRows: rows.length,
       successCount: 0,
-      failureCount,
-      duplicateCount,
+      failureCount: errorReport.length,
+      duplicateCount: 0,
       status: "FAILED",
       errorReport: errorReport,
       message: `Import rejected — ${errorReport.length} row(s) contain errors or duplicates. Fix all errors and re-upload. No data was saved.`
