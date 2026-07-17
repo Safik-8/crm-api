@@ -396,6 +396,21 @@ export const getLeadsService = async (query, actor) => {
   if (query?.pipelineId) where.pipelineId = Number(query.pipelineId);
   if (query?.stageId)    where.stageId    = Number(query.stageId);
 
+  // Scope filters
+  if (query?.companyId) {
+    const targetCompany = Number(query.companyId);
+    if (!actor.companyId || actor.companyId === targetCompany) {
+      where.companyId = targetCompany;
+    }
+  }
+  if (query?.branchId) {
+    const targetBranch = Number(query.branchId);
+    if (!actor.branchId || actor.branchId === targetBranch) {
+      where.branchId = targetBranch;
+    }
+  }
+  if (query?.teamId)     where.teamId     = Number(query.teamId);
+
   // Lead management filters
   if (query?.sourceId)     where.sourceId     = Number(query.sourceId);
   if (query?.courseId)     where.courseId     = Number(query.courseId);

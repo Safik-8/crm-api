@@ -1,7 +1,7 @@
 // src/modules/userprofile/userprofile.routes.js
 
 import { Router } from "express"
-import { getUserProfile, updateUserProfile, changePassword, getUserSessions, revokeUserSession, deactivateUserAccount } from "./userprofile.controllers.js"
+import { getUserProfile, updateUserProfile, changePassword, getUserSessions, revokeUserSession, deactivateUserAccount, getUserPreferences, updateUserPreferences } from "./userprofile.controllers.js"
 import { authenticate } from "../../middleware/Authenticate.js"
 import { validateBody, updateUserProfileSchema, changePasswordSchema } from "./userprofile.validation.js"
 
@@ -13,6 +13,9 @@ router.use(authenticate)
 router.get("/", getUserProfile)
 router.put("/", validateBody(updateUserProfileSchema), updateUserProfile)
 router.put("/change-password", validateBody(changePasswordSchema), changePassword)
+
+router.get("/preferences", getUserPreferences)
+router.put("/preferences", updateUserPreferences)
 
 router.get("/sessions", getUserSessions)
 router.delete("/sessions/:id", revokeUserSession)
