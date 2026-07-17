@@ -84,6 +84,7 @@ export const MODULES = [
   "NOTIFICATION",
   "AUDIT",
   "LEAD_SOURCE",
+  "LEAD_STATUS",
 ]
 
 // ── PERMISSION ACTIONS ───────────────────────────────────────────
