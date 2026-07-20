@@ -7,6 +7,8 @@ import {
   getUserSessionsService,
   revokeUserSessionService,
   deactivateUserAccountService,
+  getUserPreferencesService,
+  updateUserPreferencesService
 } from "./userprofile.services.js"
 import { sendSuccess } from "../../utils/response.js"
 
@@ -99,6 +101,30 @@ export const deactivateUserAccount = async (req, res, next) => {
     res.clearCookie("accessToken")
     res.clearCookie("refreshToken")
     return sendSuccess(res, null, "Account deactivated successfully")
+  } catch (err) {
+    next(err)
+  }
+}
+
+/**
+ * GET /api/user-profile/preferences
+ */
+export const getUserPreferences = async (req, res, next) => {
+  try {
+    const preferences = await getUserPreferencesService(req.user.id)
+    return sendSuccess(res, preferences, "Preferences fetched successfully")
+  } catch (err) {
+    next(err)
+  }
+}
+
+/**
+ * PUT /api/user-profile/preferences
+ */
+export const updateUserPreferences = async (req, res, next) => {
+  try {
+    const preferences = await updateUserPreferencesService(req.user.id, req.body.sessionPreferences)
+    return sendSuccess(res, preferences, "Preferences updated successfully")
   } catch (err) {
     next(err)
   }

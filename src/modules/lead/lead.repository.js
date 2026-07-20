@@ -15,7 +15,14 @@ export const leadDetailInclude = {
   source:     { select: { id: true, name: true } },
   course:     { select: { id: true, name: true } },
   status:     { select: { id: true, name: true, code: true, displayColor: true } },
-  assignedTo: { select: { id: true, name: true, email: true } },
+  assignedTo: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      reportingManager: { select: { id: true, name: true } }
+    }
+  },
   team:       { select: { id: true, name: true } },
   createdBy:  { select: { id: true, name: true } },
   updatedBy:  { select: { id: true, name: true } },

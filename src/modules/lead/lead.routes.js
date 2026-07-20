@@ -11,10 +11,13 @@ import {
   getLeadById,
   updateLead,
   deleteLead,
+  tempDeleteAllLeads,
   updateLeadStage,
   addLeadComment,
   getLeadComments,
   importLeadsFromExcel,
+  getLeadImportLogs,
+  downloadImportErrors,
   restoreLead,
   getLeadNotes,
   createLeadNote,
@@ -39,11 +42,17 @@ router.use(authenticate);
 router.get("/branch-users", hasPermission("LEAD", "canCreate"), getBranchUsersForLead);
 router.get("/form-data",    hasPermission("LEAD", "canCreate"), getLeadFormData);
 
+// ── Bulk Excel import & logs ─────────────────────────────────────────────────
+router.post("/import-excel",       hasPermission("LEAD", "canCreate"), importLeadsFromExcel);
+router.get( "/import-logs",        hasPermission("LEAD", "canCreate"), getLeadImportLogs);
+router.get( "/import-logs/:id/errors", hasPermission("LEAD", "canCreate"), downloadImportErrors);
+
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 router.post(  "/",    hasPermission("LEAD", "canCreate"), validateBody(createLeadSchema), createLead);
 router.get(   "/",    hasPermission("LEAD", "canView"),   getLeads);
 router.get(   "/:id", hasPermission("LEAD", "canView"),   getLeadById);
 router.put(   "/:id", hasPermission("LEAD", "canEdit"),   validateBody(updateLeadSchema), updateLead);
+router.delete("/temp-delete-all", hasPermission("LEAD", "canDelete"), tempDeleteAllLeads);
 router.delete("/:id", hasPermission("LEAD", "canDelete"), deleteLead);
 
 // ── Lead Restore (Reopen soft-deleted lead) ──────────────────────────────────
@@ -57,9 +66,6 @@ router.delete("/:id/notes/:noteId", hasPermission("LEAD", "canEdit"), deleteLead
 
 // ── Timeline ──────────────────────────────────────────────────────────────────
 router.get("/:id/timeline", hasPermission("LEAD", "canView"), getLeadTimeline);
-
-// ── Bulk Excel import ─────────────────────────────────────────────────────────
-router.post("/import-excel", hasPermission("LEAD", "canCreate"), importLeadsFromExcel);
 
 // ── Kanban stage update (drag-drop) ──────────────────────────────────────────
 router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), validateBody(updateLeadStageSchema), updateLeadStage);

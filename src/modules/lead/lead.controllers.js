@@ -1,5 +1,5 @@
 // src/modules/lead/lead.controllers.js
-
+ 
 import { sendSuccess } from "../../utils/response.js";
 import {
   getBranchUsersForLeadService,
@@ -9,10 +9,13 @@ import {
   getLeadByIdService,
   updateLeadService,
   deleteLeadService,
+  tempDeleteAllLeadsService,
   updateLeadStageService,
   addLeadCommentService,
   getLeadCommentsService,
   importLeadsFromExcelService,
+  getLeadImportLogsService,
+  getImportErrorsCsvService,
   restoreLeadService,
   getLeadNotesService,
   createLeadNoteService,
@@ -85,6 +88,15 @@ export const deleteLead = async (req, res, next) => {
   }
 };
 
+export const tempDeleteAllLeads = async (req, res, next) => {
+  try {
+    const result = await tempDeleteAllLeadsService(req.user);
+    return sendSuccess(res, result, "All leads deleted successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const updateLeadStage = async (req, res, next) => {
   try {
     const lead = await updateLeadStageService(req.params.id, req.body, req.user);
@@ -119,21 +131,51 @@ export const importLeadsFromExcel = (req, res, next) => {
       if (!req.file) {
         return res.status(400).json({
           success: false,
-          message: "No file uploaded. Send the Excel file as form-data field named 'file'."
+          message: "No file uploaded. Send the file as form-data field named 'file'."
         });
       }
-      const result = await importLeadsFromExcelService(req.file.buffer, req.body.pipelineId, req.user);
-      return sendSuccess(res, result, `Import complete. ${result.created} lead(s) created, ${result.skipped} skipped.`, 200);
+      const preview = req.query.preview === "true" || req.body.preview === "true";
+      const result = await importLeadsFromExcelService(
+        req.file.buffer,
+        req.body.pipelineId,
+        req.user,
+        !preview,
+        req.file.originalname,
+        req.body.companyId ? Number(req.body.companyId) : null,
+        req.body.branchId ? Number(req.body.branchId) : null
+      );
+      const msg = preview ? "Preview generated successfully" : "Import completed successfully";
+      return sendSuccess(res, result, msg, 200);
     } catch (e) {
       next(e);
     }
   });
 };
 
+export const getLeadImportLogs = async (req, res, next) => {
+  try {
+    const logs = await getLeadImportLogsService(req.user);
+    return sendSuccess(res, { logs }, "Lead import logs fetched successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const restoreLead = async (req, res, next) => {
   try {
     const lead = await restoreLeadService(req.params.id, req.user);
     return sendSuccess(res, { lead }, "Lead restored successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const downloadImportErrors = async (req, res, next) => {
+  try {
+    const csv = await getImportErrorsCsvService(req.params.id, req.user);
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename=lead_import_errors_${req.params.id}.csv`);
+    return res.status(200).send(csv);
   } catch (err) {
     next(err);
   }
@@ -183,4 +225,3 @@ export const getLeadTimeline = async (req, res, next) => {
     next(err);
   }
 };
-

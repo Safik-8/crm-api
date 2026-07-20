@@ -171,3 +171,115 @@ export const deactivateUserAccountService = async (userId) => {
   ])
 }
 
+/**
+ * Service to retrieve a user's settings/preferences
+ */
+export const getUserPreferencesService = async (userId) => {
+  let settings = await prisma.userSettings.findUnique({
+    where: { userId: Number(userId) }
+  })
+  
+  if (!settings) {
+    settings = await prisma.userSettings.create({
+      data: {
+        userId: Number(userId),
+        notificationPreferences: {},
+        sessionPreferences: {},
+        securitySettings: {}
+      }
+    })
+  }
+  return settings
+}
+
+/**
+ * Service to update user's sessionPreferences JSON safely in a transaction
+ */
+export const updateUserPreferencesService = async (userId, sessionPreferences) => {
+  const parsedUserId = Number(userId)
+  return prisma.$transaction(async (tx) => {
+    let settings = await tx.userSettings.findUnique({
+      where: { userId: parsedUserId }
+    })
+    
+    if (!settings) {
+      // Validate duplicate names on incoming savedLeadFilters if any
+      const incomingSavedFilters = sessionPreferences?.savedLeadFilters;
+      if (Array.isArray(incomingSavedFilters)) {
+        const namesSeen = new Set();
+        for (const filter of incomingSavedFilters) {
+          const normalizedName = filter.name.toLowerCase().trim();
+          if (namesSeen.has(normalizedName)) {
+            throw new BadRequestError(`A saved filter with the name "${filter.name}" already exists.`);
+          }
+          namesSeen.add(normalizedName);
+        }
+      }
+
+      settings = await tx.userSettings.create({
+        data: {
+          userId: parsedUserId,
+          notificationPreferences: {},
+          sessionPreferences: sessionPreferences || {},
+          securitySettings: {}
+        }
+      })
+    } else {
+      // Authoritative read from DB
+      const dbPreferences = settings.sessionPreferences || {};
+      const dbSavedFilters = dbPreferences.savedLeadFilters || [];
+      const incomingSavedFilters = sessionPreferences?.savedLeadFilters;
+
+      let finalSavedFilters = dbSavedFilters;
+
+      if (Array.isArray(incomingSavedFilters)) {
+        const incomingIds = new Set(incomingSavedFilters.map(f => String(f.id)));
+        
+        // 1. Handle deletes: keep only filters that are in incomingSavedFilters
+        finalSavedFilters = dbSavedFilters.filter(f => incomingIds.has(String(f.id)));
+
+        // 2. Handle additions/updates
+        for (const incoming of incomingSavedFilters) {
+          const existingIdx = finalSavedFilters.findIndex(f => String(f.id) === String(incoming.id));
+          if (existingIdx > -1) {
+            // Update/Rename
+            finalSavedFilters[existingIdx] = {
+              ...finalSavedFilters[existingIdx],
+              ...incoming
+            };
+          } else {
+            // Add
+            finalSavedFilters.push(incoming);
+          }
+        }
+
+        // 3. Enforce case-insensitive duplicate name checks (only if not a delete operation)
+        const isDeleteOperation = finalSavedFilters.length < dbSavedFilters.length;
+        if (!isDeleteOperation) {
+          const namesSeen = new Set();
+          for (const filter of finalSavedFilters) {
+            const normalizedName = filter.name.toLowerCase().trim();
+            if (namesSeen.has(normalizedName)) {
+              throw new BadRequestError(`A saved filter with the name "${filter.name}" already exists.`);
+            }
+            namesSeen.add(normalizedName);
+          }
+        }
+      }
+
+      // Write merged result back, preserving other unrelated settings in dbPreferences
+      settings = await tx.userSettings.update({
+        where: { userId: parsedUserId },
+        data: {
+          sessionPreferences: {
+            ...dbPreferences,
+            ...sessionPreferences,
+            savedLeadFilters: finalSavedFilters
+          }
+        }
+      })
+    }
+    return settings
+  })
+}
+
