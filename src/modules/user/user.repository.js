@@ -320,3 +320,120 @@ export const findAssignableRoles = async (actorRank, companyId) => {
     select: { id: true, name: true, rank: true, isSystem: true, status: true }
   })
 }
+
+/**
+ * Finds users eligible to receive leads and direct reports from a target user being deleted.
+ * Criteria:
+ * 1. Must belong to the same company as the target user.
+ * 2. Must belong to the same branch as the target user (if branchId exists).
+ * 3. Role rank must be equal to or higher than the target user's role rank.
+ * 4. Cannot be the target user itself.
+ * 5. Must be ACTIVE status.
+ */
+export const findEligibleReplacements = async (targetUser) => {
+  const targetUserRank = targetUser.userRoles?.find(ur => ur.isPrimary)?.role?.rank ?? 0
+  const targetCompanyId = targetUser.companyId
+  const targetBranchId = targetUser.branchId
+
+  const candidates = await prisma.user.findMany({
+    where: {
+      id: { not: targetUser.id },
+      companyId: targetCompanyId,
+      status: "ACTIVE",
+      OR: [
+        ...(targetBranchId ? [{ branchId: targetBranchId }] : []),
+        { branchId: null },
+        { userRoles: { some: { role: { rank: { gte: 80 } } } } }
+      ]
+    },
+    include: {
+      userRoles: {
+        include: {
+          role: true
+        }
+      },
+      branch: {
+        select: { id: true, name: true }
+      }
+    }
+  })
+
+  return candidates.filter(candidate => {
+    const primaryRole = candidate.userRoles?.find(ur => ur.isPrimary) || candidate.userRoles?.[0]
+    const rank = primaryRole?.role?.rank ?? 0
+    return rank >= targetUserRank
+  }).map(c => {
+    const primaryRole = c.userRoles?.find(ur => ur.isPrimary) || c.userRoles?.[0]
+    return {
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      branchName: c.branch?.name || "Global / Company Wide",
+      roleName: primaryRole?.role?.name || "Member",
+      rank: primaryRole?.role?.rank ?? 0
+    }
+  })
+}
+
+/**
+ * Hard deletes a User and reassigns leads & direct reports atomically in a transaction.
+ */
+export const deleteUserTransaction = async (targetUserId, replacementUserId, actorId) => {
+  return prisma.$transaction(async (tx) => {
+    let leadsReassignedCount = 0
+    let subordinatesReassignedCount = 0
+
+    // 1. Reassign Leads if replacementUserId is provided
+    if (replacementUserId) {
+      const leadUpdate = await tx.lead.updateMany({
+        where: { assignedToId: replacementUserId ? Number(replacementUserId) : null },
+        data: { assignedToId: Number(replacementUserId) }
+      })
+      // Correct query filter
+      const actualLeadUpdate = await tx.lead.updateMany({
+        where: { assignedToId: targetUserId },
+        data: { assignedToId: Number(replacementUserId) }
+      })
+      leadsReassignedCount = actualLeadUpdate.count
+    }
+
+    // 2. Reassign Direct Reports (Subordinates) if replacementUserId is provided
+    if (replacementUserId) {
+      const subUpdate = await tx.user.updateMany({
+        where: { reportingManagerId: targetUserId },
+        data: { reportingManagerId: Number(replacementUserId) }
+      })
+      subordinatesReassignedCount = subUpdate.count
+    } else {
+      // Unlink manager if no replacement provided
+      await tx.user.updateMany({
+        where: { reportingManagerId: targetUserId },
+        data: { reportingManagerId: null }
+      })
+    }
+
+    // 3. Remove team memberships
+    await tx.teamMember.deleteMany({
+      where: { userId: targetUserId }
+    })
+
+    // 4. Remove User relations
+    await tx.refreshToken.deleteMany({ where: { userId: targetUserId } })
+    await tx.userRole.deleteMany({ where: { userId: targetUserId } })
+    await tx.userProfile.deleteMany({ where: { userId: targetUserId } })
+    await tx.userSettings.deleteMany({ where: { userId: targetUserId } })
+
+    // 5. Hard delete User record
+    const deletedUser = await tx.user.delete({
+      where: { id: targetUserId }
+    })
+
+    return {
+      deletedUser,
+      leadsReassignedCount,
+      subordinatesReassignedCount
+    }
+  }, {
+    timeout: 15000
+  })
+}
