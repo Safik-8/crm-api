@@ -16,7 +16,7 @@ export const createUserSchema = z.object({
   }).trim().email("Enter a valid email address").toLowerCase(),
   mobileNumber: z.string({
     required_error: "Mobile number is required"
-  }).trim().min(10, "Mobile number must be at least 10 digits"),
+  }).trim().regex(/^\d{10}$/, "Mobile number must be exactly 10 digits"),
   employeeId: z.string().trim().optional().nullable(),
   joiningDate: z.coerce.date({
     required_error: "Joining date is required",
@@ -44,7 +44,7 @@ export const createUserSchema = z.object({
 export const updateUserSchema = z.object({
   firstName: z.string().trim().min(1, "First name cannot be empty").optional(),
   lastName: z.string().trim().min(1, "Last name cannot be empty").optional(),
-  mobileNumber: z.string().trim().min(10, "Mobile number must be at least 10 digits").optional(),
+  mobileNumber: z.string().trim().regex(/^\d{10}$/, "Mobile number must be exactly 10 digits").optional(),
   branchId: z.number().int().positive().optional(),
   roleId: z.number().int().positive().optional(),
   reportingManagerId: z.number().int().positive().nullable().optional(),

@@ -7,7 +7,7 @@ export const updateUserProfileSchema = z.object({
   firstName: z.string().trim().max(100, "First name must be under 100 characters").optional().nullable(),
   lastName: z.string().trim().max(100, "Last name must be under 100 characters").optional().nullable(),
   mobileNumber: z.string().trim()
-    .regex(/^$|^[+0-9\s-]{8,20}$/, "Invalid mobile number format")
+    .regex(/^$|^\d{10}$/, "Mobile number must be exactly 10 digits")
     .optional().nullable(),
   profilePhoto: z.string().trim().optional().nullable(),
   address: z.string().trim().max(500, "Address must be under 500 characters").optional().nullable(),
