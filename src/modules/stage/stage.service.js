@@ -9,21 +9,24 @@ export const createStageService = async (data, actor) => {
 
   const existing = await prisma.stage.findFirst({
     where: { name },
-    select: { id: true, isDeleted: true }
+    select: { id: true, isDeleted: true, status: true }
   })
 
-  if (existing && !existing.isDeleted) throw new ConflictError("Stage name already exists", "name")
+  if (existing && !existing.isDeleted && existing.status === "ACTIVE") {
+    throw new ConflictError("Stage name already exists", "name")
+  }
 
-  if (existing && existing.isDeleted) {
+  if (existing && (existing.isDeleted || existing.status !== "ACTIVE")) {
     return prisma.stage.update({
       where: { id: existing.id },
-      data: { isDeleted: false, updatedById: actor.id, name }
+      data: { isDeleted: false, status: "ACTIVE", updatedById: actor.id, name }
     })
   }
 
   return prisma.stage.create({
     data: {
       name,
+      status: "ACTIVE",
       isDefault: false,
       isDeleted: false,
       createdById: actor.id
@@ -33,7 +36,7 @@ export const createStageService = async (data, actor) => {
 
 export const getAllStagesService = async () => {
   return prisma.stage.findMany({
-    where: { isDeleted: false },
+    where: { isDeleted: false, status: "ACTIVE" },
     orderBy: [{ isDefault: "desc" }, { name: "asc" }]
   })
 }
@@ -46,11 +49,11 @@ export const updateStageService = async (id, data, actor) => {
   if (!name) throw new ValidationError("Validation failed", [{ field: "name", message: "name is required" }])
 
   const stage = await prisma.stage.findUnique({ where: { id: stageId } })
-  if (!stage || stage.isDeleted) throw new NotFoundError("Stage")
+  if (!stage || stage.isDeleted || stage.status !== "ACTIVE") throw new NotFoundError("Stage")
   if (stage.isDefault) throw new BadRequestError("Default stage cannot be renamed")
 
   const duplicate = await prisma.stage.findFirst({
-    where: { name, id: { not: stageId }, isDeleted: false },
+    where: { name, id: { not: stageId }, isDeleted: false, status: "ACTIVE" },
     select: { id: true }
   })
   if (duplicate) throw new ConflictError("Stage name already exists", "name")
@@ -66,7 +69,7 @@ export const deleteStageService = async (id, actor) => {
   if (!Number.isInteger(stageId) || stageId < 1) throw new BadRequestError("Invalid stage id")
 
   const stage = await prisma.stage.findUnique({ where: { id: stageId } })
-  if (!stage || stage.isDeleted) throw new NotFoundError("Stage")
+  if (!stage || stage.isDeleted || stage.status !== "ACTIVE") throw new NotFoundError("Stage")
   if (stage.isDefault) throw new BadRequestError("Default stage cannot be deleted")
 
   const leadCount = await prisma.lead.count({
@@ -78,7 +81,7 @@ export const deleteStageService = async (id, actor) => {
 
   return prisma.stage.update({
     where: { id: stageId },
-    data: { isDeleted: true, updatedById: actor.id }
+    data: { isDeleted: true, status: "INACTIVE", updatedById: actor.id }
   })
 }
 

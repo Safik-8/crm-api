@@ -80,7 +80,7 @@ export const getDashboardReportsService = async (query, user) => {
   // ── Dynamically resolve stage IDs by name ─────────────────────
   const stageNames = DASHBOARD_STAGE_MAP.map(m => m.stageName)
   const stages = await prisma.stage.findMany({
-    where: { name: { in: stageNames }, isDeleted: false },
+    where: { name: { in: stageNames }, isDeleted: false, status: "ACTIVE" },
     select: { id: true, name: true }
   })
   const stageIdByName = new Map(stages.map(s => [s.name, s.id]))
