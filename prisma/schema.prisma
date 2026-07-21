@@ -329,6 +329,7 @@ model Stage {
   displayOrder Int     @default(0) @map("display_order")
   colorCode    String? @map("color_code")
   status       String  @default("ACTIVE")
+  stageType    String  @default("REGULAR") @map("stage_type")
 
   pipelineStages          PipelineStage[]
   leads                   Lead[]
