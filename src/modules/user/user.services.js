@@ -9,7 +9,9 @@ import {
   countUsers,
   updateUserPassword,
   createAuditLog,
-  findAssignableRoles
+  findAssignableRoles,
+  findEligibleReplacements,
+  deleteUserTransaction
 } from "./user.repository.js"
 import {
   ValidationError,
@@ -495,4 +497,150 @@ export const toggleUserStatusService = async (id, status, actor) => {
  */
 export const getAssignableRolesService = async (actor) => {
   return findAssignableRoles(actor.primaryRoleRank, actor.companyId)
+}
+
+/**
+ * Service to fetch eligible replacement candidates when deleting a user.
+ * Filters by target user's company, branch, and role rank >= target user rank.
+ */
+export const getEligibleReplacementsService = async (targetId, actor) => {
+  const actorRank = actor.primaryRoleRank ?? 0
+  if (actorRank < 80) {
+    throw new ForbiddenError("Only Super Admins and Company Admins can initiate user deletion")
+  }
+
+  const targetUser = await findUserById(Number(targetId))
+  if (!targetUser) throw new NotFoundError("User")
+
+  // Company scope assertion for Company Admin
+  assertCompanyScope(actor, targetUser.companyId)
+
+  // Rank check: actor rank must be strictly higher than target user rank
+  const targetRank = getUserRank(targetUser)
+  if (actor.primaryRole !== "SUPER_ADMIN" && targetRank >= actorRank) {
+    throw new ForbiddenError("You cannot delete a user with equal or higher rank than your own")
+  }
+
+  // Count active leads assigned to targetUser
+  const assignedLeadsCount = await prisma.lead.count({
+    where: { assignedToId: Number(targetId) }
+  })
+
+  // Count direct reports managing under targetUser
+  const directReportsCount = await prisma.user.count({
+    where: { reportingManagerId: Number(targetId) }
+  })
+
+  const candidates = await findEligibleReplacements(targetUser)
+
+  return {
+    targetUser: {
+      id: targetUser.id,
+      name: targetUser.name,
+      email: targetUser.email,
+      rank: targetRank
+    },
+    assignedLeadsCount,
+    directReportsCount,
+    requiresReassignment: assignedLeadsCount > 0 || directReportsCount > 0,
+    candidates
+  }
+}
+
+/**
+ * Service to hard delete a user and reassign their leads & direct reports atomically.
+ */
+export const deleteUserService = async (targetId, replacementUserId, actor) => {
+  const actorRank = actor.primaryRoleRank ?? 0
+  if (actorRank < 80) {
+    throw new ForbiddenError("Only Super Admins and Company Admins can hard delete users")
+  }
+
+  const targetUserId = Number(targetId)
+
+  // Self deletion guard
+  if (targetUserId === actor.id) {
+    throw new ValidationError("Self deletion prohibited", [{ field: "id", message: "You cannot delete your own account" }])
+  }
+
+  const targetUser = await findUserById(targetUserId)
+  if (!targetUser) throw new NotFoundError("User")
+
+  // Company scope assertion for Company Admin
+  assertCompanyScope(actor, targetUser.companyId)
+
+  // Rank check: actor rank must be strictly higher than target user rank
+  const targetRank = getUserRank(targetUser)
+  if (actor.primaryRole !== "SUPER_ADMIN" && targetRank >= actorRank) {
+    throw new ForbiddenError("You cannot delete a user with equal or higher rank than your own")
+  }
+
+  // Count active leads & direct reports
+  const assignedLeadsCount = await prisma.lead.count({
+    where: { assignedToId: targetUserId }
+  })
+
+  const directReportsCount = await prisma.user.count({
+    where: { reportingManagerId: targetUserId }
+  })
+
+  const requiresReassignment = assignedLeadsCount > 0 || directReportsCount > 0
+
+  if (requiresReassignment && !replacementUserId) {
+    throw new ValidationError("Reassignment required", [
+      { field: "replacementUserId", message: `This user owns ${assignedLeadsCount} leads and ${directReportsCount} direct reports. You must select an eligible replacement user.` }
+    ])
+  }
+
+  // Validate replacement user if provided
+  let replacementUser = null
+  if (replacementUserId) {
+    replacementUser = await findUserById(Number(replacementUserId))
+    if (!replacementUser) throw new NotFoundError("Replacement User")
+
+    if (replacementUser.id === targetUserId) {
+      throw new ValidationError("Invalid replacement", [{ field: "replacementUserId", message: "Replacement user cannot be the same user being deleted" }])
+    }
+
+    if (replacementUser.companyId !== targetUser.companyId) {
+      throw new ValidationError("Company mismatch", [{ field: "replacementUserId", message: "Replacement user must belong to the same company" }])
+    }
+
+    const replacementRank = getUserRank(replacementUser)
+    if (replacementRank < targetRank) {
+      throw new ValidationError("Rank mismatch", [{ field: "replacementUserId", message: "Replacement user rank must be equal to or higher than deleted user rank" }])
+    }
+  }
+
+  // Execute database transaction
+  const result = await deleteUserTransaction(targetUserId, replacementUserId ? Number(replacementUserId) : null, actor.id)
+
+  // Write audit trail
+  await createAuditLog({
+    companyId: targetUser.companyId,
+    entityType: "USER",
+    entityId: targetUserId,
+    action: "DELETE",
+    oldValue: {
+      id: targetUser.id,
+      name: targetUser.name,
+      email: targetUser.email,
+      assignedLeadsCount,
+      directReportsCount
+    },
+    newValue: {
+      deleted: true,
+      replacementUserId: replacementUserId ? Number(replacementUserId) : null,
+      replacementUserName: replacementUser ? replacementUser.name : null,
+      leadsReassignedCount: result.leadsReassignedCount,
+      subordinatesReassignedCount: result.subordinatesReassignedCount
+    },
+    performedById: actor.id
+  })
+
+  return {
+    message: "User hard deleted successfully",
+    leadsReassignedCount: result.leadsReassignedCount,
+    subordinatesReassignedCount: result.subordinatesReassignedCount
+  }
 }

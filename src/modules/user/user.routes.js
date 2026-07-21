@@ -8,7 +8,9 @@ import {
   updateUser,
   toggleUserStatus,
   resetUserPassword,
-  getAssignableRoles
+  getAssignableRoles,
+  getEligibleReplacements,
+  deleteUser
 } from "./user.controllers.js"
 import {
   createUserSchema,
@@ -47,6 +49,13 @@ router.get(
   getAssignableRoles
 )
 
+// GET /api/users/:id/eligible-replacements — fetch eligible replacement users for reassignment before delete
+router.get(
+  "/:id/eligible-replacements",
+  hasPermission("USER", "canDelete"),
+  getEligibleReplacements
+)
+
 // GET /api/users/:id — fetch complete details of a single user
 router.get(
   "/:id",
@@ -75,6 +84,13 @@ router.post(
   "/:id/reset-password",
   hasPermission("USER", "canEdit"),
   resetUserPassword
+)
+
+// DELETE /api/users/:id — hard delete user with mandatory asset reassignment
+router.delete(
+  "/:id",
+  hasPermission("USER", "canDelete"),
+  deleteUser
 )
 
 export default router

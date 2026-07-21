@@ -4,7 +4,9 @@ import {
   getUsersService,
   resetUserPasswordService,
   toggleUserStatusService,
-  getAssignableRolesService
+  getAssignableRolesService,
+  getEligibleReplacementsService,
+  deleteUserService
 } from "./user.services.js"
 import { findUserById } from "./user.repository.js"
 import { NotFoundError } from "../../utils/AppError.js"
@@ -63,5 +65,20 @@ export const getAssignableRoles = async (req, res, next) => {
   try {
     const roles = await getAssignableRolesService(req.user)
     return sendSuccess(res, { roles }, "Assignable roles fetched successfully")
+  } catch (err) { next(err) }
+}
+
+export const getEligibleReplacements = async (req, res, next) => {
+  try {
+    const result = await getEligibleReplacementsService(req.params.id, req.user)
+    return sendSuccess(res, result, "Eligible replacement candidates fetched successfully")
+  } catch (err) { next(err) }
+}
+
+export const deleteUser = async (req, res, next) => {
+  try {
+    const { replacementUserId } = req.body || {}
+    const result = await deleteUserService(req.params.id, replacementUserId, req.user)
+    return sendSuccess(res, result, "User hard deleted successfully")
   } catch (err) { next(err) }
 }
