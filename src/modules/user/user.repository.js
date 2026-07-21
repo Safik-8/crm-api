@@ -68,7 +68,8 @@ export const createUserTransaction = async (data, actorId) => {
     state,
     country,
     pincode,
-    emergencyContact
+    emergencyContact,
+    profilePhoto
   } = data
 
   const fullName = `${firstName} ${lastName}`.trim()
@@ -88,6 +89,7 @@ export const createUserTransaction = async (data, actorId) => {
         companyId,
         branchId,
         reportingManagerId: reportingManagerId || null,
+        profilePhoto: profilePhoto?.trim() || null,
         mustChangePassword: true, // Force reset on admin creation
         status: "ACTIVE"
       }
@@ -153,7 +155,8 @@ export const updateUserTransaction = async (userId, data) => {
     state,
     country,
     pincode,
-    emergencyContact
+    emergencyContact,
+    profilePhoto
   } = data
 
   return prisma.$transaction(async (tx) => {
@@ -181,7 +184,8 @@ export const updateUserTransaction = async (userId, data) => {
         ...(mobileNumber !== undefined && { mobileNumber: mobileNumber?.trim() || null }),
         ...(branchId !== undefined && { branchId }),
         ...(reportingManagerId !== undefined && { reportingManagerId: reportingManagerId || null }),
-        ...(status !== undefined && { status })
+        ...(status !== undefined && { status }),
+        ...(profilePhoto !== undefined && { profilePhoto: profilePhoto?.trim() || null })
       }
     })
 

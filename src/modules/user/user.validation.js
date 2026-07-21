@@ -38,6 +38,7 @@ export const createUserSchema = z.object({
   country: z.string().trim().optional().nullable(),
   pincode: z.string().trim().optional().nullable(),
   emergencyContact: z.string().trim().optional().nullable(),
+  profilePhoto: z.string().trim().optional().nullable(),
 })
 
 // Schema for editing an existing user
@@ -55,6 +56,7 @@ export const updateUserSchema = z.object({
   country: z.string().trim().optional().nullable(),
   pincode: z.string().trim().optional().nullable(),
   emergencyContact: z.string().trim().optional().nullable(),
+  profilePhoto: z.string().trim().optional().nullable(),
 }).refine(data => Object.keys(data).length > 0, {
   message: "At least one field must be provided for update"
 })
