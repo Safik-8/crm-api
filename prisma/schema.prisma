@@ -24,20 +24,26 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  branches       Branch[]
-  users          User[]
-  userRoles      UserRole[]
-  pipelines      Pipeline[]
-  leadSources    LeadSource[]
-  roles          Role[]
-  passwordResets PasswordReset[]
-  teams          Team[]          // NEW-S2
-  courses        Course[]        // NEW-S2
-  userProfiles   UserProfile[]   // NEW-S2
-  auditLogs      AuditLog[]      // NEW-S2
-  leads          Lead[]
-  leadStatuses   LeadStatus[]
-  leadImportLogs LeadImportLog[]
+  branches          Branch[]
+  users             User[]
+  userRoles         UserRole[]
+  pipelines         Pipeline[]
+  leadSources       LeadSource[]
+  roles             Role[]
+  passwordResets    PasswordReset[]
+  teams             Team[] // NEW-S2
+  courses           Course[] // NEW-S2
+  userProfiles      UserProfile[] // NEW-S2
+  auditLogs         AuditLog[] // NEW-S2
+  leads             Lead[]
+  leadStatuses      LeadStatus[]
+  leadImportLogs    LeadImportLog[]
+  leadAssignments   LeadAssignment[]
+  pipelineHistory   PipelineHistory[]
+  followups         Followup[]
+  notifications     Notification[]
+  leadActivities    LeadActivity[]
+  communicationLogs CommunicationLog[]
 
   @@map("companies")
 }
@@ -58,10 +64,15 @@ model Branch {
   userRoles          UserRole[]
   pipelines          Pipeline[]
   dailyBranchReports DailyBranchReport[]
-  teams              Team[]              // NEW-S2
-  userProfiles       UserProfile[]       // NEW-S2
+  teams              Team[] // NEW-S2
+  userProfiles       UserProfile[] // NEW-S2
   leads              Lead[]
   leadImportLogs     LeadImportLog[]
+  leadAssignments    LeadAssignment[]
+  pipelineHistory    PipelineHistory[]
+  followups          Followup[]
+  notifications      Notification[]
+  communicationLogs  CommunicationLog[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -86,23 +97,23 @@ model User {
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   // ── NEW-S2 fields (additive, nullable) ──
-  firstName          String?   @map("first_name")
-  lastName           String?   @map("last_name")
+  firstName String? @map("first_name")
+  lastName  String? @map("last_name")
   // NOTE: existing name field is KEPT for backward compatibility.
   // App layer must sync: name = ${firstName} ${lastName}.trim()
   // on every create/update so existing code reading .name keeps working.
 
-  mobileNumber       String?   @unique @map("mobile_number")
-  employeeId         String?   @unique @map("employee_id")
-  joiningDate        DateTime? @map("joining_date")
-  profilePhoto       String?   @map("profile_photo")
+  mobileNumber String?   @unique @map("mobile_number")
+  employeeId   String?   @unique @map("employee_id")
+  joiningDate  DateTime? @map("joining_date")
+  profilePhoto String?   @map("profile_photo")
   // FIX #1: profilePhoto lives ONLY here, not duplicated on UserProfile
 
-  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  mustChangePassword Boolean @default(false) @map("must_change_password")
   // FIX #3: needed for Task 1.8 "force password change on next login"
   // set true on admin-triggered reset, cleared after successful login
 
-  reportingManagerId Int?      @map("reporting_manager_id")
+  reportingManagerId Int? @map("reporting_manager_id")
 
   // ── Sprint 1 relations (unchanged) ──
   company                   Company?            @relation(fields: [companyId], references: [id])
@@ -119,25 +130,39 @@ model User {
   passwordResets            PasswordReset[]
 
   // ── NEW-S2 relations ──
-  reportingManager    User?          @relation("UserReportingManager", fields: [reportingManagerId], references: [id])
-  subordinates        User[]         @relation("UserReportingManager")
+  reportingManager    User?         @relation("UserReportingManager", fields: [reportingManagerId], references: [id])
+  subordinates        User[]        @relation("UserReportingManager")
   profile             UserProfile?
   settings            UserSettings?
-  ownedTeams          Team[]         @relation("TeamBDE")
-  createdTeams        Team[]         @relation("TeamCreatedBy")
-  updatedTeams        Team[]         @relation("TeamUpdatedBy")
-  teamMemberships     TeamMember[]   @relation("TeamMemberUser")
-  teamAssignmentsMade TeamMember[]   @relation("TeamMemberAssignedBy")
-  createdCourses      Course[]       @relation("CourseCreatedBy")
-  updatedCourses      Course[]       @relation("CourseUpdatedBy")
-  auditLogsPerformed  AuditLog[]     @relation("AuditPerformedBy")
+  ownedTeams          Team[]        @relation("TeamBDE")
+  createdTeams        Team[]        @relation("TeamCreatedBy")
+  updatedTeams        Team[]        @relation("TeamUpdatedBy")
+  teamMemberships     TeamMember[]  @relation("TeamMemberUser")
+  teamAssignmentsMade TeamMember[]  @relation("TeamMemberAssignedBy")
+  createdCourses      Course[]      @relation("CourseCreatedBy")
+  updatedCourses      Course[]      @relation("CourseUpdatedBy")
+  auditLogsPerformed  AuditLog[]    @relation("AuditPerformedBy")
 
   // ── Sprint 3 relations ──
-  updatedLeads      Lead[]          @relation("UserUpdatedLeads")
-  deletedLeads      Lead[]          @relation("UserDeletedLeads")
-  leadNoteCreated   LeadNote[]      @relation("LeadNoteCreatedBy")
-  leadNoteUpdated   LeadNote[]      @relation("LeadNoteUpdatedBy")
-  leadImportLogs    LeadImportLog[] @relation("LeadImportLogCreatedBy")
+  updatedLeads    Lead[]          @relation("UserUpdatedLeads")
+  deletedLeads    Lead[]          @relation("UserDeletedLeads")
+  leadNoteCreated LeadNote[]      @relation("LeadNoteCreatedBy")
+  leadNoteUpdated LeadNote[]      @relation("LeadNoteUpdatedBy")
+  leadImportLogs  LeadImportLog[] @relation("LeadImportLogCreatedBy")
+
+  // ── Sprint 4 relations ──
+  leadAssignmentsReceived   LeadAssignment[]   @relation("LeadAssignmentsReceived")
+  leadAssignmentsAsPrevious LeadAssignment[]   @relation("LeadAssignmentsAsPrevious")
+  leadAssignmentsMade       LeadAssignment[]   @relation("LeadAssignmentsMade")
+  pipelineChangesMade       PipelineHistory[]  @relation("PipelineChangesMade")
+  followupsAssigned         Followup[]         @relation("FollowupsAssigned")
+  followupsCreated          Followup[]         @relation("FollowupsCreated")
+  followupsCompleted        Followup[]         @relation("FollowupsCompleted")
+  followupsUpdated          Followup[]         @relation("FollowupsUpdated")
+  notificationsReceived     Notification[]     @relation("NotificationsReceived")
+  leadActivitiesPerformed   LeadActivity[]     @relation("LeadActivitiesPerformed")
+  communicationLogsCreated  CommunicationLog[] @relation("CommunicationLogsCreated")
+  communicationLogsDeleted  CommunicationLog[] @relation("CommunicationLogsDeleted")
 
   @@index([companyId])
   @@index([branchId])
@@ -147,22 +172,22 @@ model User {
 
 model Role {
   id          Int      @id @default(autoincrement())
-  companyId   Int?     @map("company_id")             // null = global system role, shared by all companies
-  name        String                                   // role identifier — unique within company scope
+  companyId   Int?     @map("company_id") // null = global system role, shared by all companies
+  name        String // role identifier — unique within company scope
   description String?
-  rank        Int      @default(0)                     // authority level: Super Admin=100, Company Admin=80, Branch Manager=60, BDE/ISE=40
+  rank        Int      @default(0) // authority level: Super Admin=100, Company Admin=80, Branch Manager=60, BDE/ISE=40
   isSystem    Boolean  @default(false) @map("is_system") // true = seeded role, locks rank & name, prevents deletion
-  status      String   @default("ACTIVE")              // "ACTIVE" | "INACTIVE"
+  status      String   @default("ACTIVE") // "ACTIVE" | "INACTIVE"
   createdBy   Int?     @map("created_by")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
-  company         Company?    @relation(fields: [companyId], references: [id])
-  createdByUser   User?       @relation("RoleCreatedBy", fields: [createdBy], references: [id])
+  company         Company?     @relation(fields: [companyId], references: [id])
+  createdByUser   User?        @relation("RoleCreatedBy", fields: [createdBy], references: [id])
   userRoles       UserRole[]
   rolePermissions Permission[]
 
-  @@unique([companyId, name])           // same name allowed per-company, no cross-company collision
+  @@unique([companyId, name]) // same name allowed per-company, no cross-company collision
   @@index([companyId])
   @@map("roles")
 }
@@ -226,7 +251,7 @@ model RefreshToken {
 model PasswordReset {
   id         Int      @id @default(autoincrement())
   userId     Int      @map("user_id")
-  companyId  Int?     @map("company_id")  // denormalized from user at creation time
+  companyId  Int?     @map("company_id") // denormalized from user at creation time
   otp        String
   isVerified Boolean  @default(false) @map("is_verified")
   expiresAt  DateTime @map("expires_at")
@@ -246,13 +271,13 @@ model PasswordReset {
 
 model LeadSource {
   id          Int       @id @default(autoincrement())
-  companyId   Int?      @map("company_id")   // null = global system source
+  companyId   Int?      @map("company_id") // null = global system source
   name        String
-  description String?                        // FIX: Task 2.3 — was missing
+  description String? // FIX: Task 2.3 — was missing
   isActive    Boolean   @default(true) @map("is_active")
   deletedAt   DateTime? @map("deleted_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")  // FIX: was missing
+  updatedAt   DateTime  @updatedAt @map("updated_at") // FIX: was missing
 
   company Company? @relation(fields: [companyId], references: [id])
   leads   Lead[]
@@ -300,9 +325,17 @@ model Stage {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  pipelineStages     PipelineStage[]
-  leads              Lead[]
-  leadsPreviousStage Lead[] @relation("LeadPreviousStage")
+  code         String? @unique
+  displayOrder Int     @default(0) @map("display_order")
+  colorCode    String? @map("color_code")
+  status       String  @default("ACTIVE")
+  stageType    String  @default("REGULAR") @map("stage_type")
+
+  pipelineStages          PipelineStage[]
+  leads                   Lead[]
+  leadsPreviousStage      Lead[]            @relation("LeadPreviousStage")
+  pipelineHistoryPrevious PipelineHistory[] @relation("PipelineHistoryPreviousStage")
+  pipelineHistoryNew      PipelineHistory[] @relation("PipelineHistoryNewStage")
 
   @@map("stages")
 }
@@ -326,11 +359,11 @@ model PipelineStage {
 // ══════════════════════════════════════
 
 model Lead {
-  id               Int       @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
   // ── TENANT SCOPE (direct — no pipeline join required) ──────────
-  companyId        Int?      @map("company_id")
-  branchId         Int?      @map("branch_id")
+  companyId Int? @map("company_id")
+  branchId  Int? @map("branch_id")
 
   // ── PIPELINE (optional — Kanban view only) ──────────────────────
   // A lead can exist without a pipeline (list view entry)
@@ -342,68 +375,74 @@ model Lead {
   stageChangedAt   DateTime? @map("stage_changed_at")
 
   // ── MANDATORY RELATIONS ─────────────────────────────────────────
-  sourceId         Int?      @map("source_id")   // mandatory at app layer
-  courseId         Int?      @map("course_id")    // mandatory at app layer
-  statusId         Int?      @map("status_id")    // mandatory at app layer; nullable for migration safety
+  sourceId Int? @map("source_id") // mandatory at app layer
+  courseId Int? @map("course_id") // mandatory at app layer
+  statusId Int? @map("status_id") // mandatory at app layer; nullable for migration safety
 
   // ── ASSIGNMENT ──────────────────────────────────────────────────
-  assignedToId     Int?      @map("assigned_to")
-  teamId           Int?      @map("team_id")
+  assignedToId Int? @map("assigned_to")
+  teamId       Int? @map("team_id")
 
   // ── MANDATORY CONTACT ───────────────────────────────────────────
-  name             String
-  mobile           String
+  name   String
+  mobile String
 
   // ── OPTIONAL CONTACT ────────────────────────────────────────────
-  email            String?
-  alternateMobile  String?   @map("alternate_mobile")
+  email           String?
+  alternateMobile String? @map("alternate_mobile")
 
   // ── LEAD DETAILS ────────────────────────────────────────────────
-  priority         String    @default("MEDIUM")   // "HIGH" | "MEDIUM" | "LOW"
-  budget           Decimal?  @db.Decimal(10, 2)
-  city             String?
-  state            String?
-  country          String?
-  notes            String?   @db.Text             // quick single-field note on lead
+  priority String   @default("MEDIUM") // "HIGH" | "MEDIUM" | "LOW"
+  budget   Decimal? @db.Decimal(10, 2)
+  city     String?
+  state    String?
+  country  String?
+  notes    String?  @db.Text // quick single-field note on lead
 
   // ── DUPLICATE TRACKING (Task 7) ─────────────────────────────────
-  isDuplicate      Boolean   @default(false) @map("is_duplicate")
-  duplicateOfId    Int?      @map("duplicate_of_id")  // self-reference to original lead
+  isDuplicate   Boolean @default(false) @map("is_duplicate")
+  duplicateOfId Int?    @map("duplicate_of_id") // self-reference to original lead
 
   // ── BACKWARD COMPAT ─────────────────────────────────────────────
-  date             DateTime  @default(now())
-  interestedFor    String?   @map("interested_for")  // DEPRECATED: kept for Kanban, use courseId
+  date          DateTime @default(now())
+  interestedFor String?  @map("interested_for") // DEPRECATED: kept for Kanban, use courseId
 
   // ── SOFT DELETE (Task 1.6) ──────────────────────────────────────
-  isDeleted        Boolean   @default(false) @map("is_deleted")
-  deletedById      Int?      @map("deleted_by")
-  deletedAt        DateTime? @map("deleted_at")
+  isDeleted   Boolean   @default(false) @map("is_deleted")
+  deletedById Int?      @map("deleted_by")
+  deletedAt   DateTime? @map("deleted_at")
 
   // ── AUDIT ───────────────────────────────────────────────────────
-  createdById      Int       @map("created_by")
-  updatedById      Int?      @map("updated_by")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  createdById Int      @map("created_by")
+  updatedById Int?     @map("updated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   // ── RELATIONS ───────────────────────────────────────────────────
-  company        Company?      @relation(fields: [companyId], references: [id])
-  branch         Branch?       @relation(fields: [branchId], references: [id])
-  pipeline       Pipeline?     @relation(fields: [pipelineId], references: [id])
-  stage          Stage?        @relation(fields: [stageId], references: [id])
-  previousStage  Stage?        @relation("LeadPreviousStage", fields: [previousStageId], references: [id])
-  stageChangedBy User?         @relation("UserStageChangedLeads", fields: [stageChangedById], references: [id])
-  source         LeadSource?   @relation(fields: [sourceId], references: [id])
-  course         Course?       @relation(fields: [courseId], references: [id])
-  status         LeadStatus?   @relation(fields: [statusId], references: [id])
-  assignedTo     User?         @relation("UserAssignedLeads", fields: [assignedToId], references: [id])
-  team           Team?         @relation(fields: [teamId], references: [id])
-  duplicateOf    Lead?         @relation("LeadDuplicate", fields: [duplicateOfId], references: [id])
-  duplicates     Lead[]        @relation("LeadDuplicate")
-  createdBy      User          @relation("UserCreatedLeads", fields: [createdById], references: [id])
-  updatedBy      User?         @relation("UserUpdatedLeads", fields: [updatedById], references: [id])
-  deletedBy      User?         @relation("UserDeletedLeads", fields: [deletedById], references: [id])
-  comments       LeadComment[]
-  leadNotes      LeadNote[]
+  company           Company?           @relation(fields: [companyId], references: [id])
+  branch            Branch?            @relation(fields: [branchId], references: [id])
+  pipeline          Pipeline?          @relation(fields: [pipelineId], references: [id])
+  stage             Stage?             @relation(fields: [stageId], references: [id])
+  previousStage     Stage?             @relation("LeadPreviousStage", fields: [previousStageId], references: [id])
+  stageChangedBy    User?              @relation("UserStageChangedLeads", fields: [stageChangedById], references: [id])
+  source            LeadSource?        @relation(fields: [sourceId], references: [id])
+  course            Course?            @relation(fields: [courseId], references: [id])
+  status            LeadStatus?        @relation(fields: [statusId], references: [id])
+  assignedTo        User?              @relation("UserAssignedLeads", fields: [assignedToId], references: [id])
+  team              Team?              @relation(fields: [teamId], references: [id])
+  duplicateOf       Lead?              @relation("LeadDuplicate", fields: [duplicateOfId], references: [id])
+  duplicates        Lead[]             @relation("LeadDuplicate")
+  createdBy         User               @relation("UserCreatedLeads", fields: [createdById], references: [id])
+  updatedBy         User?              @relation("UserUpdatedLeads", fields: [updatedById], references: [id])
+  deletedBy         User?              @relation("UserDeletedLeads", fields: [deletedById], references: [id])
+  comments          LeadComment[]
+  leadNotes         LeadNote[]
+  assignments       LeadAssignment[]
+  pipelineHistory   PipelineHistory[]
+  followups         Followup[]
+  notifications     Notification[]
+  activities        LeadActivity[]
+  communicationLogs CommunicationLog[]
 
   // ── INDEXES ─────────────────────────────────────────────────────
   @@index([companyId])
@@ -416,12 +455,12 @@ model Lead {
   @@index([statusId])
   @@index([assignedToId])
   @@index([teamId])
-  @@index([mobile])                    // fast single-field lookup
-  @@index([email])                     // fast email duplicate detection
-  @@index([alternateMobile])           // FIX: Task 7.4 alternate contact dup detection
-  @@index([companyId, mobile])         // compound: duplicate check within company scope
-  @@index([isDuplicate])               // filter duplicates fast
-  @@index([createdAt])                 // date range filter
+  @@index([mobile]) // fast single-field lookup
+  @@index([email]) // fast email duplicate detection
+  @@index([alternateMobile]) // FIX: Task 7.4 alternate contact dup detection
+  @@index([companyId, mobile]) // compound: duplicate check within company scope
+  @@index([isDuplicate]) // filter duplicates fast
+  @@index([createdAt]) // date range filter
   @@map("leads")
 }
 
@@ -431,13 +470,13 @@ model Lead {
 
 model LeadStatus {
   id            Int      @id @default(autoincrement())
-  companyId     Int?     @map("company_id")       // null = global system status
-  name          String                             // "New", "Open", "Contacted"
-  code          String                             // "NEW", "OPEN", "CONTACTED"
-  displayColor  String   @map("display_color")    // hex: "#3b82f6"
+  companyId     Int?     @map("company_id") // null = global system status
+  name          String // "New", "Open", "Contacted"
+  code          String // "NEW", "OPEN", "CONTACTED"
+  displayColor  String   @map("display_color") // hex: "#3b82f6"
   sequenceOrder Int      @default(0) @map("sequence_order")
-  isDefault     Boolean  @default(false) @map("is_default")  // auto-assigned on lead create
-  isSystem      Boolean  @default(false) @map("is_system")   // prevents deletion
+  isDefault     Boolean  @default(false) @map("is_default") // auto-assigned on lead create
+  isSystem      Boolean  @default(false) @map("is_system") // prevents deletion
   isActive      Boolean  @default(true) @map("is_active")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
@@ -445,7 +484,7 @@ model LeadStatus {
   company Company? @relation(fields: [companyId], references: [id])
   leads   Lead[]
 
-  @@unique([companyId, code])   // same code allowed per-company, no cross-company collision
+  @@unique([companyId, code]) // same code allowed per-company, no cross-company collision
   @@index([companyId])
   @@map("lead_statuses")
 }
@@ -460,7 +499,7 @@ model LeadNote {
   note        String   @db.Text
   isDeleted   Boolean  @default(false) @map("is_deleted")
   createdById Int      @map("created_by")
-  updatedById Int?     @map("updated_by")    // FIX: who last edited this note
+  updatedById Int?     @map("updated_by") // FIX: who last edited this note
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -480,14 +519,14 @@ model LeadImportLog {
   id             Int      @id @default(autoincrement())
   companyId      Int      @map("company_id")
   branchId       Int      @map("branch_id")
-  pipelineId     Int?     @map("pipeline_id")   // optional: set when imported via Kanban
+  pipelineId     Int?     @map("pipeline_id") // optional: set when imported via Kanban
   fileName       String   @map("file_name")
   totalRows      Int      @map("total_rows")
   successCount   Int      @default(0) @map("success_count")
   failureCount   Int      @default(0) @map("failure_count")
-  duplicateCount Int      @default(0) @map("duplicate_count")  // rows flagged as duplicate
+  duplicateCount Int      @default(0) @map("duplicate_count") // rows flagged as duplicate
   status         String   @default("COMPLETED") // "COMPLETED" | "PARTIAL" | "FAILED"
-  errorReport    Json?    @map("error_report")  // full downloadable error data (Task 4.7)
+  errorReport    Json?    @map("error_report") // full downloadable error data (Task 4.7)
   createdById    Int      @map("created_by")
   createdAt      DateTime @default(now()) @map("created_at")
 
@@ -501,7 +540,6 @@ model LeadImportLog {
   @@index([createdById])
   @@map("lead_import_logs")
 }
-
 
 // ══════════════════════════════════════
 // LEAD COMMENT
@@ -535,14 +573,14 @@ model DailyBranchReport {
   branchId   Int      @map("branch_id")
   reportDate DateTime @map("report_date") // store date-only at 00:00:00
 
-  callsReceived      Int     @default(0) @map("calls_received")
-  qualifiedLeads     Int     @default(0) @map("qualified_leads")
-  counsellingDone    Int     @default(0) @map("counselling_done")
-  counsellingBooked  Int     @default(0) @map("counselling_booked")
-  officeVisits       Int     @default(0) @map("office_visits")
-  closures           Int     @default(0) @map("closures")
-  followupsDone      Int     @default(0) @map("followups_done")
-  pendingFollowups   Int     @default(0) @map("pending_followups")
+  callsReceived     Int @default(0) @map("calls_received")
+  qualifiedLeads    Int @default(0) @map("qualified_leads")
+  counsellingDone   Int @default(0) @map("counselling_done")
+  counsellingBooked Int @default(0) @map("counselling_booked")
+  officeVisits      Int @default(0) @map("office_visits")
+  closures          Int @default(0) @map("closures")
+  followupsDone     Int @default(0) @map("followups_done")
+  pendingFollowups  Int @default(0) @map("pending_followups")
 
   isDeleted   Boolean  @default(false) @map("is_deleted")
   createdById Int      @map("created_by")
@@ -568,22 +606,22 @@ model DailyBranchReport {
 // ══════════════════════════════════════
 
 model UserProfile {
-  id               Int      @id @default(autoincrement())
-  userId           Int      @unique @map("user_id")
-  companyId        Int?     @map("company_id")   // denormalized for tenant isolation
-  branchId         Int?     @map("branch_id")    // denormalized for tenant isolation
+  id        Int  @id @default(autoincrement())
+  userId    Int  @unique @map("user_id")
+  companyId Int? @map("company_id") // denormalized for tenant isolation
+  branchId  Int? @map("branch_id") // denormalized for tenant isolation
 
   address          String?
   city             String?
   state            String?
   country          String?
-  pincode          String?                        // FIX #11: postal/zip code
-  emergencyContact String?  @map("emergency_contact")
+  pincode          String? // FIX #11: postal/zip code
+  emergencyContact String? @map("emergency_contact")
 
   // FIX #1: profilePhoto intentionally NOT here — lives only on User
 
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   user    User     @relation(fields: [userId], references: [id])
   company Company? @relation(fields: [companyId], references: [id])
@@ -600,15 +638,15 @@ model UserProfile {
 // ══════════════════════════════════════
 
 model UserSettings {
-  id                      Int      @id @default(autoincrement())
-  userId                  Int      @unique @map("user_id")
+  id     Int @id @default(autoincrement())
+  userId Int @unique @map("user_id")
 
-  notificationPreferences Json?    @map("notification_preferences")
-  sessionPreferences      Json?    @map("session_preferences")
-  securitySettings        Json?    @map("security_settings")
+  notificationPreferences Json? @map("notification_preferences")
+  sessionPreferences      Json? @map("session_preferences")
+  securitySettings        Json? @map("security_settings")
 
-  createdAt               DateTime @default(now()) @map("created_at")
-  updatedAt               DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -625,25 +663,27 @@ model Team {
   branchId    Int      @map("branch_id")
   name        String   @map("team_name")
   code        String   @map("team_code")
-  bdeId       Int      @map("bde_id")             // team owner — exactly one BDE
+  bdeId       Int      @map("bde_id") // team owner — exactly one BDE
   status      String   @default("ACTIVE")
   isDeleted   Boolean  @default(false) @map("is_deleted")
   createdById Int      @map("created_by")
-  updatedById Int?     @map("updated_by")          // FIX A: relation now defined
+  updatedById Int?     @map("updated_by") // FIX A: relation now defined
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  company   Company      @relation(fields: [companyId], references: [id])
-  branch    Branch       @relation(fields: [branchId], references: [id])
-  bde       User         @relation("TeamBDE", fields: [bdeId], references: [id])
-  createdBy User         @relation("TeamCreatedBy", fields: [createdById], references: [id])
-  updatedBy User?        @relation("TeamUpdatedBy", fields: [updatedById], references: [id]) // FIX A
-  members   TeamMember[]
-  leads     Lead[]
+  company                   Company          @relation(fields: [companyId], references: [id])
+  branch                    Branch           @relation(fields: [branchId], references: [id])
+  bde                       User             @relation("TeamBDE", fields: [bdeId], references: [id])
+  createdBy                 User             @relation("TeamCreatedBy", fields: [createdById], references: [id])
+  updatedBy                 User?            @relation("TeamUpdatedBy", fields: [updatedById], references: [id]) // FIX A
+  members                   TeamMember[]
+  leads                     Lead[]
+  leadAssignmentsReceived   LeadAssignment[] @relation("TeamAssignmentsReceived")
+  leadAssignmentsAsPrevious LeadAssignment[] @relation("TeamAssignmentsAsPrevious")
 
   // FIX #4: team_code unique PER COMPANY, not globally
   @@unique([companyId, code])
-  @@unique([branchId, name])       // team name unique within a branch
+  @@unique([branchId, name]) // team name unique within a branch
   @@index([companyId])
   @@index([branchId])
   @@index([bdeId])
@@ -651,21 +691,21 @@ model Team {
 }
 
 model TeamMember {
-  id             Int       @id @default(autoincrement())
-  teamId         Int       @map("team_id")
-  userId         Int       @map("user_id")
-  memberRole     String    @map("member_role")     // "BDE" | "ISE"
-  assignedDate   DateTime  @default(now()) @map("assigned_date")
-  assignedById   Int?      @map("assigned_by_id")
+  id           Int      @id @default(autoincrement())
+  teamId       Int      @map("team_id")
+  userId       Int      @map("user_id")
+  memberRole   String   @map("member_role") // "BDE" | "ISE"
+  assignedDate DateTime @default(now()) @map("assigned_date")
+  assignedById Int?     @map("assigned_by_id")
   // FIX #6: records WHO made the assignment — audit trail
 
-  removedAt      DateTime? @map("removed_at")
+  removedAt DateTime? @map("removed_at")
   // FIX #5: single source of truth for membership state.
   // removedAt IS NULL  → active member
   // removedAt IS SET   → removed member (history preserved)
   // Dropped redundant status + isDeleted fields
 
-  createdAt      DateTime  @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   team       Team  @relation(fields: [teamId], references: [id])
   user       User  @relation("TeamMemberUser", fields: [userId], references: [id])
@@ -686,7 +726,7 @@ model Course {
   companyId      Int      @map("company_id")
   name           String   @map("course_name")
   code           String   @map("course_code")
-  description    String?                              // FIX #9: was missing
+  description    String? // FIX #9: was missing
   category       String
   parentCategory String?  @map("parent_category")
   price          Decimal  @db.Decimal(10, 2)
@@ -694,7 +734,7 @@ model Course {
   status         String   @default("ACTIVE")
   isDeleted      Boolean  @default(false) @map("is_deleted")
   createdById    Int      @map("created_by")
-  updatedById    Int?     @map("updated_by")           // FIX A: relation now defined
+  updatedById    Int?     @map("updated_by") // FIX A: relation now defined
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -714,16 +754,16 @@ model Course {
 // ══════════════════════════════════════
 
 model AuditLog {
-  id            Int      @id @default(autoincrement())
-  companyId     Int?     @map("company_id")
+  id        Int  @id @default(autoincrement())
+  companyId Int? @map("company_id")
   // FIX #7: added for tenant-scoped queries without entity joins
 
-  entityType    String   @map("entity_type")   // "USER" | "TEAM" | "COURSE" | "ROLE" ...
-  entityId      Int      @map("entity_id")
-  action        String                          // "CREATE" | "UPDATE" | "STATUS_CHANGE" | "PASSWORD_RESET" | "MANAGER_CHANGE" | "MEMBER_REMOVE" ...
+  entityType String @map("entity_type") // "USER" | "TEAM" | "COURSE" | "ROLE" ...
+  entityId   Int    @map("entity_id")
+  action     String // "CREATE" | "UPDATE" | "STATUS_CHANGE" | "PASSWORD_RESET" | "MANAGER_CHANGE" | "MEMBER_REMOVE" ...
 
-  oldValue      Json?    @map("old_value")      // FIX #8: native Json, not varchar
-  newValue      Json?    @map("new_value")      // FIX #8: native Json, not varchar
+  oldValue Json? @map("old_value") // FIX #8: native Json, not varchar
+  newValue Json? @map("new_value") // FIX #8: native Json, not varchar
 
   performedById Int?     @map("performed_by_id")
   createdAt     DateTime @default(now()) @map("created_at")
@@ -735,4 +775,196 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([performedById])
   @@map("audit_logs")
+}
+
+// ══════════════════════════════════════════════════════════════
+// SPRINT 4 — NEW TABLES
+// ══════════════════════════════════════════════════════════════
+
+model LeadAssignment {
+  id               Int      @id @default(autoincrement())
+  leadId           Int      @map("lead_id")
+  companyId        Int      @map("company_id")
+  branchId         Int?     @map("branch_id")
+  assignmentType   String   @map("assignment_type") // "MANUAL" | "BULK" | "REASSIGNMENT"
+  assignedToUserId Int?     @map("assigned_to_user_id")
+  assignedToTeamId Int?     @map("assigned_to_team_id")
+  previousUserId   Int?     @map("previous_user_id")
+  previousTeamId   Int?     @map("previous_team_id")
+  assignedById     Int      @map("assigned_by_id")
+  notes            String?  @db.Text
+  reason           String?  @db.Text
+  assignedAt       DateTime @default(now()) @map("assigned_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  // Relations
+  lead           Lead    @relation(fields: [leadId], references: [id])
+  company        Company @relation(fields: [companyId], references: [id])
+  branch         Branch? @relation(fields: [branchId], references: [id])
+  assignedToUser User?   @relation("LeadAssignmentsReceived", fields: [assignedToUserId], references: [id])
+  assignedToTeam Team?   @relation("TeamAssignmentsReceived", fields: [assignedToTeamId], references: [id])
+  previousUser   User?   @relation("LeadAssignmentsAsPrevious", fields: [previousUserId], references: [id])
+  previousTeam   Team?   @relation("TeamAssignmentsAsPrevious", fields: [previousTeamId], references: [id])
+  assignedByUser User    @relation("LeadAssignmentsMade", fields: [assignedById], references: [id])
+
+  @@index([leadId])
+  @@index([companyId])
+  @@index([branchId])
+  @@index([assignedToUserId])
+  @@index([assignedToTeamId])
+  @@index([leadId, assignedAt])
+  @@map("lead_assignments")
+}
+
+model PipelineHistory {
+  id              Int      @id @default(autoincrement())
+  leadId          Int      @map("lead_id")
+  companyId       Int      @map("company_id")
+  branchId        Int?     @map("branch_id")
+  previousStageId Int?     @map("previous_stage_id")
+  newStageId      Int      @map("new_stage_id")
+  changedById     Int      @map("changed_by_id")
+  reason          String?  @db.Text
+  changedAt       DateTime @default(now()) @map("changed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  lead          Lead    @relation(fields: [leadId], references: [id])
+  company       Company @relation(fields: [companyId], references: [id])
+  branch        Branch? @relation(fields: [branchId], references: [id])
+  previousStage Stage?  @relation("PipelineHistoryPreviousStage", fields: [previousStageId], references: [id])
+  newStage      Stage   @relation("PipelineHistoryNewStage", fields: [newStageId], references: [id])
+  changedByUser User    @relation("PipelineChangesMade", fields: [changedById], references: [id])
+
+  @@index([leadId])
+  @@index([companyId])
+  @@index([branchId])
+  @@index([previousStageId])
+  @@index([newStageId])
+  @@map("pipeline_histories")
+}
+
+model Followup {
+  id              Int       @id @default(autoincrement())
+  leadId          Int       @map("lead_id")
+  companyId       Int       @map("company_id")
+  branchId        Int?      @map("branch_id")
+  followupType    String    @map("followup_type") // "CALL" | "MEETING" | "DEMO" | "WHATSAPP" | "EMAIL" | "VISIT"
+  scheduledAt     DateTime  @map("scheduled_at")
+  status          String    @default("PENDING") // "PENDING" | "COMPLETED" | "MISSED" | "CANCELLED"
+  notes           String?   @db.Text
+  completionNotes String?   @map("completion_notes") @db.Text
+  completedAt     DateTime? @map("completed_at")
+  completedById   Int?      @map("completed_by_id")
+  assignedToId    Int       @map("assigned_to_id")
+  createdById     Int       @map("created_by")
+  updatedById     Int?      @map("updated_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  lead          Lead           @relation(fields: [leadId], references: [id])
+  company       Company        @relation(fields: [companyId], references: [id])
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  completedBy   User?          @relation("FollowupsCompleted", fields: [completedById], references: [id])
+  assignedTo    User           @relation("FollowupsAssigned", fields: [assignedToId], references: [id])
+  createdBy     User           @relation("FollowupsCreated", fields: [createdById], references: [id])
+  updatedBy     User?          @relation("FollowupsUpdated", fields: [updatedById], references: [id])
+  notifications Notification[]
+
+  @@index([leadId])
+  @@index([companyId])
+  @@index([branchId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([assignedToId, status, scheduledAt])
+  @@map("followups")
+}
+
+model Notification {
+  id               Int       @id @default(autoincrement())
+  userId           Int       @map("user_id")
+  leadId           Int?      @map("lead_id")
+  companyId        Int?      @map("company_id")
+  branchId         Int?      @map("branch_id")
+  followupId       Int?      @map("followup_id")
+  notificationType String    @map("notification_type") // "REMINDER" | "OVERDUE_ALERT" | "ASSIGNMENT_ALERT" | "FOLLOWUP_ALERT"
+  message          String    @db.Text
+  status           String    @default("UNREAD") // "UNREAD" | "READ"
+  readAt           DateTime? @map("read_at")
+  expiresAt        DateTime? @map("expires_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user     User      @relation("NotificationsReceived", fields: [userId], references: [id])
+  lead     Lead?     @relation(fields: [leadId], references: [id])
+  company  Company?  @relation(fields: [companyId], references: [id])
+  branch   Branch?   @relation(fields: [branchId], references: [id])
+  followup Followup? @relation(fields: [followupId], references: [id])
+
+  @@index([userId])
+  @@index([leadId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([companyId])
+  @@index([branchId])
+  @@index([followupId])
+  @@map("notifications")
+}
+
+model LeadActivity {
+  id                Int      @id @default(autoincrement())
+  leadId            Int      @map("lead_id")
+  companyId         Int      @map("company_id")
+  activityType      String   @map("activity_type") // "CREATED" | "ASSIGNED" | "REASSIGNED" ...
+  description       String?  @db.Text
+  metadata          Json?
+  relatedEntityType String?  @map("related_entity_type")
+  relatedEntityId   Int?     @map("related_entity_id")
+  performedById     Int?     @map("performed_by_id")
+  performedAt       DateTime @default(now()) @map("performed_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Relations
+  lead        Lead    @relation(fields: [leadId], references: [id])
+  company     Company @relation(fields: [companyId], references: [id])
+  performedBy User?   @relation("LeadActivitiesPerformed", fields: [performedById], references: [id])
+
+  @@index([leadId])
+  @@index([companyId])
+  @@index([performedAt])
+  @@index([activityType])
+  @@index([leadId, performedAt])
+  @@map("lead_activities")
+}
+
+model CommunicationLog {
+  id                Int       @id @default(autoincrement())
+  leadId            Int       @map("lead_id")
+  companyId         Int       @map("company_id")
+  branchId          Int?      @map("branch_id")
+  communicationType String    @map("communication_type") // "CALL" | "EMAIL" | "MEETING" | "WHATSAPP"
+  summary           String?   @db.Text
+  interactionDate   DateTime  @map("interaction_date")
+  isDeleted         Boolean   @default(false) @map("is_deleted")
+  deletedById       Int?      @map("deleted_by")
+  deletedAt         DateTime? @map("deleted_at")
+  createdById       Int       @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  lead      Lead    @relation(fields: [leadId], references: [id])
+  company   Company @relation(fields: [companyId], references: [id])
+  branch    Branch? @relation(fields: [branchId], references: [id])
+  createdBy User    @relation("CommunicationLogsCreated", fields: [createdById], references: [id])
+  deletedBy User?   @relation("CommunicationLogsDeleted", fields: [deletedById], references: [id])
+
+  @@index([leadId])
+  @@index([companyId])
+  @@index([branchId])
+  @@index([communicationType])
+  @@index([interactionDate])
+  @@map("communication_logs")
 }

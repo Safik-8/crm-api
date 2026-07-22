@@ -355,33 +355,46 @@ export const initializeSystem = async () => {
 
         const createdById = (await prisma.user.findUnique({ where: { email: "superadmin@gmail.com" }, select: { id: true } }))?.id
         if (createdById) {
-            const defaultStages = ["Prospect", "Closure"]
-            for (const stageName of defaultStages) {
-                const existingStage = await prisma.stage.findUnique({
-                    where: { name: stageName },
+            const defaultStages = [
+                { name: "Prospect", stageType: "PROSPECT", colorCode: "#3b82f6", code: "PROSPECT" },
+                { name: "Closure",  stageType: "CLOSURE",  colorCode: "#6366f1", code: "CLOSURE"  }
+            ]
+            for (const def of defaultStages) {
+                const existingStage = await prisma.stage.findFirst({
+                    where: { stageType: def.stageType },
+                    select: { id: true, isDeleted: true, isDefault: true, name: true }
+                }) || await prisma.stage.findUnique({
+                    where: { name: def.name },
                     select: { id: true, isDeleted: true, isDefault: true, name: true }
                 })
                 if (!existingStage) {
                     await prisma.stage.create({
                         data: {
-                            name: stageName,
+                            name: def.name,
+                            code: def.code,
+                            stageType: def.stageType,
+                            colorCode: def.colorCode,
                             isDefault: true,
                             isDeleted: false,
+                            status: "ACTIVE",
                             createdById
                         }
                     })
-                    console.log(`✅ Default stage seeded: ${stageName}`)
+                    console.log(`✅ Default stage seeded: ${def.name}`)
                 } else if (existingStage.isDeleted || !existingStage.isDefault) {
                     await prisma.stage.update({
                         where: { id: existingStage.id },
                         data: {
-                            name: stageName,
+                            name: def.name,
+                            stageType: def.stageType,
+                            colorCode: def.colorCode,
                             isDefault: true,
                             isDeleted: false,
+                            status: "ACTIVE",
                             updatedById: createdById
                         }
                     })
-                    console.log(`✅ Default stage synced: ${stageName}`)
+                    console.log(`✅ Default stage synced: ${def.name}`)
                 }
             }
         }

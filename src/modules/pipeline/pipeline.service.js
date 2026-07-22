@@ -50,12 +50,16 @@ const assertPipelineScope = (actor, pipeline) => {
   if (actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
 }
 
+// GAP-3 FIX: Use stageType-based ordering — rename-safe
+// Handles both PipelineStage objects (with .stage relation) and plain stage objects
 const normalizePipelineStagesOrder = (stages) => {
   if (!Array.isArray(stages)) return stages
-  const prospect = stages.find(s => s.name === "Prospect")
-  const closure = stages.find(s => s.name === "Closure")
-  const middle = stages.filter(s => s.name !== "Prospect" && s.name !== "Closure")
-  const ordered = []
+  // Each element may be a PipelineStage (with .stage) or a plain Stage object
+  const getType = (s) => s.stage?.stageType ?? s.stageType
+  const prospect = stages.find(s => getType(s) === "PROSPECT")
+  const closure  = stages.find(s => getType(s) === "CLOSURE")
+  const middle   = stages.filter(s => getType(s) !== "PROSPECT" && getType(s) !== "CLOSURE")
+  const ordered  = []
   if (prospect) ordered.push(prospect)
   ordered.push(...middle)
   if (closure) ordered.push(closure)
@@ -151,35 +155,60 @@ const buildLeadBoardQueryOptions = (query) => {
   }
 }
 
+// GAP-8 FIX: ensureDefaultStages now sets stageType and status
+const SYSTEM_STAGE_DEFS = [
+  { name: "Prospect", stageType: "PROSPECT", colorCode: "#3b82f6", code: "PROSPECT" },
+  { name: "Closure",  stageType: "CLOSURE",  colorCode: "#8b5cf6", code: "CLOSURE"  }
+]
+
 const ensureDefaultStages = async (tx, actorId) => {
-  const stageNames = ["Prospect", "Closure"]
   const stages = {}
 
-  for (const name of stageNames) {
-    let stage = await tx.stage.findUnique({
-      where: { name },
-      select: { id: true, isDefault: true, isDeleted: true }
+  for (const def of SYSTEM_STAGE_DEFS) {
+    // Look up by stageType first (rename-safe), fall back to name
+    let stage = await tx.stage.findFirst({
+      where: { stageType: def.stageType, isDeleted: false },
+      select: { id: true, isDefault: true, isDeleted: true, status: true }
     })
 
+    if (!stage) {
+      // Also check by name in case it exists but stageType not yet set
+      stage = await tx.stage.findUnique({
+        where: { name: def.name },
+        select: { id: true, isDefault: true, isDeleted: true, status: true }
+      })
+    }
+
     if (stage) {
-      if (stage.isDeleted || !stage.isDefault) {
-        stage = await tx.stage.update({
-          where: { id: stage.id },
-          data: { isDeleted: false, isDefault: true, updatedById: actorId }
-        })
-      }
+      // Update to ensure all system fields are correct
+      stage = await tx.stage.update({
+        where: { id: stage.id },
+        data: {
+          isDeleted:   false,
+          isDefault:   true,
+          stageType:   def.stageType,
+          colorCode:   stage.colorCode || def.colorCode,
+          code:        stage.code        || def.code,
+          status:      "ACTIVE",
+          updatedById: actorId
+        }
+      })
     } else {
       stage = await tx.stage.create({
         data: {
-          name,
-          isDefault: true,
-          isDeleted: false,
+          name:        def.name,
+          stageType:   def.stageType,
+          colorCode:   def.colorCode,
+          code:        def.code,
+          status:      "ACTIVE",
+          isDefault:   true,
+          isDeleted:   false,
           createdById: actorId
         }
       })
     }
 
-    stages[name] = stage
+    stages[def.name] = stage
   }
 
   return stages
@@ -284,11 +313,16 @@ export const listPipelinesService = async (query, actor) => {
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     leadCount: countsByPipelineId.get(p.id) ?? 0,
+    // GAP-5 FIX: Include stageType and colorCode for frontend lock checks
     stages: normalizePipelineStagesOrder(p.stages).map(ps => ({
-      id: ps.stage.id,
-      name: ps.stage.name,
+      id:        ps.stage.id,
+      name:      ps.stage.name,
       isDefault: ps.stage.isDefault,
-      orderNo: ps.orderNo,
+      orderNo:   ps.orderNo,
+      stageType: ps.stage.stageType,
+      colorCode: ps.stage.colorCode,
+      code:      ps.stage.code,
+      status:    ps.stage.status,
       leadCount: countsByPipelineStageKey.get(`${p.id}:${ps.stageId}`) ?? 0
     }))
   }))
@@ -312,12 +346,17 @@ export const getPipelineDetailsService = async (id, query, actor) => {
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
+  // GAP-4 FIX: Include stageType/colorCode/code/status — Kanban lock checks require this
   const stages = normalizePipelineStagesOrder(pipeline.stages).map(ps => ({
-    id: ps.stage.id,
-    name: ps.stage.name,
+    id:        ps.stage.id,
+    name:      ps.stage.name,
     isDefault: ps.stage.isDefault,
-    orderNo: ps.orderNo,
-    leads: []
+    orderNo:   ps.orderNo,
+    stageType: ps.stage.stageType,
+    colorCode: ps.stage.colorCode,
+    code:      ps.stage.code,
+    status:    ps.stage.status,
+    leads:     []
   }))
 
   const leadWhere = {
@@ -473,14 +512,15 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
         finalStageIds.every(id => orderedSet.has(id))
 
       if (!same) throw new BadRequestError("orderedStageIds must contain the same stage ids being assigned")
+      // GAP-7 FIX: Check by id (prospect/closure ids come from ensureDefaultStages, which uses stageType)
       if (orderedStageIds[0] !== prospect.id) throw new BadRequestError("Prospect stage must come first")
       if (orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
 
       ordered = orderedStageIds
     } else {
       // default order: Prospect first, closure last, then other stages by name
-      const stages = await tx.stage.findMany({ where: { id: { in: finalStageIds } }, select: { id: true, name: true } })
-      const rest = stages
+      const stageRecords = await tx.stage.findMany({ where: { id: { in: finalStageIds } }, select: { id: true, name: true } })
+      const rest = stageRecords
         .filter(s => s.id !== prospect.id && s.id !== closure.id)
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(s => s.id)
@@ -502,11 +542,16 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
       include: { stage: true }
     })
 
+    // GAP-7 FIX: Return stageType in response so SortableStageRow lock check works
     return mapping.map(m => ({
-      stageId: m.stageId,
-      name: m.stage.name,
+      stageId:   m.stageId,
+      name:      m.stage.name,
       isDefault: m.stage.isDefault,
-      orderNo: m.orderNo
+      orderNo:   m.orderNo,
+      stageType: m.stage.stageType,
+      colorCode: m.stage.colorCode,
+      code:      m.stage.code,
+      status:    m.stage.status
     }))
   })
 }
@@ -536,13 +581,13 @@ export const updatePipelineStageOrderService = async (pipelineId, data, actor) =
       existingIds.every(id => orderedSet.has(id))
     if (!same) throw new BadRequestError("orderedStageIds must match existing pipeline stages")
 
-    // Prospect must remain included; if not present, it's invalid
-    const prospect = await tx.stage.findUnique({ where: { name: "Prospect" }, select: { id: true } })
-    const closure = await tx.stage.findUnique({ where: { name: "Closure" }, select: { id: true } })
+    // GAP-6 FIX: Find anchor stages by stageType, not name — rename-safe
+    const prospect = await tx.stage.findFirst({ where: { stageType: "PROSPECT", isDeleted: false }, select: { id: true } })
+    const closure  = await tx.stage.findFirst({ where: { stageType: "CLOSURE",  isDeleted: false }, select: { id: true } })
     if (prospect && !orderedSet.has(prospect.id)) throw new BadRequestError("Prospect stage must be included")
-    if (closure && !orderedSet.has(closure.id)) throw new BadRequestError("Closure stage must be included")
+    if (closure  && !orderedSet.has(closure.id))  throw new BadRequestError("Closure stage must be included")
     if (prospect && orderedStageIds[0] !== prospect.id) throw new BadRequestError("Prospect stage must come first")
-    if (closure && orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
+    if (closure  && orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
 
     for (let i = 0; i < orderedStageIds.length; i++) {
       const stageId = orderedStageIds[i]

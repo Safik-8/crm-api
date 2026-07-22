@@ -23,7 +23,8 @@ import {
   createLeadNote,
   updateLeadNote,
   deleteLeadNote,
-  getLeadTimeline
+  getLeadTimeline,
+  getLeadPipelineHistory
 } from "./lead.controllers.js";
 import {
   createLeadSchema,
@@ -66,6 +67,9 @@ router.delete("/:id/notes/:noteId", hasPermission("LEAD", "canEdit"), deleteLead
 
 // ── Timeline ──────────────────────────────────────────────────────────────────
 router.get("/:id/timeline", hasPermission("LEAD", "canView"), getLeadTimeline);
+
+// ── Pipeline Stage History (Sprint 4) ────────────────────────────────────────
+router.get("/:id/pipeline-history", hasPermission("PIPELINE", "canView"), getLeadPipelineHistory);
 
 // ── Kanban stage update (drag-drop) ──────────────────────────────────────────
 router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), validateBody(updateLeadStageSchema), updateLeadStage);
