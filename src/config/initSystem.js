@@ -114,7 +114,7 @@ const ROLE_PERMISSIONS = {
         USER: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TEAM: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-        LEAD_ASSIGNMENT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        LEAD_ASSIGNMENT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         PIPELINE: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
