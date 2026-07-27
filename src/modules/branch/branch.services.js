@@ -247,7 +247,21 @@ export const getBranchByIdService = async (id, actor) => {
  * Updates branch operational details.
  */
 export const updateBranchService = async (id, data, actor) => {
-  const { name, address, location, status } = data
+  const allowedRoles = ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER"]
+  if (!allowedRoles.includes(actor.primaryRole)) {
+    throw new ForbiddenError("You do not have permission to configure branch settings")
+  }
+
+  const {
+    name,
+    address,
+    location,
+    status,
+    maxDailyLeadsPerUser,
+    autoAssignmentEnabled,
+    assignmentAlgorithm,
+    assignmentResolutionLevel
+  } = data
 
   const branch = await findBranchById(Number(id))
   if (!branch) throw new NotFoundError("Branch")
@@ -266,7 +280,11 @@ export const updateBranchService = async (id, data, actor) => {
     ...(name && { name: name.trim() }),
     ...(address !== undefined && { address: address?.trim() || null }),
     ...(location !== undefined && { location: location?.trim() || null }),
-    ...(status && { status })
+    ...(status && { status }),
+    ...(maxDailyLeadsPerUser !== undefined && { maxDailyLeadsPerUser }),
+    ...(autoAssignmentEnabled !== undefined && { autoAssignmentEnabled }),
+    ...(assignmentAlgorithm !== undefined && { assignmentAlgorithm }),
+    ...(assignmentResolutionLevel !== undefined && { assignmentResolutionLevel })
   })
 }
 

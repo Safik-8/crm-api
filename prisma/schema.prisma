@@ -56,6 +56,10 @@ model Branch {
   address   String?
   location  String?
   status    String   @default("ACTIVE")
+  maxDailyLeadsPerUser      Int?     @map("max_daily_leads_per_user")
+  autoAssignmentEnabled     Boolean  @default(false) @map("auto_assignment_enabled")
+  assignmentAlgorithm       String?  @map("assignment_algorithm")
+  assignmentResolutionLevel String   @default("PERSON") @map("assignment_resolution_level")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

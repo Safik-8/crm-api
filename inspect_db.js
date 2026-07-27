@@ -2,14 +2,12 @@ import prisma from './src/config/db.js';
 
 async function main() {
   try {
-    const settings = await prisma.userSettings.findMany();
-    console.log('--- ALL USER SETTINGS ---');
-    for (const setting of settings) {
-      console.log(`User ID: ${setting.userId}`);
-      console.log('Session Preferences:', JSON.stringify(setting.sessionPreferences, null, 2));
-    }
+    const lead = await prisma.lead.findUnique({
+      where: { id: 117 }
+    });
+    console.log(JSON.stringify(lead, null, 2));
   } catch (error) {
-    console.error('Error querying DB:', error);
+    console.error(error);
   } finally {
     await prisma.$disconnect();
   }

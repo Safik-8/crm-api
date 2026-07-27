@@ -346,7 +346,19 @@ export const findLeads = async (params, tx = prisma) => {
       source:     { select: { id: true, name: true } },
       course:     { select: { id: true, name: true } },
       status:     { select: { id: true, name: true, code: true, displayColor: true } },
-      assignedTo: { select: { id: true, name: true } },
+      assignedTo: {
+        select: {
+          id: true,
+          name: true,
+          userRoles: {
+            where: { isPrimary: true },
+            include: {
+              role: { select: { name: true } }
+            }
+          }
+        }
+      },
+      team:       { select: { id: true, name: true } },
       pipeline:   { select: { id: true, name: true } },
       stage:      { select: { id: true, name: true } },
       createdBy:  { select: { id: true, name: true } },
