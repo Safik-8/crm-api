@@ -1,6 +1,18 @@
-import prisma from "../../config/db.js"
 import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
-import { getBranchUsersByBranchId, leadStageLogInclude } from "../lead/lead.repository.js"
+import {
+  assignStagesToPipelineTx,
+  createAuditLog,
+  createPipelineTx,
+  fetchBranchUsers,
+  findBranchByCompanyAndId,
+  findLeadsForBoard,
+  findPipelineById,
+  findPipelinesByWhere,
+  findPipelineWithStages,
+  softDeletePipelineDb,
+  updatePipelineDb,
+  updatePipelineStageOrderTx
+} from "./pipeline.repository.js"
 
 const normalizeName = (name) => String(name || "").trim()
 const normalizeTextFilter = (value) => {
@@ -9,26 +21,20 @@ const normalizeTextFilter = (value) => {
 }
 
 const resolveOrgContext = async (data, actor) => {
-  // branch users: fixed to actor
   if (actor.companyId && actor.branchId) {
     return { companyId: actor.companyId, branchId: actor.branchId }
   }
 
-  // company level users (no branch): must specify branchId in body
   if (actor.companyId && !actor.branchId) {
     const branchId = Number(data?.branchId)
     if (!Number.isInteger(branchId) || branchId < 1) {
       throw new ValidationError("Validation failed", [{ field: "branchId", message: "branchId is required" }])
     }
-    const branch = await prisma.branch.findFirst({
-      where: { id: branchId, companyId: actor.companyId },
-      select: { id: true, companyId: true }
-    })
+    const branch = await findBranchByCompanyAndId(branchId, actor.companyId)
     if (!branch) throw new BadRequestError("Invalid branchId for your company")
     return { companyId: actor.companyId, branchId }
   }
 
-  // super admin: must specify companyId + branchId
   const companyId = Number(data?.companyId)
   const branchId = Number(data?.branchId)
   const errors = []
@@ -36,10 +42,7 @@ const resolveOrgContext = async (data, actor) => {
   if (!Number.isInteger(branchId) || branchId < 1) errors.push({ field: "branchId", message: "branchId is required" })
   if (errors.length) throw new ValidationError("Validation failed", errors)
 
-  const branch = await prisma.branch.findFirst({
-    where: { id: branchId, companyId },
-    select: { id: true }
-  })
+  const branch = await findBranchByCompanyAndId(branchId, companyId)
   if (!branch) throw new BadRequestError("Branch not found for given companyId")
 
   return { companyId, branchId }
@@ -50,15 +53,13 @@ const assertPipelineScope = (actor, pipeline) => {
   if (actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
 }
 
-// GAP-3 FIX: Use stageType-based ordering — rename-safe
-// Handles both PipelineStage objects (with .stage relation) and plain stage objects
 const normalizePipelineStagesOrder = (stages) => {
   if (!Array.isArray(stages)) return stages
-  // Each element may be a PipelineStage (with .stage) or a plain Stage object
+  const activeStages = stages.filter(s => s.stage && !s.stage.isDeleted)
   const getType = (s) => s.stage?.stageType ?? s.stageType
-  const prospect = stages.find(s => getType(s) === "PROSPECT")
-  const closure  = stages.find(s => getType(s) === "CLOSURE")
-  const middle   = stages.filter(s => getType(s) !== "PROSPECT" && getType(s) !== "CLOSURE")
+  const prospect = activeStages.find(s => getType(s) === "PROSPECT")
+  const closure  = activeStages.find(s => getType(s) === "CLOSURE")
+  const middle   = activeStages.filter(s => getType(s) !== "PROSPECT" && getType(s) !== "CLOSURE")
   const ordered  = []
   if (prospect) ordered.push(prospect)
   ordered.push(...middle)
@@ -75,7 +76,6 @@ const parsePositiveInt = (value, fieldName) => {
   return parsed
 }
 
-/** UTC calendar day bounds for "today" (matches lead date storage as UTC day). */
 const getUtcTodayBounds = () => {
   const now = new Date()
   const y = now.getUTCFullYear()
@@ -139,13 +139,17 @@ const buildLeadBoardQueryOptions = (query) => {
   const { from, to, defaultedToToday, skippedDateFilter } = parseDateRange(query?.dateFrom, query?.dateTo, query)
   const stageId = parsePositiveInt(query?.stageId, "stageId")
   const assignedToId = parsePositiveInt(query?.assignedToId, "assignedToId")
-  // One search box: matches lead name, mobile, or interestedFor (case-insensitive partial match)
   const search = normalizeTextFilter(query?.search ?? query?.leadName ?? query?.name ?? query?.q)
+
+  const rawPriority = normalizeTextFilter(query?.priority)?.toUpperCase()
+  const allowedPriorities = new Set(["HIGH", "MEDIUM", "LOW"])
+  const priority = allowedPriorities.has(rawPriority) ? rawPriority : null
 
   return {
     search,
     stageId,
     assignedToId,
+    priority,
     dateFrom: from,
     dateTo: to,
     dateDefaultedToToday: defaultedToToday,
@@ -155,198 +159,68 @@ const buildLeadBoardQueryOptions = (query) => {
   }
 }
 
-// GAP-8 FIX: ensureDefaultStages now sets stageType and status
-const SYSTEM_STAGE_DEFS = [
-  { name: "Prospect", stageType: "PROSPECT", colorCode: "#3b82f6", code: "PROSPECT" },
-  { name: "Closure",  stageType: "CLOSURE",  colorCode: "#8b5cf6", code: "CLOSURE"  }
-]
-
-const ensureDefaultStages = async (tx, actorId) => {
-  const stages = {}
-
-  for (const def of SYSTEM_STAGE_DEFS) {
-    // Look up by stageType first (rename-safe), fall back to name
-    let stage = await tx.stage.findFirst({
-      where: { stageType: def.stageType, isDeleted: false },
-      select: { id: true, isDefault: true, isDeleted: true, status: true }
-    })
-
-    if (!stage) {
-      // Also check by name in case it exists but stageType not yet set
-      stage = await tx.stage.findUnique({
-        where: { name: def.name },
-        select: { id: true, isDefault: true, isDeleted: true, status: true }
-      })
-    }
-
-    if (stage) {
-      // Update to ensure all system fields are correct
-      stage = await tx.stage.update({
-        where: { id: stage.id },
-        data: {
-          isDeleted:   false,
-          isDefault:   true,
-          stageType:   def.stageType,
-          colorCode:   stage.colorCode || def.colorCode,
-          code:        stage.code        || def.code,
-          status:      "ACTIVE",
-          updatedById: actorId
-        }
-      })
-    } else {
-      stage = await tx.stage.create({
-        data: {
-          name:        def.name,
-          stageType:   def.stageType,
-          colorCode:   def.colorCode,
-          code:        def.code,
-          status:      "ACTIVE",
-          isDefault:   true,
-          isDeleted:   false,
-          createdById: actorId
-        }
-      })
-    }
-
-    stages[def.name] = stage
-  }
-
-  return stages
-}
-
 export const createPipelineService = async (data, actor) => {
   const name = normalizeName(data?.name)
   if (!name) throw new ValidationError("Validation failed", [{ field: "name", message: "name is required" }])
 
   const { companyId, branchId } = await resolveOrgContext(data, actor)
 
-  // Rule: Every pipeline MUST have Prospect first and Closure last.
-  return prisma.$transaction(async (tx) => {
-    const pipeline = await tx.pipeline.create({
-      data: {
-        name,
-        companyId,
-        branchId,
-        isDeleted: false,
-        createdById: actor.id
-      }
-    })
+  const pipeline = await createPipelineTx(name, companyId, branchId, actor.id)
 
-    const { Prospect: prospect, Closure: closure } = await ensureDefaultStages(tx, actor.id)
-
-    await tx.pipelineStage.createMany({
-      data: [
-        { pipelineId: pipeline.id, stageId: prospect.id, orderNo: 1 },
-        { pipelineId: pipeline.id, stageId: closure.id, orderNo: 2 }
-      ]
-    })
-
-    return pipeline
+  await createAuditLog({
+    companyId,
+    branchId,
+    performedBy: actor.id,
+    action: "PIPELINE_CREATED",
+    entityId: pipeline.id,
+    details: `Created pipeline '${pipeline.name}'`
   })
+
+  return pipeline
 }
 
 export const listPipelinesService = async (query, actor) => {
   const where = { isDeleted: false }
 
-  if (actor.companyId) {
-    where.companyId = actor.companyId;
-  } else if (query?.companyId) {
-    where.companyId = Number(query.companyId);
-  }
-  if (actor.branchId) where.branchId = actor.branchId;
+  if (actor.companyId) where.companyId = actor.companyId
+  if (actor.branchId) where.branchId = actor.branchId
 
-  const listSearch = normalizeTextFilter(query?.search ?? query?.leadName ?? query?.name ?? query?.q)
-  if (listSearch) {
-    where.leads = {
-      some: {
-        isDeleted: false,
-        OR: [
-          { name: { contains: listSearch, mode: "insensitive" } },
-          { mobile: { contains: listSearch, mode: "insensitive" } },
-          { interestedFor: { contains: listSearch, mode: "insensitive" } }
-        ]
-      }
-    }
-  }
-
-  if (!actor.branchId && query?.branchId) {
-    where.branchId = Number(query.branchId)
-  }
-
-  const pipelines = await prisma.pipeline.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: {
-      stages: {
-        orderBy: { orderNo: "asc" },
-        include: { stage: true }
-      }
-    }
-  })
-
-  const pipelineIds = pipelines.map(p => p.id)
-  if (!pipelineIds.length) return []
-
-  const leadCounts = await prisma.lead.groupBy({
-    by: ["pipelineId", "stageId"],
-    where: {
-      isDeleted: false,
-      pipelineId: { in: pipelineIds }
-    },
-    _count: { _all: true }
-  })
-
-  const countsByPipelineId = new Map()
-  const countsByPipelineStageKey = new Map()
-  for (const row of leadCounts) {
-    const key = `${row.pipelineId}:${row.stageId}`
-    const count = row._count?._all ?? 0
-    countsByPipelineStageKey.set(key, count)
-    countsByPipelineId.set(row.pipelineId, (countsByPipelineId.get(row.pipelineId) ?? 0) + count)
-  }
+  const pipelines = await findPipelinesByWhere(where)
 
   return pipelines.map(p => ({
     id: p.id,
     name: p.name,
-    branchId: p.branchId,
     companyId: p.companyId,
+    branchId: p.branchId,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
-    leadCount: countsByPipelineId.get(p.id) ?? 0,
-    // GAP-5 FIX: Include stageType and colorCode for frontend lock checks
+    _count: p._count,
+    leadCount: p._count?.leads ?? 0,
     stages: normalizePipelineStagesOrder(p.stages).map(ps => ({
-      id:        ps.stage.id,
-      name:      ps.stage.name,
+      id: ps.stage.id,
+      name: ps.stage.name,
       isDefault: ps.stage.isDefault,
-      orderNo:   ps.orderNo,
+      orderNo: ps.orderNo,
       stageType: ps.stage.stageType,
       colorCode: ps.stage.colorCode,
-      code:      ps.stage.code,
-      status:    ps.stage.status,
-      leadCount: countsByPipelineStageKey.get(`${p.id}:${ps.stageId}`) ?? 0
+      code: ps.stage.code,
+      status: ps.stage.status
     }))
   }))
 }
 
 export const getPipelineDetailsService = async (id, query, actor) => {
   const pipelineId = Number(id)
-  if (!Number.isInteger(pipelineId) || pipelineId < 1) throw new BadRequestError("Invalid pipeline id")
-  const options = buildLeadBoardQueryOptions(query)
+  if (!Number.isInteger(pipelineId) || pipelineId < 1) {
+    throw new ValidationError("Validation failed", [{ field: "id", message: "Invalid pipeline id" }])
+  }
 
-  const pipeline = await prisma.pipeline.findUnique({
-    where: { id: pipelineId },
-    include: {
-      stages: {
-        orderBy: { orderNo: "asc" },
-        include: { stage: true }
-      }
-    }
-  })
-
-  if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
+  const pipeline = await findPipelineWithStages(pipelineId)
+  if (!pipeline) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
-  // GAP-4 FIX: Include stageType/colorCode/code/status — Kanban lock checks require this
+  const options = buildLeadBoardQueryOptions(query)
+
   const stages = normalizePipelineStagesOrder(pipeline.stages).map(ps => ({
     id:        ps.stage.id,
     name:      ps.stage.name,
@@ -366,6 +240,7 @@ export const getPipelineDetailsService = async (id, query, actor) => {
 
   if (options.stageId) leadWhere.stageId = options.stageId
   if (options.assignedToId) leadWhere.assignedToId = options.assignedToId
+  if (options.priority) leadWhere.priority = options.priority
   if (options.search) {
     leadWhere.OR = [
       { name: { contains: options.search, mode: "insensitive" } },
@@ -375,19 +250,14 @@ export const getPipelineDetailsService = async (id, query, actor) => {
   }
   if (!options.dateFilterSkipped && (options.dateFrom || options.dateTo)) {
     leadWhere.date = {
-      ...(options.dateFrom ? { gte: options.dateFrom } : {}),
-      ...(options.dateTo ? { lte: options.dateTo } : {})
+      ...(options.dateFrom ? { gte: options.dateFrom } : {})
+    }
+    if (options.dateTo) {
+      leadWhere.date.lte = options.dateTo
     }
   }
 
-  const leads = await prisma.lead.findMany({
-    where: leadWhere,
-    orderBy: { [options.sortBy]: options.sortOrder },
-    include: {
-      assignedTo: { select: { id: true, name: true, email: true } },
-      ...leadStageLogInclude
-    }
-  })
+  const leads = await findLeadsForBoard(leadWhere, options.sortBy, options.sortOrder)
 
   const leadsByStageId = new Map()
   for (const lead of leads) {
@@ -401,7 +271,7 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     leads: leadsByStageId.get(stage.id) || []
   }))
 
-  const assignableUsers = await getBranchUsersByBranchId(pipeline.branchId)
+  const assignableUsers = await fetchBranchUsers(pipeline.branchId)
 
   return {
     id: pipeline.id,
@@ -416,6 +286,7 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     filters: {
       stageId: options.stageId,
       assignedToId: options.assignedToId,
+      priority: options.priority,
       search: options.search,
       dateFrom: options.dateFrom,
       dateTo: options.dateTo,
@@ -436,35 +307,51 @@ export const updatePipelineService = async (id, data, actor) => {
   const name = normalizeName(data?.name)
   if (!name) throw new ValidationError("Validation failed", [{ field: "name", message: "name is required" }])
 
-  const pipeline = await prisma.pipeline.findUnique({ where: { id: pipelineId } })
+  const pipeline = await findPipelineById(pipelineId)
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
-  return prisma.pipeline.update({
-    where: { id: pipelineId },
-    data: { name, updatedById: actor.id }
+  const updated = await updatePipelineDb(pipelineId, name, actor.id)
+
+  await createAuditLog({
+    companyId: pipeline.companyId,
+    branchId: pipeline.branchId,
+    performedBy: actor.id,
+    action: "PIPELINE_UPDATED",
+    entityId: pipeline.id,
+    details: `Updated pipeline name from '${pipeline.name}' to '${name}'`
   })
+
+  return updated
 }
 
 export const deletePipelineService = async (id, actor) => {
   const pipelineId = Number(id)
   if (!Number.isInteger(pipelineId) || pipelineId < 1) throw new BadRequestError("Invalid pipeline id")
 
-  const pipeline = await prisma.pipeline.findUnique({ where: { id: pipelineId } })
+  const pipeline = await findPipelineById(pipelineId)
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
-  return prisma.pipeline.update({
-    where: { id: pipelineId },
-    data: { isDeleted: true, updatedById: actor.id }
+  const deleted = await softDeletePipelineDb(pipelineId, actor.id)
+
+  await createAuditLog({
+    companyId: pipeline.companyId,
+    branchId: pipeline.branchId,
+    performedBy: actor.id,
+    action: "PIPELINE_DELETED",
+    entityId: pipeline.id,
+    details: `Soft deleted pipeline '${pipeline.name}'`
   })
+
+  return deleted
 }
 
 export const assignStagesToPipelineService = async (pipelineId, data, actor) => {
   const pid = Number(pipelineId)
   if (!Number.isInteger(pid) || pid < 1) throw new BadRequestError("Invalid pipeline id")
 
-  const pipeline = await prisma.pipeline.findUnique({ where: { id: pid } })
+  const pipeline = await findPipelineById(pid)
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
@@ -472,144 +359,40 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
   const newStages = Array.isArray(data?.newStages) ? data.newStages : []
   const orderedStageIds = Array.isArray(data?.orderedStageIds) ? data.orderedStageIds.map(Number).filter(n => Number.isInteger(n) && n > 0) : null
 
-  return prisma.$transaction(async (tx) => {
-    const { Prospect: prospect, Closure: closure } = await ensureDefaultStages(tx, actor.id)
+  const assignedStages = await assignStagesToPipelineTx(pid, incomingStageIds, newStages, orderedStageIds, actor.id)
 
-    const createdStageIds = []
-    for (const s of newStages) {
-      const name = normalizeName(s?.name)
-      if (!name) continue
-
-      const existing = await tx.stage.findFirst({
-        where: { name },
-        select: { id: true, isDeleted: true }
-      })
-
-      if (existing) {
-        if (existing.isDeleted) {
-          await tx.stage.update({
-            where: { id: existing.id },
-            data: { isDeleted: false, updatedById: actor.id }
-          })
-        }
-        createdStageIds.push(existing.id)
-      } else {
-        const created = await tx.stage.create({
-          data: { name, isDefault: false, isDeleted: false, createdById: actor.id }
-        })
-        createdStageIds.push(created.id)
-      }
-    }
-
-    const set = new Set([prospect.id, closure.id, ...incomingStageIds, ...createdStageIds])
-    const finalStageIds = [...set]
-
-    let ordered = finalStageIds
-    if (orderedStageIds && orderedStageIds.length) {
-      const orderedSet = new Set(orderedStageIds)
-      const same =
-        orderedStageIds.length === finalStageIds.length &&
-        finalStageIds.every(id => orderedSet.has(id))
-
-      if (!same) throw new BadRequestError("orderedStageIds must contain the same stage ids being assigned")
-      // GAP-7 FIX: Check by id (prospect/closure ids come from ensureDefaultStages, which uses stageType)
-      if (orderedStageIds[0] !== prospect.id) throw new BadRequestError("Prospect stage must come first")
-      if (orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
-
-      ordered = orderedStageIds
-    } else {
-      // default order: Prospect first, closure last, then other stages by name
-      const stageRecords = await tx.stage.findMany({ where: { id: { in: finalStageIds } }, select: { id: true, name: true } })
-      const rest = stageRecords
-        .filter(s => s.id !== prospect.id && s.id !== closure.id)
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map(s => s.id)
-      ordered = [prospect.id, ...rest, closure.id]
-    }
-
-    await tx.pipelineStage.deleteMany({ where: { pipelineId: pid } })
-    await tx.pipelineStage.createMany({
-      data: ordered.map((stageId, idx) => ({
-        pipelineId: pid,
-        stageId,
-        orderNo: idx + 1
-      }))
-    })
-
-    const mapping = await tx.pipelineStage.findMany({
-      where: { pipelineId: pid },
-      orderBy: { orderNo: "asc" },
-      include: { stage: true }
-    })
-
-    // GAP-7 FIX: Return stageType in response so SortableStageRow lock check works
-    return mapping.map(m => ({
-      stageId:   m.stageId,
-      name:      m.stage.name,
-      isDefault: m.stage.isDefault,
-      orderNo:   m.orderNo,
-      stageType: m.stage.stageType,
-      colorCode: m.stage.colorCode,
-      code:      m.stage.code,
-      status:    m.stage.status
-    }))
+  await createAuditLog({
+    companyId: pipeline.companyId,
+    branchId: pipeline.branchId,
+    performedBy: actor.id,
+    action: "PIPELINE_STAGES_ASSIGNED",
+    entityId: pipeline.id,
+    details: `Assigned stages to pipeline '${pipeline.name}'`
   })
+
+  return assignedStages
 }
 
 export const updatePipelineStageOrderService = async (pipelineId, data, actor) => {
   const pid = Number(pipelineId)
   if (!Number.isInteger(pid) || pid < 1) throw new BadRequestError("Invalid pipeline id")
 
-  const orderedStageIds = Array.isArray(data?.orderedStageIds) ? data.orderedStageIds.map(Number).filter(n => Number.isInteger(n) && n > 0) : []
-  if (!orderedStageIds.length) throw new ValidationError("Validation failed", [{ field: "orderedStageIds", message: "orderedStageIds is required" }])
-
-  const pipeline = await prisma.pipeline.findUnique({ where: { id: pid } })
+  const pipeline = await findPipelineById(pid)
   if (!pipeline || pipeline.isDeleted) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
 
-  return prisma.$transaction(async (tx) => {
-    const existing = await tx.pipelineStage.findMany({
-      where: { pipelineId: pid },
-      select: { stageId: true }
-    })
-    const existingIds = existing.map(e => e.stageId)
-    const existingSet = new Set(existingIds)
+  const orderedStageIds = Array.isArray(data?.orderedStageIds) ? data.orderedStageIds.map(Number).filter(n => Number.isInteger(n) && n > 0) : []
 
-    const orderedSet = new Set(orderedStageIds)
-    const same =
-      orderedStageIds.length === existingIds.length &&
-      existingIds.every(id => orderedSet.has(id))
-    if (!same) throw new BadRequestError("orderedStageIds must match existing pipeline stages")
+  const updatedStages = await updatePipelineStageOrderTx(pid, orderedStageIds, actor.id)
 
-    // GAP-6 FIX: Find anchor stages by stageType, not name — rename-safe
-    const prospect = await tx.stage.findFirst({ where: { stageType: "PROSPECT", isDeleted: false }, select: { id: true } })
-    const closure  = await tx.stage.findFirst({ where: { stageType: "CLOSURE",  isDeleted: false }, select: { id: true } })
-    if (prospect && !orderedSet.has(prospect.id)) throw new BadRequestError("Prospect stage must be included")
-    if (closure  && !orderedSet.has(closure.id))  throw new BadRequestError("Closure stage must be included")
-    if (prospect && orderedStageIds[0] !== prospect.id) throw new BadRequestError("Prospect stage must come first")
-    if (closure  && orderedStageIds[orderedStageIds.length - 1] !== closure.id) throw new BadRequestError("Closure stage must come last")
-
-    for (let i = 0; i < orderedStageIds.length; i++) {
-      const stageId = orderedStageIds[i]
-      if (!existingSet.has(stageId)) continue
-      await tx.pipelineStage.update({
-        where: { pipelineId_stageId: { pipelineId: pid, stageId } },
-        data: { orderNo: i + 1 }
-      })
-    }
-
-    const mapping = await tx.pipelineStage.findMany({
-      where: { pipelineId: pid },
-      orderBy: { orderNo: "asc" },
-      include: { stage: true }
-    })
-
-    return mapping.map(m => ({
-      stageId: m.stageId,
-      name: m.stage.name,
-      isDefault: m.stage.isDefault,
-      orderNo: m.orderNo
-    }))
+  await createAuditLog({
+    companyId: pipeline.companyId,
+    branchId: pipeline.branchId,
+    performedBy: actor.id,
+    action: "PIPELINE_STAGE_ORDER_UPDATED",
+    entityId: pipeline.id,
+    details: `Updated stage order for pipeline '${pipeline.name}'`
   })
-}
 
+  return updatedStages
+}
