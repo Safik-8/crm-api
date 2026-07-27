@@ -3,9 +3,12 @@ import {
   createStageService,
   deleteStageService,
   getAllStagesService,
+  getAllStagesAdminService,
   getStagesForPipelineService,
+  toggleStageStatusService,
   updateStageService
 } from "./stage.service.js"
+
 
 export const createStage = async (req, res, next) => {
   try {
@@ -53,3 +56,22 @@ export const getStagesForPipeline = async (req, res, next) => {
   }
 }
 
+// Admin view: returns ALL stages incl. INACTIVE (for Pipeline Builder UI)
+export const getStagesAdmin = async (req, res, next) => {
+  try {
+    const stages = await getAllStagesAdminService()
+    return sendSuccess(res, { stages }, "All stages fetched (admin)")
+  } catch (err) {
+    next(err)
+  }
+}
+
+// Toggle a stage between ACTIVE and INACTIVE
+export const toggleStageStatus = async (req, res, next) => {
+  try {
+    const stage = await toggleStageStatusService(req.params.id, req.body, req.user)
+    return sendSuccess(res, { stage }, "Stage status updated")
+  } catch (err) {
+    next(err)
+  }
+}

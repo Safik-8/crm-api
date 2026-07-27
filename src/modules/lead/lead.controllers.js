@@ -21,7 +21,8 @@ import {
   createLeadNoteService,
   updateLeadNoteService,
   deleteLeadNoteService,
-  getLeadTimelineService
+  getLeadTimelineService,
+  getLeadPipelineHistoryService
 } from "./lead.services.js";
 import { uploadExcel } from "./lead.upload.js";
 
@@ -225,3 +226,13 @@ export const getLeadTimeline = async (req, res, next) => {
     next(err);
   }
 };
+
+export const getLeadPipelineHistory = async (req, res, next) => {
+  try {
+    const history = await getLeadPipelineHistoryService(req.params.id, req.user);
+    return sendSuccess(res, { history }, "Pipeline history fetched");
+  } catch (err) {
+    next(err);
+  }
+};
+

@@ -11,7 +11,7 @@ export const leadDetailInclude = {
   company:    { select: { id: true, name: true } },
   branch:     { select: { id: true, name: true } },
   pipeline:   { select: { id: true, name: true } },
-  stage:      { select: { id: true, name: true } },
+  stage:      { select: { id: true, name: true, stageType: true, colorCode: true, code: true } },
   source:     { select: { id: true, name: true } },
   course:     { select: { id: true, name: true } },
   status:     { select: { id: true, name: true, code: true, displayColor: true } },
@@ -243,7 +243,7 @@ export const findLeadById = async (id, tx = prisma) => {
     where: { id },
     include: {
       pipeline: { select: { id: true, companyId: true, branchId: true } },
-      stage:    { select: { id: true, name: true } }
+      stage:    { select: { id: true, name: true, stageType: true, status: true } }
     }
   });
 };
@@ -291,8 +291,9 @@ export const findPipelineById = async (pipelineId, tx = prisma) => {
  * @param {object} tx
  */
 export const findProspectStageForPipeline = async (pipelineId, tx = prisma) => {
+  // GAP-9 FIX: Use stageType-based lookup instead of name — rename-safe
   const prospectStage = await tx.stage.findFirst({
-    where: { name: "Prospect" },
+    where: { stageType: "PROSPECT", isDeleted: false },
     select: { id: true }
   });
   if (!prospectStage) return null;
