@@ -205,8 +205,16 @@ export const updateLeadStageSchema = z.object({
       .number({ required_error: "stageId is required" })
       .int()
       .positive("stageId must be a valid stage id")
-  )
+  ),
+  // reason is optional here; service enforces required for LOST stageType
+  reason: z
+    .string()
+    .trim()
+    .max(500, "Reason must be 500 characters or less")
+    .optional()
+    .nullable()
 });
+
 
 // ─── Add Comment Schema ───────────────────────────────────────────────────────
 

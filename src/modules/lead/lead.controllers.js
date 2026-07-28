@@ -23,6 +23,7 @@ import {
   deleteLeadNoteService,
   getLeadTimelineService,
   assignLeadsService
+  getLeadPipelineHistoryService
 } from "./lead.services.js";
 import { uploadExcel } from "./lead.upload.js";
 
@@ -233,6 +234,15 @@ export const assignLeads = async (req, res, next) => {
   try {
     const result = await assignLeadsService(req.body, req.user);
     return sendSuccess(res, result, "Leads assigned successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getLeadPipelineHistory = async (req, res, next) => {
+  try {
+    const history = await getLeadPipelineHistoryService(req.params.id, req.user);
+    return sendSuccess(res, { history }, "Pipeline history fetched");
   } catch (err) {
     next(err);
   }

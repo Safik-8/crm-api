@@ -16,7 +16,7 @@ export const createUserSchema = z.object({
   }).trim().email("Enter a valid email address").toLowerCase(),
   mobileNumber: z.string({
     required_error: "Mobile number is required"
-  }).trim().min(10, "Mobile number must be at least 10 digits"),
+  }).trim().regex(/^\d{10}$/, "Mobile number must be exactly 10 digits"),
   employeeId: z.string().trim().optional().nullable(),
   joiningDate: z.coerce.date({
     required_error: "Joining date is required",
@@ -38,13 +38,14 @@ export const createUserSchema = z.object({
   country: z.string().trim().optional().nullable(),
   pincode: z.string().trim().optional().nullable(),
   emergencyContact: z.string().trim().optional().nullable(),
+  profilePhoto: z.string().trim().optional().nullable(),
 })
 
 // Schema for editing an existing user
 export const updateUserSchema = z.object({
   firstName: z.string().trim().min(1, "First name cannot be empty").optional(),
   lastName: z.string().trim().min(1, "Last name cannot be empty").optional(),
-  mobileNumber: z.string().trim().min(10, "Mobile number must be at least 10 digits").optional(),
+  mobileNumber: z.string().trim().regex(/^\d{10}$/, "Mobile number must be exactly 10 digits").optional(),
   branchId: z.number().int().positive().optional(),
   roleId: z.number().int().positive().optional(),
   reportingManagerId: z.number().int().positive().nullable().optional(),
@@ -55,6 +56,7 @@ export const updateUserSchema = z.object({
   country: z.string().trim().optional().nullable(),
   pincode: z.string().trim().optional().nullable(),
   emergencyContact: z.string().trim().optional().nullable(),
+  profilePhoto: z.string().trim().optional().nullable(),
 }).refine(data => Object.keys(data).length > 0, {
   message: "At least one field must be provided for update"
 })

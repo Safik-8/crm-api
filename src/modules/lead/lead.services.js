@@ -752,6 +752,7 @@ export const deleteAllLeadsService = async (actor) => {
 export const updateLeadStageService = async (leadId, data, actor) => {
   const id      = Number(leadId);
   const stageId = data.stageId; // Already validated/coerced by Zod
+  const reason  = data.reason?.trim() || null;
 
   if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
 
@@ -760,22 +761,47 @@ export const updateLeadStageService = async (leadId, data, actor) => {
 
   await assertLeadScope(actor, lead);
 
-  // Closure lock
-  if (lead.stage?.name === "Closure") {
-    throw new ForbiddenError("This lead is closed. A closed lead cannot be moved to another stage.");
+  // GAP-1 + GAP-2: Guard non-nullable FK companyId in PipelineHistory / LeadActivity
+  if (!lead.companyId) {
+    throw new BadRequestError("Lead has no company scope — cannot record pipeline history");
+  }
+
+  // TRANSITION RULE 1: WON and CLOSURE leads cannot be moved out
+  const LOCKED_STAGE_TYPES = ["WON", "CLOSURE"];
+  if (LOCKED_STAGE_TYPES.includes(lead.stage?.stageType)) {
+    throw new ForbiddenError(
+      `This lead is in "${lead.stage.name}" stage and cannot be moved to another stage.`
+    );
   }
 
   if (!lead.pipelineId) throw new BadRequestError("Lead is not assigned to a pipeline");
 
+  // Fetch target stage details (stageType required for LOST rule check)
+  const targetStage = await prisma.stage.findUnique({
+    where:  { id: stageId },
+    select: { id: true, name: true, stageType: true, status: true, isDeleted: true }
+  });
+  if (!targetStage || targetStage.isDeleted) throw new NotFoundError("Stage");
+  if (targetStage.status === "INACTIVE") throw new BadRequestError("Target stage is disabled and cannot accept leads");
+
   const mapping = await findPipelineStageMapping(lead.pipelineId, stageId);
   if (!mapping) throw new BadRequestError("Stage is not assigned to this pipeline");
 
+  // No-op: already in this stage
   if (lead.stageId === stageId) {
     return findLeadByIdWithDetail(id);
   }
 
+  // TRANSITION RULE 2: Moving to LOST requires a reason
+  if (targetStage.stageType === "LOST" && !reason) {
+    throw new ValidationError("Validation failed", [
+      { field: "reason", message: "A reason is required when moving a lead to the Lost stage" }
+    ]);
+  }
+
   const now = new Date();
   return prisma.$transaction(async (tx) => {
+    // 1. Update the lead record
     const updated = await updateLead(id, {
       previousStageId:  lead.stageId,
       stageId,
@@ -784,12 +810,52 @@ export const updateLeadStageService = async (leadId, data, actor) => {
       updatedById:      actor.id
     }, tx);
 
+    // 2. PipelineHistory record (Sprint 4)
+    await tx.pipelineHistory.create({
+      data: {
+        leadId:          id,
+        companyId:       lead.companyId,   // non-null — guarded above
+        branchId:        lead.branchId ?? null,
+        previousStageId: lead.stageId ?? null,
+        newStageId:      stageId,
+        changedById:     actor.id,
+        reason:          reason,
+        changedAt:       now
+      }
+    });
+
+    // 3. LeadActivity record (Sprint 4)
+    // Note: LeadActivity schema has NO branchId field — do not pass it
+    await tx.leadActivity.create({
+      data: {
+        leadId:            id,
+        companyId:         lead.companyId,  // non-null — guarded above
+        activityType:      "STAGE_CHANGE",
+        description:       `Stage changed from "${lead.stage?.name ?? "None"}" to "${targetStage.name}"${
+                             reason ? ` — Reason: ${reason}` : ""
+                           }`,
+        metadata:          {
+          previousStageId:   lead.stageId,
+          previousStageName: lead.stage?.name ?? null,
+          previousStageType: lead.stage?.stageType ?? null,
+          newStageId:        stageId,
+          newStageName:      targetStage.name,
+          newStageType:      targetStage.stageType,
+          reason
+        },
+        relatedEntityType: "PIPELINE_HISTORY",
+        performedById:     actor.id,
+        performedAt:       now
+      }
+    });
+
+    // 4. AuditLog (existing — keep)
     await createAuditLog({
       companyId:     lead.companyId,
       entityId:      id,
       action:        "STAGE_CHANGE",
-      oldValue:      JSON.stringify({ stageId: lead.stageId }),
-      newValue:      JSON.stringify({ stageId }),
+      oldValue:      JSON.stringify({ stageId: lead.stageId, stageName: lead.stage?.name }),
+      newValue:      JSON.stringify({ stageId, stageName: targetStage.name, reason }),
       performedById: actor.id
     }, tx);
 
@@ -799,6 +865,7 @@ export const updateLeadStageService = async (leadId, data, actor) => {
     timeout: 30000
   });
 };
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // LEAD COMMENTS
@@ -2065,5 +2132,27 @@ export const assignLeadsService = async (data, actor) => {
     },
     results
   };
+// ──────────────────────────────────────────────────────────────────────────────
+// GET LEAD PIPELINE HISTORY (Sprint 4 — new endpoint)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export const getLeadPipelineHistoryService = async (leadId, actor) => {
+  const id = Number(leadId);
+  if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
+
+  const lead = await findLeadById(id);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+
+  return prisma.pipelineHistory.findMany({
+    where:   { leadId: id },
+    orderBy: { changedAt: "desc" },
+    include: {
+      previousStage: { select: { id: true, name: true, colorCode: true, stageType: true } },
+      newStage:      { select: { id: true, name: true, colorCode: true, stageType: true } },
+      changedByUser: { select: { id: true, name: true } }
+    }
+  });
 };
 
