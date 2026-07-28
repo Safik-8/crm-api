@@ -2132,6 +2132,7 @@ export const assignLeadsService = async (data, actor) => {
     },
     results
   };
+};
 // ──────────────────────────────────────────────────────────────────────────────
 // GET LEAD PIPELINE HISTORY (Sprint 4 — new endpoint)
 // ──────────────────────────────────────────────────────────────────────────────

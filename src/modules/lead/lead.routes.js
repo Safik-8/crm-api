@@ -24,7 +24,7 @@ import {
   updateLeadNote,
   deleteLeadNote,
   getLeadTimeline,
-  assignLeads
+  assignLeads,
   getLeadPipelineHistory
 } from "./lead.controllers.js";
 import {

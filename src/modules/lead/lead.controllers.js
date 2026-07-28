@@ -22,7 +22,7 @@ import {
   updateLeadNoteService,
   deleteLeadNoteService,
   getLeadTimelineService,
-  assignLeadsService
+  assignLeadsService,
   getLeadPipelineHistoryService
 } from "./lead.services.js";
 import { uploadExcel } from "./lead.upload.js";
