@@ -25,7 +25,11 @@ export const updateBranchSchema = z.object({
   name: z.string().trim().min(1, "Branch name cannot be empty").optional(),
   address: z.string().trim().optional().nullable(),
   location: z.string().trim().optional().nullable(),
-  status: z.enum(["ACTIVE", "INACTIVE"]).optional()
+  status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  maxDailyLeadsPerUser: z.number().int().min(50, "Daily lead limit must be at least 50").optional().nullable(),
+  autoAssignmentEnabled: z.boolean().optional(),
+  assignmentAlgorithm: z.enum(["ROUND_ROBIN", "LEAST_WORKLOAD", "PRIORITY_BASED"]).optional().nullable(),
+  assignmentResolutionLevel: z.enum(["PERSON", "TEAM"]).optional()
 }).refine(data => Object.keys(data).length > 0, {
   message: "At least one field must be provided for update"
 })

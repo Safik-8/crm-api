@@ -226,6 +226,28 @@ export const addCommentSchema = z.object({
     .max(2000, "Comment must be 2000 characters or less")
 });
 
+export const assignLeadsSchema = z.object({
+  leadIds: z
+    .array(z.number().int().positive("Lead ID must be a positive integer"))
+    .min(1, "At least one lead ID must be provided"),
+  teamId: z.preprocess(
+    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    z.number().int().positive().optional().nullable()
+  ),
+  assignedToId: z.preprocess(
+    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    z.number().int().positive().optional().nullable()
+  ),
+  notes: z.string().trim().max(1000).optional().nullable(),
+  reason: z.string().trim().max(1000).optional().nullable(),
+}).refine(
+  (data) => (data.teamId !== undefined && data.teamId !== null) || (data.assignedToId !== undefined && data.assignedToId !== null),
+  {
+    message: "Either a team or a user must be selected for assignment",
+    path: ["teamId"]
+  }
+);
+
 // ─── Middleware factory ───────────────────────────────────────────────────────
 
 export const validateBody = (schema) => {
@@ -246,3 +268,4 @@ export const validateBody = (schema) => {
     }
   };
 };
+

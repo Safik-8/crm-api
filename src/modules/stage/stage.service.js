@@ -40,10 +40,12 @@ export const createStageService = async (data, actor) => {
 
   const existing = await prisma.stage.findFirst({
     where: { name },
-    select: { id: true, isDeleted: true }
+    select: { id: true, isDeleted: true, status: true }
   })
 
-  if (existing && !existing.isDeleted) throw new ConflictError("Stage name already exists", "name")
+  if (existing && !existing.isDeleted && existing.status === "ACTIVE") {
+    throw new ConflictError("Stage name already exists", "name")
+  }
 
   // Auto-derive code if not supplied: e.g. "Scholarship Review" -> "SCHOLARSHIP_REVIEW"
   let derivedCode = data.code?.toUpperCase() || name.toUpperCase().replace(/[^A-Z0-9]/g, "_").replace(/_+/g, "_").slice(0, 30);
@@ -65,7 +67,7 @@ export const createStageService = async (data, actor) => {
   }
 
   // Soft-restore: bring back deleted stage and update ALL fields
-  if (existing && existing.isDeleted) {
+  if (existing && (existing.isDeleted || existing.status !== "ACTIVE")) {
     return prisma.stage.update({
       where: { id: existing.id },
       data: {
@@ -121,7 +123,8 @@ export const updateStageService = async (id, data, actor) => {
   if (!Number.isInteger(stageId) || stageId < 1) throw new BadRequestError("Invalid stage id")
 
   const stage = await prisma.stage.findUnique({ where: { id: stageId } })
-  if (!stage || stage.isDeleted) throw new NotFoundError("Stage")
+
+    if (!stage || stage.isDeleted || stage.status !== "ACTIVE") throw new NotFoundError("Stage")
 
   // Build update payload — only include fields present in request
   const updateData = { updatedById: actor.id }
@@ -129,10 +132,13 @@ export const updateStageService = async (id, data, actor) => {
   if (data.name !== undefined) {
     const name = normalizeName(data.name)
     if (!name) throw new ValidationError("Validation failed", [{ field: "name", message: "name cannot be empty" }])
+    
+    // Default stage cannot be renamed
+    if (stage.isDefault) throw new BadRequestError("Default stage cannot be renamed")
 
     // System stages (PROSPECT, CLOSURE) can be renamed, but the name check runs
     const duplicate = await prisma.stage.findFirst({
-      where: { name, id: { not: stageId }, isDeleted: false },
+      where: { name, id: { not: stageId }, isDeleted: false, status: "ACTIVE" },
       select: { id: true }
     })
     if (duplicate) throw new ConflictError("Stage name already exists", "name")
@@ -173,7 +179,7 @@ export const deleteStageService = async (id, actor) => {
   if (!Number.isInteger(stageId) || stageId < 1) throw new BadRequestError("Invalid stage id")
 
   const stage = await prisma.stage.findUnique({ where: { id: stageId } })
-  if (!stage || stage.isDeleted) throw new NotFoundError("Stage")
+  if (!stage || stage.isDeleted || stage.status !== "ACTIVE") throw new NotFoundError("Stage")
 
   // GAP-10: Guard by stageType first, then legacy isDefault check
   if (SYSTEM_STAGE_TYPES.includes(stage.stageType)) {
@@ -190,7 +196,7 @@ export const deleteStageService = async (id, actor) => {
 
   return prisma.stage.update({
     where: { id: stageId },
-    data: { isDeleted: true, updatedById: actor.id }
+    data: { isDeleted: true, status: "INACTIVE", updatedById: actor.id }
   })
 }
 

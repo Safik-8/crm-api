@@ -9,7 +9,7 @@ import {
   getLeadByIdService,
   updateLeadService,
   deleteLeadService,
-  tempDeleteAllLeadsService,
+  deleteAllLeadsService,
   updateLeadStageService,
   addLeadCommentService,
   getLeadCommentsService,
@@ -22,6 +22,7 @@ import {
   updateLeadNoteService,
   deleteLeadNoteService,
   getLeadTimelineService,
+  assignLeadsService
   getLeadPipelineHistoryService
 } from "./lead.services.js";
 import { uploadExcel } from "./lead.upload.js";
@@ -89,14 +90,16 @@ export const deleteLead = async (req, res, next) => {
   }
 };
 
-export const tempDeleteAllLeads = async (req, res, next) => {
+export const deleteAllLeads = async (req, res, next) => {
   try {
-    const result = await tempDeleteAllLeadsService(req.user);
-    return sendSuccess(res, result, "All leads deleted successfully");
+    const result = await deleteAllLeadsService(req.user);
+    return sendSuccess(res, result, `Successfully deleted ${result.count} leads`);
   } catch (err) {
     next(err);
   }
 };
+
+
 
 export const updateLeadStage = async (req, res, next) => {
   try {
@@ -222,6 +225,15 @@ export const getLeadTimeline = async (req, res, next) => {
   try {
     const timeline = await getLeadTimelineService(req.params.id, req.user);
     return sendSuccess(res, { timeline }, "Timeline history fetched");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const assignLeads = async (req, res, next) => {
+  try {
+    const result = await assignLeadsService(req.body, req.user);
+    return sendSuccess(res, result, "Leads assigned successfully");
   } catch (err) {
     next(err);
   }

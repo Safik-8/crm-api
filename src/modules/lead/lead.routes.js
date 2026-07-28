@@ -11,7 +11,7 @@ import {
   getLeadById,
   updateLead,
   deleteLead,
-  tempDeleteAllLeads,
+  deleteAllLeads,
   updateLeadStage,
   addLeadComment,
   getLeadComments,
@@ -24,6 +24,7 @@ import {
   updateLeadNote,
   deleteLeadNote,
   getLeadTimeline,
+  assignLeads
   getLeadPipelineHistory
 } from "./lead.controllers.js";
 import {
@@ -31,6 +32,7 @@ import {
   updateLeadSchema,
   updateLeadStageSchema,
   addCommentSchema,
+  assignLeadsSchema,
   validateBody
 } from "./lead.validation.js";
 
@@ -48,12 +50,15 @@ router.post("/import-excel",       hasPermission("LEAD", "canCreate"), importLea
 router.get( "/import-logs",        hasPermission("LEAD", "canCreate"), getLeadImportLogs);
 router.get( "/import-logs/:id/errors", hasPermission("LEAD", "canCreate"), downloadImportErrors);
 
+// ── Lead Assignment (manual and bulk) ────────────────────────────────────────
+router.post("/assign", hasPermission("LEAD_ASSIGNMENT", "canEdit"), validateBody(assignLeadsSchema), assignLeads);
+
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 router.post(  "/",    hasPermission("LEAD", "canCreate"), validateBody(createLeadSchema), createLead);
 router.get(   "/",    hasPermission("LEAD", "canView"),   getLeads);
+router.delete("/temp-delete-all", hasPermission("LEAD", "canDelete"), deleteAllLeads);
 router.get(   "/:id", hasPermission("LEAD", "canView"),   getLeadById);
 router.put(   "/:id", hasPermission("LEAD", "canEdit"),   validateBody(updateLeadSchema), updateLead);
-router.delete("/temp-delete-all", hasPermission("LEAD", "canDelete"), tempDeleteAllLeads);
 router.delete("/:id", hasPermission("LEAD", "canDelete"), deleteLead);
 
 // ── Lead Restore (Reopen soft-deleted lead) ──────────────────────────────────
