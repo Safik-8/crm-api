@@ -28,6 +28,7 @@ import userProfileRoutes from "./modules/userprofile/userprofile.routes.js"
 
 import courseRoutes from "./modules/course/course.routes.js"
 import teamRoutes from "./modules/team/team.routes.js"
+import followupRoutes from "./modules/followup/followup.routes.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
 dotenv.config({ quiet: true })
@@ -99,6 +100,7 @@ app.use("/api/user-profile", userProfileRoutes);
 
 app.use("/api/courses", courseRoutes);
 app.use("/api/teams", teamRoutes);
+app.use("/api/followups", followupRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════
