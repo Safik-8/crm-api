@@ -73,11 +73,7 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
       });
       if (!hasSalesRole) return false;
 
-      // Check current active team membership
-      const hasActiveTeam = user.teamMemberships.some(tm => 
-        tm.team && tm.team.status === "ACTIVE" && !tm.team.isDeleted
-      );
-      return hasActiveTeam;
+      return true;
     });
 
     if (eligibleUsers.length === 0) {
@@ -427,8 +423,7 @@ const handleAllFullOrNoCandidates = async (lead, tx = prisma) => {
           companyId: lead.companyId,
           branchId: lead.branchId,
           notificationType: "ASSIGNMENT_ALERT",
-          title: "Lead Assignment Failed",
-          message: `Lead "${lead.name}" remains unassigned because all eligible candidates in the branch have hit their daily limit.`,
+          message: `Lead Assignment Failed: Lead "${lead.name}" remains unassigned because all eligible candidates in the branch have hit their daily limit.`,
           status: "UNREAD"
         }
       });
