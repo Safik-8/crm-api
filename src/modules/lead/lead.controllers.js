@@ -23,7 +23,10 @@ import {
   deleteLeadNoteService,
   getLeadTimelineService,
   assignLeadsService,
-  getLeadPipelineHistoryService
+  getLeadPipelineHistoryService,
+  createCommunicationLogService,
+  getCommunicationLogsService,
+  deleteCommunicationLogService
 } from "./lead.services.js";
 import { uploadExcel } from "./lead.upload.js";
 
@@ -187,7 +190,7 @@ export const downloadImportErrors = async (req, res, next) => {
 
 export const getLeadNotes = async (req, res, next) => {
   try {
-    const notes = await getLeadNotesService(req.params.id, req.user);
+    const notes = await getLeadNotesService(req.params.id, req.query, req.user);
     return sendSuccess(res, { notes }, "Notes fetched");
   } catch (err) {
     next(err);
@@ -223,7 +226,7 @@ export const deleteLeadNote = async (req, res, next) => {
 
 export const getLeadTimeline = async (req, res, next) => {
   try {
-    const timeline = await getLeadTimelineService(req.params.id, req.user);
+    const timeline = await getLeadTimelineService(req.params.id, req.query, req.user);
     return sendSuccess(res, { timeline }, "Timeline history fetched");
   } catch (err) {
     next(err);
@@ -243,6 +246,33 @@ export const getLeadPipelineHistory = async (req, res, next) => {
   try {
     const history = await getLeadPipelineHistoryService(req.params.id, req.user);
     return sendSuccess(res, { history }, "Pipeline history fetched");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createCommunicationLog = async (req, res, next) => {
+  try {
+    const log = await createCommunicationLogService(req.params.id, req.body, req.user);
+    return sendSuccess(res, { log }, "Communication log created successfully", 201);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getCommunicationLogs = async (req, res, next) => {
+  try {
+    const logs = await getCommunicationLogsService(req.params.id, req.query, req.user);
+    return sendSuccess(res, { logs }, "Communication logs fetched");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteCommunicationLog = async (req, res, next) => {
+  try {
+    const log = await deleteCommunicationLogService(req.params.id, req.params.logId, req.user);
+    return sendSuccess(res, { log }, "Communication log deleted successfully");
   } catch (err) {
     next(err);
   }

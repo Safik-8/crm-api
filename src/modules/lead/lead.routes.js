@@ -25,7 +25,10 @@ import {
   deleteLeadNote,
   getLeadTimeline,
   assignLeads,
-  getLeadPipelineHistory
+  getLeadPipelineHistory,
+  createCommunicationLog,
+  getCommunicationLogs,
+  deleteCommunicationLog
 } from "./lead.controllers.js";
 import {
   createLeadSchema,
@@ -72,6 +75,11 @@ router.delete("/:id/notes/:noteId", hasPermission("LEAD", "canEdit"), deleteLead
 
 // ── Timeline ──────────────────────────────────────────────────────────────────
 router.get("/:id/timeline", hasPermission("LEAD", "canView"), getLeadTimeline);
+
+// ── Communication Logs CRUD (Task 8.4 & 8.5) ──────────────────────────────────
+router.get(   "/:id/communication-logs",              hasPermission("LEAD", "canView"), getCommunicationLogs);
+router.post(  "/:id/communication-logs",              hasPermission("LEAD", "canEdit"), createCommunicationLog);
+router.delete("/:id/communication-logs/:logId",        hasPermission("LEAD", "canEdit"), deleteCommunicationLog);
 
 // ── Pipeline Stage History (Sprint 4) ────────────────────────────────────────
 router.get("/:id/pipeline-history", hasPermission("PIPELINE", "canView"), getLeadPipelineHistory);
