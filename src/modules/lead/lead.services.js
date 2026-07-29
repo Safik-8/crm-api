@@ -376,6 +376,16 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
           performedById: actor.id
         }
       });
+
+      await tx.leadActivity.create({
+        data: {
+          leadId:        lead.id,
+          companyId:     lead.companyId,
+          activityType:  "RESTORED",
+          description:   "Lead restored from soft-delete",
+          performedById: actor.id
+        }
+      });
     } else {
       lead = await createLead(payload, tx);
 
@@ -386,6 +396,31 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
         newValue:      JSON.stringify({ name: lead.name, mobile: lead.mobile, sourceId: lead.sourceId }),
         performedById: actor.id
       }, tx);
+
+      await tx.leadActivity.create({
+        data: {
+          leadId:        lead.id,
+          companyId:     lead.companyId,
+          activityType:  "CREATED",
+          description:   "Lead created",
+          performedById: actor.id
+        }
+      });
+
+      if (resolvedStageId) {
+        await tx.pipelineHistory.create({
+          data: {
+            leadId:          lead.id,
+            companyId:       lead.companyId,
+            branchId:        lead.branchId ?? null,
+            previousStageId: null,
+            newStageId:      resolvedStageId,
+            changedById:     actor.id,
+            reason:          "Initial stage on creation",
+            changedAt:       now
+          }
+        });
+      }
     }
 
     if (!skipAutoAssign && !lead.assignedToId && !lead.teamId) {
@@ -643,6 +678,48 @@ export const updateLeadService = async (leadId, data, actor) => {
       newValue:      JSON.stringify(updated),
       performedById: actor.id
     }, tx);
+
+    const changes = [];
+    if (data.name !== undefined && data.name !== currentLead.name) changes.push(`name to "${data.name}"`);
+    if (data.mobile !== undefined && data.mobile !== currentLead.mobile) changes.push(`mobile to "${data.mobile}"`);
+    if (data.email !== undefined && data.email !== currentLead.email) changes.push(`email to "${data.email || 'None'}"`);
+    if (data.priority !== undefined && data.priority !== currentLead.priority) changes.push(`priority to "${data.priority}"`);
+    if (data.statusId !== undefined && data.statusId !== currentLead.statusId) {
+      changes.push(`status to "${updated.status?.name || 'Updated'}"`);
+    }
+
+    const desc = changes.length > 0 ? `Updated ${changes.join(', ')}` : "Updated lead details";
+
+    await tx.leadActivity.create({
+      data: {
+        leadId:        id,
+        companyId:     lead.companyId,
+        activityType:  "UPDATED",
+        description:   desc,
+        performedById: actor.id,
+        metadata: {
+          fields: Object.keys(updateData).filter(k => k !== 'updatedById')
+        }
+      }
+    });
+
+    if (data.assignedToId !== undefined && data.assignedToId !== currentLead.assignedToId) {
+      const assigneeName = data.assignedToId
+        ? (await tx.user.findUnique({ where: { id: data.assignedToId }, select: { name: true } }))?.name || "User"
+        : null;
+      const activityType = currentLead.assignedToId ? "REASSIGNED" : "ASSIGNED";
+      const description = assigneeName ? `Lead ${activityType.toLowerCase()} to ${assigneeName}` : "Lead unassigned";
+      
+      await tx.leadActivity.create({
+        data: {
+          leadId:        id,
+          companyId:     lead.companyId,
+          activityType,
+          description,
+          performedById: actor.id
+        }
+      });
+    }
 
     if (!updated.assignedToId && !updated.teamId) {
       await autoAssignLead(updated.id, tx);
@@ -1651,7 +1728,7 @@ export const getLeadImportLogsService = async (actor) => {
 // LEAD NOTES CRUD
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const getLeadNotesService = async (leadId, actor) => {
+export const getLeadNotesService = async (leadId, query = {}, actor) => {
   const id = Number(leadId);
   if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
 
@@ -1659,7 +1736,41 @@ export const getLeadNotesService = async (leadId, actor) => {
   if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
 
   await assertLeadScope(actor, lead);
-  return findLeadNotes(id);
+
+  const where = {
+    leadId: id,
+    isDeleted: false
+  };
+
+  if (query.search) {
+    where.note = {
+      contains: query.search,
+      mode: "insensitive"
+    };
+  }
+
+  if (query.authorId) {
+    where.createdById = Number(query.authorId);
+  }
+
+  if (query.dateFrom || query.dateTo) {
+    where.createdAt = {};
+    if (query.dateFrom) {
+      where.createdAt.gte = new Date(query.dateFrom);
+    }
+    if (query.dateTo) {
+      where.createdAt.lte = new Date(query.dateTo + "T23:59:59.999Z");
+    }
+  }
+
+  return prisma.leadNote.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    include: {
+      createdBy: { select: { id: true, name: true } },
+      updatedBy: { select: { id: true, name: true } }
+    }
+  });
 };
 
 export const createLeadNoteService = async (leadId, data, actor) => {
@@ -1689,6 +1800,17 @@ export const createLeadNoteService = async (leadId, data, actor) => {
       newValue: JSON.stringify({ noteId: note.id, text: note.note }),
       performedById: actor.id
     }, tx);
+
+    await tx.leadActivity.create({
+      data: {
+        leadId: id,
+        companyId: lead.companyId,
+        activityType: "NOTE_ADD",
+        description: `Added a note: "${note.note.substring(0, 60)}${note.note.length > 60 ? '...' : ''}"`,
+        performedById: actor.id,
+        metadata: { noteId: note.id }
+      }
+    });
 
     return note;
   }, {
@@ -1735,6 +1857,17 @@ export const updateLeadNoteService = async (leadId, noteId, data, actor) => {
       performedById: actor.id
     }, tx);
 
+    await tx.leadActivity.create({
+      data: {
+        leadId: lid,
+        companyId: lead.companyId,
+        activityType: "NOTE_UPDATE",
+        description: `Updated note: "${updated.note.substring(0, 60)}${updated.note.length > 60 ? '...' : ''}"`,
+        performedById: actor.id,
+        metadata: { noteId: nid }
+      }
+    });
+
     return updated;
   }, {
     maxWait: 15000,
@@ -1775,6 +1908,17 @@ export const deleteLeadNoteService = async (leadId, noteId, actor) => {
       performedById: actor.id
     }, tx);
 
+    await tx.leadActivity.create({
+      data: {
+        leadId: lid,
+        companyId: lead.companyId,
+        activityType: "NOTE_DELETE",
+        description: `Deleted a note`,
+        performedById: actor.id,
+        metadata: { noteId: nid }
+      }
+    });
+
     return deleted;
   }, {
     maxWait: 15000,
@@ -1786,7 +1930,7 @@ export const deleteLeadNoteService = async (leadId, noteId, actor) => {
 // LEAD TIMELINE
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const getLeadTimelineService = async (leadId, actor) => {
+export const getLeadTimelineService = async (leadId, query = {}, actor) => {
   const id = Number(leadId);
   if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
 
@@ -1795,15 +1939,181 @@ export const getLeadTimelineService = async (leadId, actor) => {
 
   await assertLeadScope(actor, lead);
 
-  return prisma.auditLog.findMany({
-    where: {
-      entityType: "LEAD",
-      entityId: id
-    },
-    orderBy: { createdAt: "desc" },
+  const where = {
+    leadId: id
+  };
+
+  if (query.activityType) {
+    where.activityType = query.activityType;
+  }
+
+  if (query.performedById) {
+    const filterUser = await prisma.user.findUnique({
+      where: { id: Number(query.performedById) }
+    });
+    if (!filterUser || (lead.branchId && filterUser.branchId !== lead.branchId)) {
+      // Force empty results if user doesn't belong to the lead's branch
+      where.performedById = -1;
+    } else {
+      where.performedById = filterUser.id;
+    }
+  }
+
+  if (query.dateFrom || query.dateTo) {
+    where.performedAt = {};
+    if (query.dateFrom) {
+      where.performedAt.gte = new Date(query.dateFrom);
+    }
+    if (query.dateTo) {
+      where.performedAt.lte = new Date(query.dateTo + "T23:59:59.999Z");
+    }
+  }
+
+  return prisma.leadActivity.findMany({
+    where,
+    orderBy: { performedAt: "desc" },
     include: {
       performedBy: { select: { id: true, name: true } }
     }
+  });
+};
+
+// ──────────────────────────────────────────────────────────────────────────────
+// LEAD COMMUNICATION LOGS CRUD (Task 8.4 & 8.5)
+// ──────────────────────────────────────────────────────────────────────────────
+
+const VALID_COMMUNICATION_TYPES = ["CALL", "EMAIL", "MEETING", "WHATSAPP"];
+
+export const createCommunicationLogService = async (leadId, data, actor) => {
+  const id = Number(leadId);
+  if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
+
+  const lead = await findLeadById(id);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+
+  const { communicationType, summary, interactionDate } = data;
+
+  if (!communicationType || !VALID_COMMUNICATION_TYPES.includes(communicationType.toUpperCase())) {
+    throw new ValidationError("Validation failed", [{ field: "communicationType", message: "Invalid or missing communication type" }]);
+  }
+
+  if (!interactionDate) {
+    throw new ValidationError("Validation failed", [{ field: "interactionDate", message: "Interaction date is required" }]);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const log = await tx.communicationLog.create({
+      data: {
+        leadId: id,
+        companyId: lead.companyId ?? actor.companyId,
+        branchId: lead.branchId,
+        communicationType: communicationType.toUpperCase(),
+        summary: summary || null,
+        interactionDate: new Date(interactionDate),
+        createdById: actor.id
+      },
+      include: {
+        createdBy: { select: { id: true, name: true } }
+      }
+    });
+
+    await tx.leadActivity.create({
+      data: {
+        leadId: id,
+        companyId: lead.companyId ?? actor.companyId,
+        activityType: "COMMUNICATION_LOGGED",
+        description: `Logged a ${communicationType.toLowerCase()} communication`,
+        performedById: actor.id,
+        metadata: {
+          logId: log.id,
+          communicationType
+        }
+      }
+    });
+
+    return log;
+  });
+};
+
+export const getCommunicationLogsService = async (leadId, query = {}, actor) => {
+  const id = Number(leadId);
+  if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
+
+  const lead = await findLeadById(id);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+
+  const where = {
+    leadId: id,
+    isDeleted: false
+  };
+
+  if (query.communicationType) {
+    where.communicationType = query.communicationType.toUpperCase();
+  }
+
+  if (query.dateFrom || query.dateTo) {
+    where.interactionDate = {};
+    if (query.dateFrom) where.interactionDate.gte = new Date(query.dateFrom);
+    if (query.dateTo) where.interactionDate.lte = new Date(query.dateTo + "T23:59:59.999Z");
+  }
+
+  return prisma.communicationLog.findMany({
+    where,
+    orderBy: { interactionDate: "desc" },
+    include: {
+      createdBy: { select: { id: true, name: true } }
+    }
+  });
+};
+
+export const deleteCommunicationLogService = async (leadId, logId, actor) => {
+  const lId = Number(leadId);
+  const logIdNum = Number(logId);
+  if (!Number.isInteger(lId) || lId < 1) throw new BadRequestError("Invalid lead id");
+  if (!Number.isInteger(logIdNum) || logIdNum < 1) throw new BadRequestError("Invalid log id");
+
+  const lead = await findLeadById(lId);
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  await assertLeadScope(actor, lead);
+
+  const log = await prisma.communicationLog.findUnique({
+    where: { id: logIdNum }
+  });
+
+  if (!log || log.isDeleted || log.leadId !== lId) {
+    throw new NotFoundError("Communication Log");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updatedLog = await tx.communicationLog.update({
+      where: { id: logIdNum },
+      data: {
+        isDeleted: true,
+        deletedById: actor.id,
+        deletedAt: new Date()
+      }
+    });
+
+    await tx.leadActivity.create({
+      data: {
+        leadId: lId,
+        companyId: lead.companyId ?? actor.companyId,
+        activityType: "COMMUNICATION_DELETED",
+        description: `Deleted a ${log.communicationType.toLowerCase()} communication log`,
+        performedById: actor.id,
+        metadata: {
+          logId: logIdNum,
+          communicationType: log.communicationType
+        }
+      }
+    });
+
+    return updatedLog;
   });
 };
 export const getImportErrorsCsvService = async (logId, actor) => {
@@ -2110,6 +2420,37 @@ export const assignLeadsService = async (data, actor) => {
               team: updatedLead.team
             }),
             performedById: actor.id
+          }
+        });
+
+        const activityType = prevUserId ? "REASSIGNED" : "ASSIGNED";
+        const assigneeName = updatedLead.assignedTo?.name || (targetUser?.name) || "User";
+        const teamName = updatedLead.team?.name || (targetTeam?.name) || "Team";
+        let desc = "";
+        if (updatedLead.assignedToId && updatedLead.teamId) {
+          desc = `Lead ${activityType.toLowerCase()} to ${assigneeName} in team ${teamName}`;
+        } else if (updatedLead.assignedToId) {
+          desc = `Lead ${activityType.toLowerCase()} to ${assigneeName}`;
+        } else if (updatedLead.teamId) {
+          desc = `Lead ${activityType.toLowerCase()} to team ${teamName}`;
+        } else {
+          desc = "Lead unassigned";
+        }
+
+        await tx.leadActivity.create({
+          data: {
+            leadId,
+            companyId: lead.companyId ?? actor.companyId,
+            activityType,
+            description: desc,
+            performedById: actor.id,
+            metadata: {
+              previousUserId: prevUserId,
+              previousTeamId: prevTeamId,
+              nextUserId: updatedLead.assignedToId,
+              nextTeamId: updatedLead.teamId,
+              reason: reason || null
+            }
           }
         });
 
