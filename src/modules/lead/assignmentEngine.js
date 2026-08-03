@@ -427,7 +427,6 @@ const handleAllFullOrNoCandidates = async (lead, tx = prisma) => {
           companyId: lead.companyId,
           branchId: lead.branchId,
           notificationType: "ASSIGNMENT_ALERT",
-          title: "Lead Assignment Failed",
           message: `Lead "${lead.name}" remains unassigned because all eligible candidates in the branch have hit their daily limit.`,
           status: "UNREAD"
         }

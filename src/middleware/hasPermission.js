@@ -17,7 +17,17 @@ export const hasPermission = (module, action) => {
       return next()
     }
 
-    // 2. Flexible permission check for Comments / Activities: users with LEAD view/edit/create rights can comment
+    // 2. Branch Manager (rank >= 60) always has permission to view & edit their scoped branch
+    if (module === "BRANCH" && (action === "canView" || action === "canEdit")) {
+      if (
+        req.user.primaryRole === "BRANCH_MANAGER" ||
+        (req.user.primaryRoleRank && Number(req.user.primaryRoleRank) >= 60)
+      ) {
+        return next()
+      }
+    }
+
+    // 3. Flexible permission check for Comments / Activities: users with LEAD view/edit/create rights can comment
     if (module === "ACTIVITY") {
       const leadPerms = req.user.permissions?.["LEAD"]
       if (leadPerms && (leadPerms.canView || leadPerms.canEdit || leadPerms.canCreate)) {
@@ -25,7 +35,7 @@ export const hasPermission = (module, action) => {
       }
     }
 
-    // 3. Module permission check from req.user.permissions matrix
+    // 4. Module permission check from req.user.permissions matrix
     const modulePerms = req.user.permissions?.[module]
     if (!modulePerms || !modulePerms[action]) {
       return next(new PermissionDeniedError(module, action))

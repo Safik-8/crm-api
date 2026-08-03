@@ -61,7 +61,7 @@ export const createCourse = async (data, actorId, tx = prisma) => {
     }
   });
 };
-
+  
 /**
  * Updates an existing Course record.
  *

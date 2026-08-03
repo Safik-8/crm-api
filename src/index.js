@@ -29,6 +29,8 @@ import userProfileRoutes from "./modules/userprofile/userprofile.routes.js"
 import courseRoutes from "./modules/course/course.routes.js"
 import teamRoutes from "./modules/team/team.routes.js"
 import followupRoutes from "./modules/followup/followup.routes.js"
+import notificationRoutes from "./modules/notification/notification.routes.js"
+import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
 dotenv.config({ quiet: true })
@@ -101,6 +103,7 @@ app.use("/api/user-profile", userProfileRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/followups", followupRoutes);
+app.use("/api/notifications", notificationRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════
@@ -126,6 +129,7 @@ const startServer = async () => {
       console.log(`Server running on port ${PORT}`)
       console.log(`API URL: http://localhost:${PORT}`)
       console.log(`Client URL: ${process.env.CLIENT_URL}`)
+      startReminderJob()
     })
 
   } catch (error) {

@@ -6,6 +6,7 @@ import {
   findFollowupById, findFollowups, countFollowups,
   createFollowupDb, updateFollowupDb, deleteFollowupDb,
   findLeadForFollowup, findBdeTeamMemberIds, findUserInScope,
+  buildNotificationRecipients,
 } from "./followup.repository.js";
 
 // ── INTERNAL HELPERS ──────────────────────────────────────────────────────────
@@ -103,6 +104,68 @@ const logFollowupActivity = async (leadId, companyId, activityType, description,
   }
 };
 
+/**
+ * Creates a FOLLOWUP_ALERT notification for a single recipient user.
+ * Non-blocking fire-and-forget — errors are swallowed, never interrupt main flow.
+ *
+ * @param {number} userId       - Recipient user ID
+ * @param {Object} followup     - Followup record (must have leadId, companyId, branchId, id)
+ * @param {string} message      - Human-readable message body
+ * @param {'SCHEDULED'|'COMPLETED'|'CANCELLED'} eventSubType - Controls icon on frontend
+ */
+const notifyFollowupEvent = async (userId, followup, message, eventSubType = 'SCHEDULED') => {
+  const PREFIX_MAP = {
+    SCHEDULED:  '[SCHEDULED]',
+    COMPLETED:  '[COMPLETED]',
+    CANCELLED:  '[CANCELLED]',
+  };
+  const prefix = PREFIX_MAP[eventSubType] ?? '[SCHEDULED]';
+  try {
+    await prisma.notification.create({
+      data: {
+        userId,
+        leadId:           followup.leadId           ?? null,
+        companyId:        followup.companyId         ?? null,
+        branchId:         followup.branchId          ?? null,
+        followupId:       followup.id,
+        notificationType: "FOLLOWUP_ALERT",
+        message:          `${prefix} ${message}`,
+        status:           "UNREAD",
+      },
+    });
+  } catch (err) {
+    console.error(`[FollowupService] Failed to create FOLLOWUP_ALERT for user ${userId}:`, err.message);
+  }
+};
+
+/**
+ * Industry-level fan-out: sends a separate notification row to every recipient
+ * in the supervisor chain (assigned user → creator → branch manager → company admin → super admin).
+ * Each row is independently owned — deleting one does NOT affect others.
+ *
+ * @param {Object} followup     - Full followup record
+ * @param {string} message      - Notification message body
+ * @param {string} eventSubType - 'SCHEDULED' | 'COMPLETED' | 'CANCELLED'
+ * @param {number} [createdById] - Optional additional recipient (e.g. creator on complete/cancel)
+ */
+const fanOutFollowupNotification = async (followup, message, eventSubType, createdById = null) => {
+  try {
+    const recipientIds = await buildNotificationRecipients({
+      assignedToId: followup.assignedToId,
+      createdById:  createdById ?? followup.createdById ?? null,
+      companyId:    followup.companyId,
+      branchId:     followup.branchId ?? null,
+    });
+
+    // Fire all notifications in parallel — each is independent and non-blocking
+    await Promise.allSettled(
+      recipientIds.map((uid) => notifyFollowupEvent(uid, followup, message, eventSubType))
+    );
+  } catch (err) {
+    console.error("[FollowupService] fanOutFollowupNotification failed:", err.message);
+  }
+};
+
 // ── EXPORTED SERVICE FUNCTIONS ────────────────────────────────────────────────
 
 export const createFollowupService = async (data, actor) => {
@@ -167,6 +230,14 @@ export const createFollowupService = async (data, actor) => {
     `Follow-up scheduled: ${data.followupType} on ${scheduledAt.toLocaleDateString("en-IN")}`,
     { followupId: followup.id, followupType: data.followupType, scheduledAt: data.scheduledAt, assignedToId },
     actor.id
+  );
+
+  // Fan-out SCHEDULED notification to: assigned user + creator + BM + CA + SA
+  fanOutFollowupNotification(
+    followup,
+    `Follow-up scheduled: ${data.followupType} on ${scheduledAt.toLocaleDateString("en-IN")} for lead "${lead.name}". Assigned to ${followup.assignedTo?.name ?? 'a team member'}.`,
+    'SCHEDULED',
+    actor.id // creator
   );
 
   return followup;
@@ -341,6 +412,16 @@ export const completeFollowupService = async (id, data, actor) => {
     { followupId, followupType: followup.followupType, completedAt: updated.completedAt },
     actor.id
   );
+
+  // Fan-out COMPLETED notification to: assigned user + creator + BM + CA + SA
+  fanOutFollowupNotification(
+    followup,
+    `Follow-up completed: ${followup.followupType} for lead "${followup.lead?.name ?? 'Unknown'}" was marked done by ${actor.name ?? 'a team member'}.`,
+    'COMPLETED',
+    actor.id
+  );
+
+
   return updated;
 };
 
@@ -366,8 +447,18 @@ export const cancelFollowupService = async (id, actor) => {
     { followupId, followupType: followup.followupType },
     actor.id
   );
+
+  // Fan-out CANCELLED notification to: assigned user + creator + BM + CA + SA
+  fanOutFollowupNotification(
+    followup,
+    `Follow-up cancelled: ${followup.followupType} for lead "${followup.lead?.name ?? 'Unknown'}" was cancelled by ${actor.name ?? 'a team member'}.`,
+    'CANCELLED',
+    actor.id
+  );
+
   return updated;
 };
+
 
 export const deleteFollowupService = async (id, actor) => {
   const perm = actor.permissions?.FOLLOWUP;
