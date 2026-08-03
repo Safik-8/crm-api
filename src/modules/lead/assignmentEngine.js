@@ -73,11 +73,7 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
       });
       if (!hasSalesRole) return false;
 
-      // Check current active team membership
-      const hasActiveTeam = user.teamMemberships.some(tm => 
-        tm.team && tm.team.status === "ACTIVE" && !tm.team.isDeleted
-      );
-      return hasActiveTeam;
+      return true;
     });
 
     if (eligibleUsers.length === 0) {
