@@ -62,6 +62,7 @@ export const findLeadsForBoard = async (leadWhere, sortBy, sortOrder) => {
     include: {
       assignedTo: { select: { id: true, name: true, email: true } },
       course: { select: { id: true, name: true } },
+      opportunities: { select: { id: true }, where: { isDeleted: false } },
       ...leadStageLogInclude
     }
   })

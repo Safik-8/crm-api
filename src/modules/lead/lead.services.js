@@ -84,6 +84,10 @@ export const getSubordinateIds = async (managerId, companyId) => {
  */
 const actorScope = (actor) => {
   const scope = {};
+  // SUPER_ADMIN (rank >= 100) has global access across all companies and branches
+  if ((actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN') {
+    return scope;
+  }
   if (actor.companyId) scope.companyId = actor.companyId;
   if (actor.branchId)  scope.branchId  = actor.branchId;
   return scope;
@@ -94,6 +98,11 @@ const actorScope = (actor) => {
  * Supports both new-style (direct companyId/branchId) and legacy (pipeline-scoped) leads.
  */
 const assertLeadScope = async (actor, lead) => {
+  // SUPER_ADMIN (rank >= 100) bypasses tenant guards
+  if ((actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN') {
+    return;
+  }
+
   // New-style: direct tenant columns
   if (lead.companyId && actor.companyId && lead.companyId !== actor.companyId) {
     throw new ForbiddenError("Lead does not belong to your company");
@@ -456,24 +465,21 @@ export const getLeadsService = async (query, actor) => {
   // Build where clause — always scoped to actor's tenant
   const where = { isDeleted: false, ...actorScope(actor) };
 
-  // Apply HRABAC Filters for roles with Rank < 60 (BDE/ISE)
+  // Apply HRBAC Filters for roles with Rank < 60 (BDE/ISE)
+  // Strict Model: Reps see leads assigned to them or their direct subordinates
   if (actor.primaryRoleRank < 60) {
     const subordinates = await getSubordinateIds(actor.id, actor.companyId);
-    where.OR = [
-      { assignedToId: actor.id },
-      { createdById: actor.id },
-      { assignedToId: { in: subordinates } },
-      { createdById: { in: subordinates } }
-    ];
+    const allowedAssigneeIds = [actor.id, ...subordinates];
 
-    // If explicit filter is passed, narrow down or restrict
     if (query?.assignedToId) {
       const filterAssignee = Number(query.assignedToId);
-      if (filterAssignee === actor.id || subordinates.includes(filterAssignee)) {
+      if (allowedAssigneeIds.includes(filterAssignee)) {
         where.assignedToId = filterAssignee;
       } else {
         where.assignedToId = -1; // Not allowed: force empty results
       }
+    } else {
+      where.assignedToId = { in: allowedAssigneeIds };
     }
   } else {
     if (query?.assignedToId) {
@@ -482,7 +488,11 @@ export const getLeadsService = async (query, actor) => {
   }
 
   // Kanban filters
-  if (query?.pipelineId) where.pipelineId = Number(query.pipelineId);
+  if (query?.pipelineId) {
+    where.pipelineId = Number(query.pipelineId);
+    // Exclude leads converted to opportunities from active prospecting Kanban board
+    where.opportunities = { none: { isDeleted: false } };
+  }
   if (query?.stageId)    where.stageId    = Number(query.stageId);
 
   // Scope filters

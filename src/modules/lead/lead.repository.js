@@ -27,6 +27,7 @@ export const leadDetailInclude = {
   createdBy:  { select: { id: true, name: true } },
   updatedBy:  { select: { id: true, name: true } },
   deletedBy:  { select: { id: true, name: true } },
+  opportunities: { select: { id: true, opportunityName: true, status: true, expectedRevenue: true }, where: { isDeleted: false } },
 };
 
 /** Kanban list include — kept for backward compat with Kanban board */
@@ -363,6 +364,7 @@ export const findLeads = async (params, tx = prisma) => {
       pipeline:   { select: { id: true, name: true } },
       stage:      { select: { id: true, name: true } },
       createdBy:  { select: { id: true, name: true } },
+      opportunities: { select: { id: true }, where: { isDeleted: false } },
       ...leadStageLogInclude
     }
   });

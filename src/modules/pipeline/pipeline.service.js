@@ -1,3 +1,4 @@
+import prisma from "../../config/db.js"
 import { BadRequestError, NotFoundError, ValidationError } from "../../utils/AppError.js"
 import {
   assignStagesToPipelineTx,
@@ -209,6 +210,52 @@ export const listPipelinesService = async (query, actor) => {
   }))
 }
 
+const getSubordinateIds = async (managerId, companyId) => {
+  if (!companyId) return [];
+  const users = await prisma.user.findMany({
+    where: { companyId, status: "ACTIVE" },
+    select: { id: true, reportingManagerId: true }
+  });
+
+  const managerToSubordinates = {};
+  users.forEach(u => {
+    if (u.reportingManagerId) {
+      if (!managerToSubordinates[u.reportingManagerId]) {
+        managerToSubordinates[u.reportingManagerId] = [];
+      }
+      managerToSubordinates[u.reportingManagerId].push(u.id);
+    }
+  });
+
+  const ids = [];
+  const visited = new Set([managerId]);
+  const queue = [managerId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const subs = managerToSubordinates[current];
+    if (subs) {
+      for (const subId of subs) {
+        if (!visited.has(subId)) {
+          visited.add(subId);
+          ids.push(subId);
+          queue.push(subId);
+        }
+      }
+    }
+  }
+  return ids;
+};
+
+const actorScope = (actor) => {
+  const scope = {};
+  if ((actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN') {
+    return scope;
+  }
+  if (actor.companyId) scope.companyId = actor.companyId;
+  if (actor.branchId)  scope.branchId  = actor.branchId;
+  return scope;
+};
+
 export const getPipelineDetailsService = async (id, query, actor) => {
   const pipelineId = Number(id)
   if (!Number.isInteger(pipelineId) || pipelineId < 1) {
@@ -235,18 +282,59 @@ export const getPipelineDetailsService = async (id, query, actor) => {
 
   const leadWhere = {
     pipelineId: pipeline.id,
-    isDeleted: false
+    isDeleted: false,
+    ...actorScope(actor)
+  }
+
+  // HRBAC scoping for roles with Rank < 60 (BDE / ISE)
+  // Strict Model: Reps see leads assigned to them or their direct subordinates
+  if (actor && actor.primaryRoleRank < 60) {
+    const subordinates = await getSubordinateIds(actor.id, actor.companyId);
+    const allowedAssigneeIds = [actor.id, ...subordinates];
+
+    if (query?.assignedToId) {
+      const filterAssignee = Number(query.assignedToId);
+      if (allowedAssigneeIds.includes(filterAssignee)) {
+        leadWhere.assignedToId = filterAssignee;
+      } else {
+        leadWhere.assignedToId = -1; // Not allowed: force empty results
+      }
+    } else {
+      leadWhere.assignedToId = { in: allowedAssigneeIds };
+    }
+  } else if (query?.assignedToId) {
+    leadWhere.assignedToId = Number(query.assignedToId);
+  }
+
+  if (query.includeConverted === 'only') {
+    leadWhere.opportunities = { some: { isDeleted: false } };
+  } else if (query.includeConverted === 'true' || query.includeConverted === 'all') {
+    // Show all leads (includes converted)
+  } else {
+    // Default: active prospecting view (excludes converted)
+    leadWhere.opportunities = { none: { isDeleted: false } };
   }
 
   if (options.stageId) leadWhere.stageId = options.stageId
-  if (options.assignedToId) leadWhere.assignedToId = options.assignedToId
   if (options.priority) leadWhere.priority = options.priority
+
   if (options.search) {
-    leadWhere.OR = [
+    const searchConditions = [
       { name: { contains: options.search, mode: "insensitive" } },
       { mobile: { contains: options.search, mode: "insensitive" } },
       { interestedFor: { contains: options.search, mode: "insensitive" } }
-    ]
+    ];
+
+    if (leadWhere.OR) {
+      const existingScopeOR = leadWhere.OR;
+      delete leadWhere.OR;
+      leadWhere.AND = [
+        { OR: existingScopeOR },
+        { OR: searchConditions }
+      ];
+    } else {
+      leadWhere.OR = searchConditions;
+    }
   }
   if (!options.dateFilterSkipped && (options.dateFrom || options.dateTo)) {
     leadWhere.date = {
