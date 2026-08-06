@@ -30,6 +30,7 @@ import courseRoutes from "./modules/course/course.routes.js"
 import teamRoutes from "./modules/team/team.routes.js"
 import followupRoutes from "./modules/followup/followup.routes.js"
 import notificationRoutes from "./modules/notification/notification.routes.js"
+import qualificationRoutes from "./modules/qualification/qualification.routes.js"
 import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -94,6 +95,7 @@ app.use("/api/lead-sources", leadSourceRoutes);
 app.use("/api/lead-statuses", leadStatusRoutes);
 app.use("/api/pipelines", pipelineRoutes);
 app.use("/api/stages", stageRoutes);
+app.use("/api/leads", qualificationRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/users", userRoutes);
