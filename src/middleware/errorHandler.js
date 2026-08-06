@@ -20,6 +20,18 @@ export const errorHandler = (err, req, res, next) => {
     return res.status(err.statusCode).json(err.toJSON())
   }
 
+  // Zod Validation Error
+  if (err.name === 'ZodError') {
+    return res.status(400).json({
+      success: false,
+      statusCode: 400,
+      code: "VALIDATION_ERROR",
+      message: "Invalid input data",
+      errors: err.errors.map(e => ({ field: e.path.join('.'), message: e.message })),
+      timestamp: new Date().toISOString()
+    });
+  }
+
   // Prisma — unique constraint
   if (err.code === "P2002") {
     let field = err.meta?.target?.[0] || "field";

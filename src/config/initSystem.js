@@ -261,7 +261,7 @@ export const initializeSystem = async () => {
         }
 
         if (permsToCreate.length) {
-            await prisma.permission.createMany({ data: permsToCreate })
+            await prisma.permission.createMany({ data: permsToCreate, skipDuplicates: true })
         }
         for (const p of permsToUpdate) {
             await prisma.permission.update({ where: { id: p.id }, data: p.data })

@@ -27,6 +27,22 @@ export const leadDetailInclude = {
   createdBy:  { select: { id: true, name: true } },
   updatedBy:  { select: { id: true, name: true } },
   deletedBy:  { select: { id: true, name: true } },
+  qualification: {
+    select: {
+      id: true,
+      status: true,
+      score: true,
+      budgetAvailable: true,
+      interestLevel: true,
+      purchaseTimeline: true,
+      decisionMakerAvailable: true,
+      productFit: true,
+      notes: true,
+      remarks: true,
+      evaluatedAt: true,
+      evaluatedBy: { select: { id: true, name: true } }
+    }
+  },
   opportunities: { select: { id: true, opportunityName: true, status: true, expectedRevenue: true }, where: { isDeleted: false } },
 };
 
@@ -364,6 +380,21 @@ export const findLeads = async (params, tx = prisma) => {
       pipeline:   { select: { id: true, name: true } },
       stage:      { select: { id: true, name: true } },
       createdBy:  { select: { id: true, name: true } },
+      qualification: {
+        select: {
+          id: true,
+          status: true,
+          score: true,
+          budgetAvailable: true,
+          interestLevel: true,
+          purchaseTimeline: true,
+          decisionMakerAvailable: true,
+          productFit: true,
+          notes: true,
+          remarks: true,
+          evaluatedAt: true,
+        }
+      },
       opportunities: { select: { id: true }, where: { isDeleted: false } },
       ...leadStageLogInclude
     }
