@@ -86,6 +86,8 @@ export const MODULES = [
   "AUDIT",
   "LEAD_SOURCE",
   "LEAD_STATUS",
+  "QUALIFICATION",
+  "OPPORTUNITY",
 ]
 
 // ── PERMISSION ACTIONS ───────────────────────────────────────────

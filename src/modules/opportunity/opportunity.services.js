@@ -55,31 +55,34 @@ export const createOpportunity = async (actor, payload) => {
 
   // 3. Resolve ownerId:
   // For Sales Reps (BDE, Rank <= 40), the opportunity is automatically owned by the BDE creating it (actor.id).
-  // For Managers/Admins (Rank >= 60), default to requested ownerId, lead's assigned BDE, or actor.id.
+  // For Managers/Admins (Rank >= 60), default to requested ownerId, lead's assigned BDE (if in same company), or actor.id.
   let ownerId;
   if (actor.primaryRoleRank <= ROLE_RANKS.BDE) {
     ownerId = actor.id;
   } else {
-    ownerId = payload.ownerId || lead.assignedToId || actor.id;
+    const candidateOwnerId = payload.ownerId || lead.assignedToId;
+    if (candidateOwnerId) {
+      const ownerWhere = { id: candidateOwnerId };
+      if (!isSuperAdmin && actor.companyId) {
+        ownerWhere.companyId = actor.companyId;
+      }
+      const validOwner = await prisma.user.findFirst({ where: ownerWhere });
+      if (validOwner) {
+        ownerId = validOwner.id;
+      }
+    }
+    if (!ownerId) {
+      ownerId = actor.id;
+    }
   }
 
   if (ownerId !== actor.id) {
-    const ownerUserWhere = { id: ownerId };
-    if (!isSuperAdmin && actor.companyId) {
-      ownerUserWhere.companyId = actor.companyId;
-    }
-
     const ownerUser = await prisma.user.findFirst({
-      where: ownerUserWhere,
+      where: { id: ownerId },
       include: { userRoles: { include: { role: true } } },
     });
 
-    if (!ownerUser) {
-      throw new NotFoundError('Owner user');
-    }
-
-    // HRBAC Rank Guard: Branch Managers (60) can only assign within branch, BDEs (40) can only self-assign
-    if (actor.primaryRoleRank === ROLE_RANKS.BRANCH_MANAGER && ownerUser.branchId !== actor.branchId) {
+    if (actor.primaryRoleRank === ROLE_RANKS.BRANCH_MANAGER && ownerUser && ownerUser.branchId !== actor.branchId) {
       throw new ForbiddenError('Branch Managers can only assign opportunities to users within their branch.');
     }
     if (actor.primaryRoleRank <= ROLE_RANKS.BDE && ownerId !== actor.id) {

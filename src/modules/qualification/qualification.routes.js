@@ -9,13 +9,13 @@ router.use(authenticate);
 
 router.post(
   '/:id/qualify',
-  hasPermission('LEAD', 'canEdit'),
+  hasPermission('QUALIFICATION', 'canEdit'),
   evaluateLead
 );
 
 router.get(
   '/:id/qualification-history',
-  hasPermission('LEAD', 'canView'),
+  hasPermission('QUALIFICATION', 'canView'),
   getLeadHistory
 );
 

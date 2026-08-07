@@ -14,23 +14,23 @@ const router = Router();
 // Protect all opportunity endpoints with JWT Authentication
 router.use(authenticate);
 
-router.get('/stages', hasPermission('LEAD', 'canView'), opportunityController.getOpportunityStages);
+router.get('/stages', hasPermission('OPPORTUNITY', 'canView'), opportunityController.getOpportunityStages);
 
 /**
  * @route   GET /api/opportunities
  * @desc    List paginated opportunities with search & filters (HRBAC Scoped)
- * @access  Private (LEAD:canView)
+ * @access  Private (OPPORTUNITY:canView)
  */
-router.get('/', hasPermission('LEAD', 'canView'), opportunityController.getOpportunitiesList);
+router.get('/', hasPermission('OPPORTUNITY', 'canView'), opportunityController.getOpportunitiesList);
 
 /**
  * @route   POST /api/opportunities
  * @desc    Create a new opportunity for a qualified lead
- * @access  Private (LEAD:canCreate)
+ * @access  Private (OPPORTUNITY:canCreate)
  */
 router.post(
   '/',
-  hasPermission('LEAD', 'canCreate'),
+  hasPermission('OPPORTUNITY', 'canCreate'),
   validateBody(createOpportunitySchema),
   opportunityController.createOpportunity
 );
@@ -38,18 +38,18 @@ router.post(
 /**
  * @route   GET /api/opportunities/:id
  * @desc    Get detailed single opportunity profile
- * @access  Private (LEAD:canView)
+ * @access  Private (OPPORTUNITY:canView)
  */
-router.get('/:id', hasPermission('LEAD', 'canView'), opportunityController.getOpportunityById);
+router.get('/:id', hasPermission('OPPORTUNITY', 'canView'), opportunityController.getOpportunityById);
 
 /**
  * @route   PATCH /api/opportunities/:id
  * @desc    Update opportunity details (revenue, closing date, notes)
- * @access  Private (LEAD:canEdit)
+ * @access  Private (OPPORTUNITY:canEdit)
  */
 router.patch(
   '/:id',
-  hasPermission('LEAD', 'canEdit'),
+  hasPermission('OPPORTUNITY', 'canEdit'),
   validateBody(updateOpportunitySchema),
   opportunityController.updateOpportunity
 );
@@ -57,11 +57,11 @@ router.patch(
 /**
  * @route   POST /api/opportunities/:id/close
  * @desc    Close opportunity outcome (WON / LOST / CANCELLED)
- * @access  Private (LEAD:canEdit)
+ * @access  Private (OPPORTUNITY:canEdit)
  */
 router.post(
   '/:id/close',
-  hasPermission('LEAD', 'canEdit'),
+  hasPermission('OPPORTUNITY', 'canEdit'),
   validateBody(closeOpportunitySchema),
   opportunityController.closeOpportunity
 );

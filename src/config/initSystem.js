@@ -57,6 +57,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         LEAD_STATUS: { canView: true, canCreate: true, canEdit: true, canDelete: true, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
     },
 
     COMPANY_ADMIN: {
@@ -82,6 +84,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         LEAD_STATUS: { canView: true, canCreate: true, canEdit: true, canDelete: false, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
     },
 
     BRANCH_MANAGER: {
@@ -107,6 +111,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
     },
 
     BDE: {
@@ -132,6 +138,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
     },
 
     ISE: {
@@ -157,6 +165,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: false, canDelete: false },
+        OPPORTUNITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     },
 }
 

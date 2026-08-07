@@ -84,12 +84,13 @@ export const getSubordinateIds = async (managerId, companyId) => {
  */
 const actorScope = (actor) => {
   const scope = {};
-  // SUPER_ADMIN (rank >= 100) has global access across all companies and branches
   if ((actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN') {
     return scope;
   }
   if (actor.companyId) scope.companyId = actor.companyId;
-  if (actor.branchId)  scope.branchId  = actor.branchId;
+  if (actor.branchId && (!actor.primaryRoleRank || actor.primaryRoleRank < 80)) {
+    scope.branchId = actor.branchId;
+  }
   return scope;
 };
 

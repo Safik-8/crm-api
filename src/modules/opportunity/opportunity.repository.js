@@ -72,11 +72,11 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
       },
     });
 
-    // 2c. Update Lead status to CONVERTED
+    // 2c. Update Lead qualificationStatus to CONVERTED
     if (data.leadId) {
       await tx.lead.update({
         where: { id: Number(data.leadId) },
-        data: { status: 'CONVERTED' },
+        data: { qualificationStatus: 'CONVERTED' },
       });
     }
 
@@ -218,14 +218,72 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById) => 
       },
     });
 
+    if (status === 'WON') {
+      let deal = await tx.deal.findFirst({ where: { opportunityId: opportunity.id } });
+      if (!deal) {
+        deal = await tx.deal.create({
+          data: {
+            companyId: opportunity.companyId,
+            branchId: opportunity.branchId,
+            dealNumber: `DEAL-${opportunity.id}-${Date.now().toString().slice(-4)}`,
+            opportunityId: opportunity.id,
+            leadId: opportunity.leadId,
+            finalAmount: opportunity.expectedRevenue,
+            outcome: 'WON',
+            closingDate: opportunity.closingDate || new Date(),
+            closedById: updatedById,
+            createdById: updatedById,
+          }
+        });
+      }
+
+      let customer = await tx.customer.findFirst({ where: { dealId: deal.id } });
+      if (!customer) {
+        const leadUser = opportunity.lead;
+        customer = await tx.customer.create({
+          data: {
+            companyId: opportunity.companyId,
+            branchId: opportunity.branchId,
+            customerCode: `CUST-${opportunity.leadId}-${Date.now().toString().slice(-4)}`,
+            customerName: leadUser?.name || opportunity.opportunityName,
+            contactNumber: leadUser?.mobile || 'N/A',
+            email: leadUser?.email || null,
+            leadId: opportunity.leadId,
+            opportunityId: opportunity.id,
+            dealId: deal.id,
+            purchasedProductId: opportunity.productId,
+            totalRevenue: opportunity.expectedRevenue,
+            assignedOwnerId: opportunity.ownerId,
+            createdById: updatedById,
+          }
+        });
+      }
+
+      let revLog = await tx.revenueLog.findFirst({ where: { dealId: deal.id } });
+      if (!revLog) {
+        await tx.revenueLog.create({
+          data: {
+            companyId: opportunity.companyId,
+            branchId: opportunity.branchId,
+            dealId: deal.id,
+            customerId: customer.id,
+            productId: opportunity.productId,
+            revenueAmount: opportunity.expectedRevenue,
+            paymentStatus: 'COMPLETED',
+            createdById: updatedById,
+          }
+        });
+      }
+    }
+
     await tx.auditLog.create({
       data: {
         companyId,
         entityType: 'OPPORTUNITY',
         entityId: id,
         action: `OPPORTUNITY_CLOSED_${status}`,
-        oldValue: oldVal,
-        newValue: { status },
+        oldValue: JSON.stringify(oldVal),
+        newValue: JSON.stringify({ status }),
         performedById: updatedById,
       },
     });

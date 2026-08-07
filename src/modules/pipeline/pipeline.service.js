@@ -183,8 +183,10 @@ export const createPipelineService = async (data, actor) => {
 export const listPipelinesService = async (query, actor) => {
   const where = { isDeleted: false }
 
-  if (actor.companyId) where.companyId = actor.companyId
-  if (actor.branchId) where.branchId = actor.branchId
+  if ((!actor.primaryRoleRank || actor.primaryRoleRank < 100) && actor.role !== 'SUPER_ADMIN') {
+    if (actor.companyId) where.companyId = actor.companyId;
+    if (actor.branchId && actor.primaryRoleRank < 80) where.branchId = actor.branchId;
+  }
 
   const pipelines = await findPipelinesByWhere(where)
 
@@ -252,7 +254,9 @@ const actorScope = (actor) => {
     return scope;
   }
   if (actor.companyId) scope.companyId = actor.companyId;
-  if (actor.branchId)  scope.branchId  = actor.branchId;
+  if (actor.branchId && (!actor.primaryRoleRank || actor.primaryRoleRank < 80)) {
+    scope.branchId = actor.branchId;
+  }
   return scope;
 };
 
