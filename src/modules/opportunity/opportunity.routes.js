@@ -2,10 +2,15 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/Authenticate.js';
 import { hasPermission } from '../../middleware/hasPermission.js';
 import * as opportunityController from './opportunity.controllers.js';
+import { authorize } from '../../middleware/authorize.js';
 import {
   createOpportunitySchema,
   updateOpportunitySchema,
   closeOpportunitySchema,
+  createOpportunityStageSchema,
+  updateOpportunityStageSchema,
+  bulkOpportunityStagesSchema,
+  moveOpportunityStageSchema,
   validateBody,
 } from './opportunity.validation.js';
 
@@ -15,6 +20,13 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/stages', hasPermission('LEAD', 'canView'), opportunityController.getOpportunityStages);
+router.put('/stages/bulk', hasPermission('OPPORTUNITY_PIPELINE', 'canEdit'), validateBody(bulkOpportunityStagesSchema), opportunityController.bulkUpdateOpportunityStages);
+router.post('/stages', hasPermission('OPPORTUNITY_PIPELINE', 'canCreate'), validateBody(createOpportunityStageSchema), opportunityController.createOpportunityStage);
+router.patch('/stages/:stageId', hasPermission('OPPORTUNITY_PIPELINE', 'canEdit'), validateBody(updateOpportunityStageSchema), opportunityController.updateOpportunityStage);
+router.patch('/stages/:stageId/toggle', hasPermission('OPPORTUNITY_PIPELINE', 'canEdit'), opportunityController.toggleOpportunityStage);
+router.delete('/stages/:stageId', hasPermission('OPPORTUNITY_PIPELINE', 'canDelete'), opportunityController.deleteOpportunityStage);
+router.patch('/:id/stage', hasPermission('LEAD', 'canEdit'), validateBody(moveOpportunityStageSchema), opportunityController.moveOpportunityStage);
+
 
 /**
  * @route   GET /api/opportunities

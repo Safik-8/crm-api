@@ -73,7 +73,9 @@ export const getOpportunitiesList = async (req, res, next) => {
 
 export const getOpportunityStages = async (req, res, next) => {
   try {
-    const stages = await opportunityService.getOpportunityStagesService(req.user);
+    const includeInactive = req.query.includeInactive === 'true';
+    const companyId = req.query.companyId ? parseInt(req.query.companyId) : undefined;
+    const stages = await opportunityService.getOpportunityStagesService(req.user, includeInactive, companyId);
     return res.status(200).json({
       success: true,
       statusCode: 200,
@@ -85,3 +87,118 @@ export const getOpportunityStages = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Controller: Create Opportunity Stage
+ */
+export const createOpportunityStage = async (req, res, next) => {
+  try {
+    const stage = await opportunityService.createOpportunityStage(req.user, req.body);
+    return res.status(201).json({
+      success: true,
+      statusCode: 201,
+      message: 'Opportunity stage created successfully',
+      data: stage,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Controller: Update Opportunity Stage
+ */
+export const updateOpportunityStage = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.stageId);
+    const stage = await opportunityService.updateOpportunityStage(req.user, id, req.body);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Opportunity stage updated successfully',
+      data: stage,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Controller: Toggle Opportunity Stage status
+ */
+export const toggleOpportunityStage = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.stageId);
+    const status = req.body.status;
+    const companyId = req.body.companyId ? parseInt(req.body.companyId) : (req.query.companyId ? parseInt(req.query.companyId) : undefined);
+    const stage = await opportunityService.toggleOpportunityStage(req.user, id, status, companyId);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: `Opportunity stage status updated to ${status}`,
+      data: stage,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Controller: Delete Opportunity Stage
+ */
+export const deleteOpportunityStage = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.stageId);
+    const companyId = req.query.companyId ? parseInt(req.query.companyId) : (req.body.companyId ? parseInt(req.body.companyId) : undefined);
+    await opportunityService.deleteOpportunityStage(req.user, id, companyId);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Opportunity stage deleted successfully',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Controller: Bulk Update Opportunity Stages
+ */
+export const bulkUpdateOpportunityStages = async (req, res, next) => {
+  try {
+    const result = await opportunityService.bulkUpdateOpportunityStagesService(req.user, req.body);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Opportunity stages bulk updated successfully',
+      data: result,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Controller: Move Opportunity Stage
+ */
+export const moveOpportunityStage = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    const opportunity = await opportunityService.moveOpportunityStage(req.user, id, req.body);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Opportunity stage updated successfully',
+      data: opportunity,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

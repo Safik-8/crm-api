@@ -147,7 +147,7 @@ export const closeOpportunity = async (actor, id, payload) => {
     throw new ForbiddenError('You can only close opportunities within your branch.');
   }
 
-  return opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id);
+  return opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id, payload.remarks);
 };
 
 /**
@@ -250,23 +250,32 @@ export const getOpportunitiesList = async (actor, queryParams) => {
 /**
  * Fetches dynamic Opportunity stages for actor's company with auto-seed fallback
  */
-export const getOpportunityStagesService = async (actor) => {
-  const companyId = actor.companyId || 1;
+/**
+ * Fetches dynamic Opportunity stages for actor's company with auto-seed fallback
+ */
+export const getOpportunityStagesService = async (actor, includeInactive = false, queryCompanyId = null) => {
+  const isSuperAdmin = actor.primaryRole === 'SUPER_ADMIN';
+  const companyId = isSuperAdmin && queryCompanyId ? Number(queryCompanyId) : (actor.companyId || 1);
+  const where = { companyId };
+  if (!includeInactive) {
+    where.status = 'ACTIVE';
+  }
+
   let stages = await prisma.opportunityStage.findMany({
-    where: {
-      companyId,
-      status: 'ACTIVE',
-    },
+    where,
     orderBy: { displayOrder: 'asc' },
   });
 
   if (!stages || stages.length === 0) {
     const defaultStages = [
-      { companyId, name: 'Qualification', code: 'QUALIFICATION', displayOrder: 1, colorCode: '#6366f1', defaultProbabilityPct: 10 },
-      { companyId, name: 'Needs Analysis', code: 'NEEDS_ANALYSIS', displayOrder: 2, colorCode: '#3b82f6', defaultProbabilityPct: 25 },
-      { companyId, name: 'Proposal', code: 'PROPOSAL', displayOrder: 3, colorCode: '#8b5cf6', defaultProbabilityPct: 50 },
-      { companyId, name: 'Negotiation', code: 'NEGOTIATION', displayOrder: 4, colorCode: '#f59e0b', defaultProbabilityPct: 75 },
-      { companyId, name: 'Final Review', code: 'FINAL_REVIEW', displayOrder: 5, colorCode: '#10b981', defaultProbabilityPct: 90 },
+      { companyId, name: 'Qualification', code: 'QUALIFICATION', displayOrder: 1, colorCode: '#6366f1', defaultProbabilityPct: 10, stageType: 'QUALIFICATION', isSystem: true },
+      { companyId, name: 'Needs Analysis', code: 'NEEDS_ANALYSIS', displayOrder: 2, colorCode: '#3b82f6', defaultProbabilityPct: 25, stageType: 'REGULAR', isSystem: false },
+      { companyId, name: 'Proposal', code: 'PROPOSAL', displayOrder: 3, colorCode: '#8b5cf6', defaultProbabilityPct: 50, stageType: 'REGULAR', isSystem: false },
+      { companyId, name: 'Negotiation', code: 'NEGOTIATION', displayOrder: 4, colorCode: '#f59e0b', defaultProbabilityPct: 75, stageType: 'REGULAR', isSystem: false },
+      { companyId, name: 'Final Review', code: 'FINAL_REVIEW', displayOrder: 5, colorCode: '#10b981', defaultProbabilityPct: 90, stageType: 'REGULAR', isSystem: false },
+      { companyId, name: 'Won', code: 'WON', displayOrder: 6, colorCode: '#10b981', defaultProbabilityPct: 100, stageType: 'WON', isSystem: true },
+      { companyId, name: 'Lost', code: 'LOST', displayOrder: 7, colorCode: '#ef4444', defaultProbabilityPct: 0, stageType: 'LOST', isSystem: true },
+      { companyId, name: 'Cancelled', code: 'CANCELLED', displayOrder: 8, colorCode: '#6b7280', defaultProbabilityPct: 0, stageType: 'CANCELLED', isSystem: true },
     ];
     for (const st of defaultStages) {
       await prisma.opportunityStage.upsert({
@@ -276,10 +285,277 @@ export const getOpportunityStagesService = async (actor) => {
       });
     }
     stages = await prisma.opportunityStage.findMany({
-      where: { companyId, status: 'ACTIVE' },
+      where,
       orderBy: { displayOrder: 'asc' },
     });
   }
 
   return stages;
 };
+
+/**
+ * Creates a new Opportunity Stage
+ */
+export const createOpportunityStage = async (actor, payload) => {
+  const companyId = actor.companyId || payload.companyId || 1;
+  const name = payload.name.trim();
+
+  // Code derivation if not provided
+  const code = payload.code
+    ? payload.code.trim().toUpperCase()
+    : name.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/_+/g, '_').slice(0, 50);
+
+  // Check unique constraint (companyId + code)
+  const existingCode = await prisma.opportunityStage.findFirst({
+    where: { companyId, code },
+  });
+  if (existingCode) {
+    throw new ValidationError('A stage with this code already exists for this company.');
+  }
+
+  return prisma.opportunityStage.create({
+    data: {
+      companyId,
+      name,
+      code,
+      stageType: payload.stageType || 'REGULAR',
+      displayOrder: payload.displayOrder ?? 0,
+      colorCode: payload.colorCode || '#6366f1',
+      defaultProbabilityPct: payload.defaultProbabilityPct ?? 10,
+      isSystem: false,
+      status: 'ACTIVE',
+      createdById: actor.id,
+    },
+  });
+};
+
+/**
+ * Updates an Opportunity Stage
+ */
+export const updateOpportunityStage = async (actor, id, payload) => {
+  const companyId = actor.companyId || payload.companyId || 1;
+  const stage = await prisma.opportunityStage.findFirst({
+    where: { id: Number(id), companyId },
+  });
+
+  if (!stage) {
+    throw new NotFoundError('Opportunity Stage');
+  }
+
+  // System stage restrictions
+  if (stage.isSystem) {
+    if (payload.name && payload.name.trim() !== stage.name) {
+      throw new ValidationError('System stages cannot be renamed.');
+    }
+    if (payload.stageType && payload.stageType !== stage.stageType) {
+      throw new ValidationError('System stage types cannot be altered.');
+    }
+  }
+
+  const updateData = {
+    updatedById: actor.id,
+  };
+
+  if (payload.name) updateData.name = payload.name.trim();
+  if (payload.displayOrder !== undefined) updateData.displayOrder = payload.displayOrder;
+  if (payload.colorCode) updateData.colorCode = payload.colorCode;
+  if (payload.defaultProbabilityPct !== undefined) {
+    updateData.defaultProbabilityPct = payload.defaultProbabilityPct;
+  }
+  if (!stage.isSystem && payload.stageType) {
+    updateData.stageType = payload.stageType;
+  }
+
+  return prisma.opportunityStage.update({
+    where: { id: stage.id },
+    data: updateData,
+  });
+};
+
+/**
+ * Toggles an Opportunity Stage status (ACTIVE/INACTIVE)
+ */
+export const toggleOpportunityStage = async (actor, id, status, payloadCompanyId) => {
+  const companyId = actor.companyId || payloadCompanyId || 1;
+  const stage = await prisma.opportunityStage.findFirst({
+    where: { id: Number(id), companyId },
+  });
+
+  if (!stage) {
+    throw new NotFoundError('Opportunity Stage');
+  }
+
+  if (stage.isSystem && status === 'INACTIVE') {
+    throw new ValidationError('System stages cannot be deactivated.');
+  }
+
+  return prisma.opportunityStage.update({
+    where: { id: stage.id },
+    data: {
+      status: status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
+      updatedById: actor.id,
+    },
+  });
+};
+
+/**
+ * Deletes an Opportunity Stage (soft delete via status INACTIVE and removing from list)
+ * We check if used in opportunities first.
+ */
+export const deleteOpportunityStage = async (actor, id, payloadCompanyId) => {
+  const companyId = actor.companyId || payloadCompanyId || 1;
+  const stage = await prisma.opportunityStage.findFirst({
+    where: { id: Number(id), companyId },
+  });
+
+  if (!stage) {
+    throw new NotFoundError('Opportunity Stage');
+  }
+
+  if (stage.isSystem) {
+    throw new ValidationError('System stages cannot be deleted.');
+  }
+
+  // Check if used in any active/deleted opportunities
+  const count = await prisma.opportunity.count({
+    where: { stageId: stage.id },
+  });
+  if (count > 0) {
+    throw new ValidationError('Cannot delete stage as it is currently linked to existing opportunities.');
+  }
+
+  // Delete stage record completely since it has no dependency
+  return prisma.opportunityStage.delete({
+    where: { id: stage.id },
+  });
+};
+
+/**
+ * Bulk updates Opportunity Stages (display order and status)
+ */
+export const bulkUpdateOpportunityStagesService = async (actor, payload) => {
+  const isSuperAdmin = actor.primaryRole === 'SUPER_ADMIN';
+  const companyId = isSuperAdmin && payload.companyId ? Number(payload.companyId) : (actor.companyId || 1);
+  const { stageOrders } = payload;
+
+  const updates = stageOrders.map((item) => {
+    return prisma.opportunityStage.update({
+      where: { id: Number(item.id), companyId },
+      data: {
+        displayOrder: Number(item.displayOrder),
+        status: item.status,
+        updatedById: actor.id,
+      },
+    });
+  });
+
+  await prisma.$transaction(updates);
+  return { success: true };
+};
+
+/**
+ * Move Opportunity Stage & Update status / probability
+ */
+export const moveOpportunityStage = async (actor, id, payload) => {
+  const companyId = actor.companyId || 1;
+  const opportunity = await prisma.opportunity.findFirst({
+    where: { id: Number(id), isDeleted: false, companyId },
+    include: { stage: true },
+  });
+
+  if (!opportunity) {
+    throw new NotFoundError('Opportunity');
+  }
+
+  // RBAC Permission Guard
+  const rank = actor.primaryRoleRank || 0;
+  if (rank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
+    throw new ForbiddenError('BDEs can only move their own opportunities.');
+  }
+  if (rank === ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
+    throw new ForbiddenError('Branch Managers can only move opportunities within their branch.');
+  }
+
+  // 1. Opportunity must be OPEN
+  if (opportunity.status !== 'OPEN') {
+    throw new ValidationError('Closed opportunities (WON, LOST, CANCELLED) cannot be moved.');
+  }
+
+  // 2. Fetch target stage
+  const newStage = await prisma.opportunityStage.findFirst({
+    where: { id: payload.newStageId, companyId, status: 'ACTIVE' },
+  });
+
+  if (!newStage) {
+    throw new ValidationError('Target stage not found or is inactive.');
+  }
+
+  // Determine closure status based on stageType
+  let targetStatus = 'OPEN';
+  if (newStage.stageType === 'WON') {
+    targetStatus = 'WON';
+  } else if (newStage.stageType === 'LOST') {
+    targetStatus = 'LOST';
+    if (!payload.reasonId) {
+      throw new ValidationError('A reason ID is required when marking an opportunity as LOST.');
+    }
+  } else if (newStage.stageType === 'CANCELLED') {
+    targetStatus = 'CANCELLED';
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // 1. Create stage history record
+    await tx.opportunityStageHistory.create({
+      data: {
+        opportunityId: opportunity.id,
+        companyId,
+        branchId: opportunity.branchId,
+        previousStageId: opportunity.stageId,
+        newStageId: newStage.id,
+        changedById: actor.id,
+        remarks: payload.remarks || null,
+      },
+    });
+
+    // 2. Update Opportunity
+    const updatedOpp = await tx.opportunity.update({
+      where: { id: opportunity.id },
+      data: {
+        stageId: newStage.id,
+        probabilityPercentage: newStage.defaultProbabilityPct ?? opportunity.probabilityPercentage,
+        status: targetStatus,
+        updatedById: actor.id,
+      },
+      include: { stage: true },
+    });
+
+    // 3. Log Lead Activity
+    await tx.leadActivity.create({
+      data: {
+        leadId: opportunity.leadId,
+        companyId,
+        activityType: 'OPPORTUNITY_STAGE_CHANGED',
+        description: `Moved opportunity "${opportunity.opportunityName}" from "${opportunity.stage.name}" to "${newStage.name}" (Status: ${targetStatus})`,
+        relatedEntityType: 'OPPORTUNITY',
+        relatedEntityId: opportunity.id,
+        performedById: actor.id,
+      },
+    });
+
+    // 4. Log Audit Trail
+    await tx.auditLog.create({
+      data: {
+        companyId,
+        entityType: 'OPPORTUNITY',
+        entityId: opportunity.id,
+        action: 'OPPORTUNITY_STAGE_CHANGED',
+        oldValue: JSON.stringify({ stageId: opportunity.stageId, status: opportunity.status }),
+        newValue: JSON.stringify({ stageId: newStage.id, status: targetStatus }),
+        performedById: actor.id,
+      },
+    });
+
+    return updatedOpp;
+  });
+};
+

@@ -73,6 +73,7 @@ export const MODULES = [
   "LEAD",
   "LEAD_ASSIGNMENT",
   "PIPELINE",
+  "OPPORTUNITY_PIPELINE",
   "FOLLOWUP",
   "TASK",
   "ACTIVITY",

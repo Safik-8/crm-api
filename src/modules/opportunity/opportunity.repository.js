@@ -200,14 +200,24 @@ export const updateOpportunityTx = async (id, companyId, data, updatedById) => {
 /**
  * Updates an Opportunity status (Won / Lost / Cancelled) with audit logging
  */
-export const closeOpportunityTx = async (id, companyId, status, updatedById) => {
+export const closeOpportunityTx = async (id, companyId, status, updatedById, remarks = null) => {
   return prisma.$transaction(async (tx) => {
     const oldVal = await tx.opportunity.findUnique({ where: { id } });
+
+    // 1. Resolve matching terminal stage for the company
+    const targetStage = await tx.opportunityStage.findFirst({
+      where: {
+        companyId: oldVal ? oldVal.companyId : companyId,
+        stageType: status, // "WON" | "LOST" | "CANCELLED"
+      },
+    });
 
     const opportunity = await tx.opportunity.update({
       where: { id },
       data: {
         status, // "WON" | "LOST" | "CANCELLED"
+        stageId: targetStage ? targetStage.id : oldVal.stageId,
+        probabilityPercentage: status === 'WON' ? 100 : 0,
         updatedById,
       },
       include: {
@@ -218,6 +228,21 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById) => 
       },
     });
 
+    // 2. Log in opportunity_stage_histories
+    if (targetStage) {
+      await tx.opportunityStageHistory.create({
+        data: {
+          opportunityId: id,
+          companyId,
+          branchId: opportunity.branchId,
+          previousStageId: oldVal.stageId,
+          newStageId: targetStage.id,
+          changedById: updatedById,
+          remarks,
+        },
+      });
+    }
+
     await tx.auditLog.create({
       data: {
         companyId,
@@ -225,7 +250,7 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById) => 
         entityId: id,
         action: `OPPORTUNITY_CLOSED_${status}`,
         oldValue: oldVal,
-        newValue: { status },
+        newValue: { status, stageId: targetStage ? targetStage.id : oldVal.stageId },
         performedById: updatedById,
       },
     });
