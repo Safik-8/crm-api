@@ -135,7 +135,7 @@ export const closeOpportunity = async (actor, id, payload) => {
     throw new NotFoundError('Opportunity');
   }
 
-  if (opportunity.status === 'WON' || opportunity.status === 'LOST') {
+  if (opportunity.status === 'WON' || opportunity.status === 'LOST' || opportunity.status === 'CANCELLED') {
     throw new ValidationError(`Opportunity is already closed as ${opportunity.status}.`);
   }
 
@@ -147,7 +147,7 @@ export const closeOpportunity = async (actor, id, payload) => {
     throw new ForbiddenError('You can only close opportunities within your branch.');
   }
 
-  return opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id, payload.remarks);
+  return opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id, payload.remarks, payload.reasonId);
 };
 
 /**
@@ -291,6 +291,20 @@ export const getOpportunityStagesService = async (actor, includeInactive = false
   }
 
   return stages;
+};
+
+/**
+ * Fetch active Win/Loss reasons for a company
+ */
+export const getWinLossReasonsService = async (actor, queryCompanyId = null) => {
+  const isSuperAdmin = actor.primaryRole === 'SUPER_ADMIN';
+  const companyId = isSuperAdmin && queryCompanyId ? Number(queryCompanyId) : (actor.companyId || 1);
+  const where = { companyId, status: 'ACTIVE' };
+  const reasons = await prisma.winLossReason.findMany({
+    where,
+    orderBy: { id: 'asc' },
+  });
+  return reasons;
 };
 
 /**
@@ -438,11 +452,107 @@ export const bulkUpdateOpportunityStagesService = async (actor, payload) => {
   const companyId = isSuperAdmin && payload.companyId ? Number(payload.companyId) : (actor.companyId || 1);
   const { stageOrders } = payload;
 
+  // 1. Fetch current stages state to get names
+  const stageIds = stageOrders.map((item) => Number(item.id));
+  const existingStages = await prisma.opportunityStage.findMany({
+    where: { id: { in: stageIds }, companyId },
+  });
+  const stagesMap = new Map(existingStages.map((s) => [s.id, s]));
+
+  // 2. Validate deactivation requests
+  for (const item of stageOrders) {
+    const stageId = Number(item.id);
+    const existingStage = stagesMap.get(stageId);
+    if (!existingStage) continue;
+
+    if (item.status === 'INACTIVE' && existingStage.status === 'ACTIVE') {
+      const activeCount = await prisma.opportunity.count({
+        where: {
+          stageId,
+          companyId,
+          status: 'OPEN',
+          isDeleted: false,
+        },
+      });
+      if (activeCount > 0) {
+        throw new ValidationError(
+          `Cannot deactivate stage "${existingStage.name}" as it currently has ${activeCount} active opportunities. Please move them first.`
+        );
+      }
+    }
+  }
+
+  const isStartStage = (s) => 
+    s.stageType === 'QUALIFICATION' || 
+    s.code === 'QUALIFICATION' || 
+    s.name?.toLowerCase() === 'qualification' ||
+    s.stageType === 'PROSPECT' || 
+    s.code === 'PROSPECT' || 
+    s.name?.toLowerCase() === 'prospect';
+
+  const isTerminalStage = (s) => {
+    const type = (s.stageType || s.code || '').toUpperCase();
+    const name = (s.name || '').toLowerCase();
+    return ['WON', 'LOST', 'CANCELLED'].includes(type) || ['won', 'lost', 'cancelled'].includes(name);
+  };
+
+  // 3. Re-assign order bounds to prevent dragging/reordering outside start & end stages
+  const activeIncomingStages = stageOrders
+    .filter((item) => {
+      const existing = stagesMap.get(Number(item.id));
+      return existing && item.status !== 'INACTIVE';
+    })
+    .map((item) => {
+      const existing = stagesMap.get(Number(item.id));
+      return {
+        ...item,
+        stageType: existing.stageType,
+        code: existing.code,
+        name: existing.name
+      };
+    });
+
+  const firstStage = activeIncomingStages.find((s) => isStartStage(s));
+  const terminalStages = activeIncomingStages.filter((s) => isTerminalStage(s));
+  const middleStages = activeIncomingStages.filter((s) => !isStartStage(s) && !isTerminalStage(s));
+
+  // Sort middle stages by displayOrder
+  middleStages.sort((a, b) => Number(a.displayOrder) - Number(b.displayOrder));
+
+  // Sort terminal stages by fixed terminal sequence order
+  const terminalOrder = ['WON', 'LOST', 'CANCELLED'];
+  const getTerminalWeight = (s) => {
+    const type = (s.stageType || s.code || '').toUpperCase();
+    const idx = terminalOrder.indexOf(type);
+    if (idx !== -1) return idx;
+    const name = (s.name || '').toLowerCase();
+    return terminalOrder.indexOf(name.toUpperCase());
+  };
+  terminalStages.sort((a, b) => getTerminalWeight(a) - getTerminalWeight(b));
+
+  const finalOrderedUpdates = [];
+  let currentOrder = 1;
+
+  if (firstStage) {
+    finalOrderedUpdates.push({ id: firstStage.id, displayOrder: currentOrder++ });
+  }
+  for (const ms of middleStages) {
+    finalOrderedUpdates.push({ id: ms.id, displayOrder: currentOrder++ });
+  }
+  for (const ts of terminalStages) {
+    finalOrderedUpdates.push({ id: ts.id, displayOrder: currentOrder++ });
+  }
+
+  const orderMap = new Map(finalOrderedUpdates.map((u) => [u.id, u.displayOrder]));
+
+  // 4. Apply updates
   const updates = stageOrders.map((item) => {
+    const stageId = Number(item.id);
+    const resolvedOrder = orderMap.get(stageId) ?? 999;
     return prisma.opportunityStage.update({
-      where: { id: Number(item.id), companyId },
+      where: { id: stageId, companyId },
       data: {
-        displayOrder: Number(item.displayOrder),
+        displayOrder: resolvedOrder,
         status: item.status,
         updatedById: actor.id,
       },
@@ -457,15 +567,22 @@ export const bulkUpdateOpportunityStagesService = async (actor, payload) => {
  * Move Opportunity Stage & Update status / probability
  */
 export const moveOpportunityStage = async (actor, id, payload) => {
-  const companyId = actor.companyId || 1;
+  const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN';
+  const opportunityWhere = { id: Number(id), isDeleted: false };
+  if (!isSuperAdmin && actor.companyId) {
+    opportunityWhere.companyId = actor.companyId;
+  }
+
   const opportunity = await prisma.opportunity.findFirst({
-    where: { id: Number(id), isDeleted: false, companyId },
+    where: opportunityWhere,
     include: { stage: true },
   });
 
   if (!opportunity) {
     throw new NotFoundError('Opportunity');
   }
+
+  const companyId = opportunity.companyId;
 
   // RBAC Permission Guard
   const rank = actor.primaryRoleRank || 0;
@@ -554,6 +671,11 @@ export const moveOpportunityStage = async (actor, id, payload) => {
         performedById: actor.id,
       },
     });
+
+    // If moved to a terminal stage, create deal/customer/revenue idempotently
+    if (['WON', 'LOST', 'CANCELLED'].includes(targetStatus)) {
+      await opportunityRepository.createDealCustomerRevenueIfNeeded(tx, updatedOpp, targetStatus, actor.id, payload.reasonId);
+    }
 
     return updatedOpp;
   });

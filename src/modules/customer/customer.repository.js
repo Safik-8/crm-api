@@ -159,3 +159,25 @@ export const updateCustomerStatus = async (id, status, updatedById) => {
     include: LIST_INCLUDE,
   });
 };
+
+/**
+ * Get customer stats aggregated by filters
+ */
+export const getCustomerStats = async (where) => {
+  const [total, active, inactive, revenue] = await prisma.$transaction([
+    prisma.customer.count({ where }),
+    prisma.customer.count({ where: { ...where, status: 'ACTIVE' } }),
+    prisma.customer.count({ where: { ...where, status: 'INACTIVE' } }),
+    prisma.customer.aggregate({
+      where,
+      _sum: { totalRevenue: true },
+    }),
+  ]);
+  return {
+    total,
+    active,
+    inactive,
+    totalRevenue: Number(revenue._sum.totalRevenue || 0),
+  };
+};
+

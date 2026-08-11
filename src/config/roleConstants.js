@@ -80,6 +80,7 @@ export const MODULES = [
   "COURSE",
   "TARGET",
   "CUSTOMER",
+  "DEAL",
   "APPROVAL",
   "DASHBOARD",
   "REPORT",

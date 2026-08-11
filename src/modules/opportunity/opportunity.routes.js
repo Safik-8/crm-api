@@ -78,4 +78,7 @@ router.post(
   opportunityController.closeOpportunity
 );
 
+// Fetch active win/loss reasons for the company (used when closing opportunities as LOST)
+router.get('/reasons', hasPermission('LEAD', 'canView'), opportunityController.getWinLossReasons);
+
 export default router;

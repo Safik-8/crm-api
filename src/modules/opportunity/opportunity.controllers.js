@@ -71,6 +71,22 @@ export const getOpportunitiesList = async (req, res, next) => {
   }
 };
 
+export const getWinLossReasons = async (req, res, next) => {
+  try {
+    const companyId = req.query.companyId ? parseInt(req.query.companyId) : undefined;
+    const reasons = await opportunityService.getWinLossReasonsService(req.user, companyId);
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Win/Loss reasons fetched successfully',
+      data: reasons,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getOpportunityStages = async (req, res, next) => {
   try {
     const includeInactive = req.query.includeInactive === 'true';

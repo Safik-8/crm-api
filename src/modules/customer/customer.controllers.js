@@ -14,6 +14,7 @@ export const getCustomersList = async (req, res, next) => {
       message    : 'Customers fetched successfully',
       data       : result.items,
       pagination : result.pagination,
+      stats      : result.stats,
       timestamp  : new Date().toISOString(),
     });
   } catch (error) {

@@ -18,6 +18,8 @@ export const getCustomersList = async (actor, queryParams) => {
     take: limit,
   });
 
+  const stats = await customerRepository.getCustomerStats(where);
+
   return {
     items: customers,
     pagination: {
@@ -26,6 +28,7 @@ export const getCustomersList = async (actor, queryParams) => {
       limit,
       totalPages: Math.ceil(total / limit),
     },
+    stats,
   };
 };
 
