@@ -28,3 +28,12 @@ export const getLeadHistory = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getQualificationConfig = async (req, res, next) => {
+  try {
+    const { DEFAULT_QUALIFICATION_CONFIG } = await import('./qualification.config.js');
+    return sendSuccess(res, DEFAULT_QUALIFICATION_CONFIG, 'Qualification configuration fetched successfully');
+  } catch (error) {
+    next(error);
+  }
+};

@@ -48,6 +48,8 @@ model Company {
   // SPRINT 5 RELATIONS
   leadQualifications         LeadQualification[]
   leadQualificationHistories LeadQualificationHistory[]
+  qualificationCriteria      CompanyQualificationCriteria[]
+  qualificationSettings      CompanyQualificationSettings?
   opportunityStages          OpportunityStage[]
   opportunities              Opportunity[]
   opportunityStageHistories  OpportunityStageHistory[]
@@ -895,6 +897,105 @@ model Notification {
   @@map("notifications")
 }
 
+model LeadQualification {
+  id        Int @id @default(autoincrement())
+  leadId    Int @unique @map("lead_id")
+  companyId Int @map("company_id")
+  branchId  Int? @map("branch_id")
+
+  status String @default("UNQUALIFIED") @map("status")
+  score  Int    @default(0)
+
+  budgetAvailable        Boolean @default(false) @map("budget_available")
+  interestLevel          String  @default("MEDIUM") @map("interest_level")
+  purchaseTimeline       String? @map("purchase_timeline")
+  decisionMakerAvailable Boolean @default(false) @map("decision_maker_available")
+  productFit             Boolean @default(false) @map("product_fit")
+
+  criteriaValues Json? @map("criteria_values")
+
+  notes   String? @db.Text
+  remarks String? @db.Text
+
+  evaluatedById Int?     @map("evaluated_by_id")
+  evaluatedAt   DateTime @default(now()) @map("evaluated_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  lead        Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  company     Company @relation(fields: [companyId], references: [id])
+  branch      Branch? @relation(fields: [branchId], references: [id])
+  evaluatedBy User?   @relation("LeadQualifiedBy", fields: [evaluatedById], references: [id])
+
+  @@index([companyId])
+  @@index([branchId])
+  @@index([leadId])
+  @@index([status])
+  @@map("lead_qualifications")
+}
+
+model LeadQualificationHistory {
+  id               Int      @id @default(autoincrement())
+  leadId           Int      @map("lead_id")
+  companyId        Int      @map("company_id")
+  branchId         Int?     @map("branch_id")
+  previousStatus   String?  @map("previous_status")
+  newStatus        String   @map("new_status")
+  score            Int?
+  remarks          String?  @db.Text
+  criteriaSnapshot Json?    @map("criteria_snapshot")
+  changedById      Int      @map("changed_by_id")
+  changedAt        DateTime @default(now()) @map("changed_at")
+
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  company   Company @relation(fields: [companyId], references: [id])
+  branch    Branch? @relation(fields: [branchId], references: [id])
+  changedBy User    @relation("QualificationHistoryChangedBy", fields: [changedById], references: [id])
+
+  @@index([leadId])
+  @@index([companyId])
+  @@index([branchId])
+  @@index([changedAt])
+  @@map("lead_qualification_histories")
+}
+
+model CompanyQualificationCriteria {
+  id           Int      @id @default(autoincrement())
+  companyId    Int      @map("company_id")
+  key          String
+  label        String
+  description  String?  @db.Text
+  fieldType    String   @map("field_type")
+  maxPoints    Int      @map("max_points")
+  options      Json?
+  defaultValue String?  @map("default_value")
+  isRequired   Boolean  @default(false) @map("is_required")
+  isActive     Boolean  @default(true) @map("is_active")
+  displayOrder Int      @default(0) @map("display_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@index([isActive])
+  @@map("company_qualification_criteria")
+}
+
+model CompanyQualificationSettings {
+  id            Int      @id @default(autoincrement())
+  companyId     Int      @unique @map("company_id")
+  passThreshold Int      @default(60) @map("pass_threshold")
+  holdThreshold Int      @default(40) @map("hold_threshold")
+  validStatuses Json     @default("[\"QUALIFIED\",\"NOT_QUALIFIED\",\"ON_HOLD\",\"UNQUALIFIED\"]") @map("valid_statuses")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@map("company_qualification_settings")
+}
+
 // FIX #5: Added compound index [relatedEntityType, relatedEntityId]
 model LeadActivity {
   id                Int      @id @default(autoincrement())
@@ -955,66 +1056,7 @@ model CommunicationLog {
 // SPRINT 5 NEW TABLES
 // Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
-// TASK 1: LEAD QUALIFICATION
-
-model LeadQualification {
-  id        Int @id @default(autoincrement())
-  leadId    Int @unique @map("lead_id")
-  companyId Int @map("company_id")
-  branchId  Int? @map("branch_id")
-
-  status String @default("UNQUALIFIED") @map("status")
-  score  Int    @default(0)
-
-  budgetAvailable        Boolean @default(false) @map("budget_available")
-  interestLevel          String  @default("MEDIUM") @map("interest_level")
-  purchaseTimeline       String? @map("purchase_timeline")
-  decisionMakerAvailable Boolean @default(false) @map("decision_maker_available")
-  productFit             Boolean @default(false) @map("product_fit")
-
-  notes   String? @db.Text
-  remarks String? @db.Text
-
-  evaluatedById Int?     @map("evaluated_by_id")
-  evaluatedAt   DateTime @default(now()) @map("evaluated_at")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  lead        Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  company     Company @relation(fields: [companyId], references: [id])
-  branch      Branch? @relation(fields: [branchId], references: [id])
-  evaluatedBy User?   @relation("LeadQualifiedBy", fields: [evaluatedById], references: [id])
-
-  @@index([companyId])
-  @@index([branchId])
-  @@index([leadId])
-  @@index([status])
-  @@map("lead_qualifications")
-}
-
-model LeadQualificationHistory {
-  id             Int      @id @default(autoincrement())
-  leadId         Int      @map("lead_id")
-  companyId      Int      @map("company_id")
-  branchId       Int?     @map("branch_id")
-  previousStatus String?  @map("previous_status")
-  newStatus      String   @map("new_status")
-  score          Int?
-  remarks        String?  @db.Text
-  changedById    Int      @map("changed_by_id")
-  changedAt      DateTime @default(now()) @map("changed_at")
-
-  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  company   Company @relation(fields: [companyId], references: [id])
-  branch    Branch? @relation(fields: [branchId], references: [id])
-  changedBy User    @relation("QualificationHistoryChangedBy", fields: [changedById], references: [id])
-
-  @@index([leadId])
-  @@index([companyId])
-  @@index([branchId])
-  @@index([changedAt])
-  @@map("lead_qualification_histories")
-}
+// TASK 1: LEAD QUALIFICATION (Defined above in SPRINT 5 SECTION)
 
 // TASK 3: OPPORTUNITY STAGES Ã¢â‚¬â€ FIX #2: companyId non-nullable
 

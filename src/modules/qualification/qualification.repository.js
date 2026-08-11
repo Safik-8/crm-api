@@ -1,18 +1,28 @@
 import prisma from '../../config/db.js';
 
-export const saveQualificationTx = async (leadId, companyId, branchId, data, computedScore, status, actorId) => {
+export const saveQualificationTx = async (
+  leadId,
+  companyId,
+  branchId,
+  data,
+  computedScore,
+  status,
+  actorId,
+  criteriaSnapshot = null
+) => {
   return prisma.$transaction(async (tx) => {
-    // 1. Upsert LeadQualification record
+    // 1. Upsert LeadQualification record with criteriaValues JSON
     const qualification = await tx.leadQualification.upsert({
       where: { leadId },
       update: {
-        budgetAvailable: data.budgetAvailable,
-        interestLevel: data.interestLevel,
-        purchaseTimeline: data.purchaseTimeline,
-        decisionMakerAvailable: data.decisionMakerAvailable,
-        productFit: data.productFit,
-        notes: data.notes,
-        remarks: data.remarks,
+        budgetAvailable: Boolean(data.budgetAvailable),
+        interestLevel: data.interestLevel || 'MEDIUM',
+        purchaseTimeline: data.purchaseTimeline || null,
+        decisionMakerAvailable: Boolean(data.decisionMakerAvailable),
+        productFit: Boolean(data.productFit),
+        criteriaValues: data,
+        notes: data.notes || null,
+        remarks: data.remarks || null,
         score: computedScore,
         status: status,
         evaluatedById: actorId,
@@ -22,26 +32,27 @@ export const saveQualificationTx = async (leadId, companyId, branchId, data, com
         leadId,
         companyId,
         branchId,
-        budgetAvailable: data.budgetAvailable,
-        interestLevel: data.interestLevel,
-        purchaseTimeline: data.purchaseTimeline,
-        decisionMakerAvailable: data.decisionMakerAvailable,
-        productFit: data.productFit,
-        notes: data.notes,
-        remarks: data.remarks,
+        budgetAvailable: Boolean(data.budgetAvailable),
+        interestLevel: data.interestLevel || 'MEDIUM',
+        purchaseTimeline: data.purchaseTimeline || null,
+        decisionMakerAvailable: Boolean(data.decisionMakerAvailable),
+        productFit: Boolean(data.productFit),
+        criteriaValues: data,
+        notes: data.notes || null,
+        remarks: data.remarks || null,
         score: computedScore,
         status: status,
         evaluatedById: actorId,
-      }
+      },
     });
 
     // 2. Fetch current status to record previousStatus in history
     const currentLead = await tx.lead.findUnique({
       where: { id: leadId },
-      select: { qualificationStatus: true }
+      select: { qualificationStatus: true },
     });
 
-    // 3. Create LeadQualificationHistory log
+    // 3. Create LeadQualificationHistory log with criteriaSnapshot JSON (Edge Case 1)
     await tx.leadQualificationHistory.create({
       data: {
         leadId,
@@ -50,9 +61,10 @@ export const saveQualificationTx = async (leadId, companyId, branchId, data, com
         previousStatus: currentLead?.qualificationStatus || 'UNQUALIFIED',
         newStatus: status,
         score: computedScore,
-        remarks: data.remarks || 'Qualification updated',
+        remarks: data.remarks || (status === 'QUALIFIED' ? 'Lead qualified successfully' : 'Qualification updated'),
+        criteriaSnapshot: criteriaSnapshot ? criteriaSnapshot : undefined,
         changedById: actorId,
-      }
+      },
     });
 
     // 4. Update the Lead table with denormalized fields
@@ -62,7 +74,7 @@ export const saveQualificationTx = async (leadId, companyId, branchId, data, com
         qualificationStatus: status,
         qualificationScore: computedScore,
         isQualified: status === 'QUALIFIED',
-      }
+      },
     });
 
     return { qualification, updatedLead };
@@ -75,8 +87,8 @@ export const getQualificationHistory = async (leadId, companyId) => {
     orderBy: { changedAt: 'desc' },
     include: {
       changedBy: {
-        select: { id: true, name: true, firstName: true, lastName: true }
-      }
-    }
+        select: { id: true, name: true, firstName: true, lastName: true },
+      },
+    },
   });
 };

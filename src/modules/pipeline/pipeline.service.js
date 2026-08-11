@@ -91,18 +91,14 @@ const parseDateRange = (dateFrom, dateTo, query) => {
   const allDates =
     query?.allDates === "1" ||
     query?.allDates === "true" ||
+    query?.allDates === true ||
     String(query?.allDates || "").toLowerCase() === "yes"
-
-  if (allDates) {
-    return { from: null, to: null, defaultedToToday: false, skippedDateFilter: true }
-  }
 
   const hasFrom = dateFrom !== undefined && dateFrom !== null && String(dateFrom).trim() !== ""
   const hasTo = dateTo !== undefined && dateTo !== null && String(dateTo).trim() !== ""
 
-  if (!hasFrom && !hasTo) {
-    const { from, to } = getUtcTodayBounds()
-    return { from, to, defaultedToToday: true, skippedDateFilter: false }
+  if (allDates || (!hasFrom && !hasTo)) {
+    return { from: null, to: null, defaultedToToday: false, skippedDateFilter: true }
   }
 
   const from = hasFrom ? new Date(dateFrom) : null
