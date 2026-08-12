@@ -7,6 +7,7 @@ import {
     ROLE_RANKS,
     MODULES,
 } from "./roleConstants.js"
+import { ensureCompanyCriteriaSeeded } from "../modules/qualification/qualification-settings.service.js"
 
 // ══════════════════════════════════════
 // SYSTEM ROLES — seeds on every startup
@@ -580,6 +581,21 @@ export const initializeSystem = async () => {
 
             console.log("✅ Default StackDot Hierarchy Seeded Successfully!");
         }
+
+        // ── STEP 6: SEED QUALIFICATION CRITERIA FOR ALL COMPANIES ──
+        // This runs at every startup — idempotent, safe, and ensures
+        // every company always has default BANT criteria + pass thresholds.
+        // This is the CORRECT pattern: seed at startup after companies exist,
+        // NOT inside read-request API handlers.
+        const allCompanies = await prisma.company.findMany({
+            where: { status: 'ACTIVE' },
+            select: { id: true, name: true }
+        })
+        for (const company of allCompanies) {
+            await ensureCompanyCriteriaSeeded(company.id)
+            console.log(`✅ Qualification criteria verified for company: ${company.name} (ID: ${company.id})`)
+        }
+
     } catch (error) {
         console.error("System initialization failed:", error)
         throw error
