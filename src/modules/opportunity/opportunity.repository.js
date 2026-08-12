@@ -28,8 +28,8 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
 
   // If WON require lead contact details for customer creation
   if (status === 'WON') {
-    if (!lead.name || !lead.email) {
-      throw new ValidationError('Lead name and email are required to create a customer.');
+    if (!lead.name) {
+      throw new ValidationError('Lead name is required to create a customer.');
     }
     if (!lead.mobile) {
       throw new ValidationError('Lead mobile number is required to create a customer.');
@@ -67,37 +67,28 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
   const companyCode = company ? company.code.toUpperCase() : 'CO';
   const currentYear = new Date().getFullYear();
 
-  // Create Deal
+  // Create Deal with collision-free dealNumber
   const dealCount = await tx.deal.count({ where: { companyId: opportunity.companyId } });
   const dealSeq = (dealCount + 1).toString().padStart(4, '0');
-  const dealNumber = `DEAL-${companyCode}-${currentYear}-${dealSeq}`;
-  let deal;
-  try {
-    deal = await tx.deal.create({
-      data: {
-        companyId: opportunity.companyId,
-        branchId: opportunity.branchId || null,
-        dealNumber,
-        opportunityId: opportunity.id,
-        leadId: opportunity.leadId,
-        outcome: status,
-        closingDate: new Date(),
-        finalAmount: opportunity.expectedRevenue,
-        reasonId: reasonId || null,
-        remarks: remarks || null,
-        closedById: performedById,
-        createdById: performedById,
-      },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      deal = await tx.deal.findUnique({ where: { opportunityId: opportunity.id } });
-      if (deal) {
-        return deal;
-      }
-    }
-    throw error;
-  }
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  const dealNumber = `DEAL-${companyCode}-${currentYear}-${dealSeq}-${randomSuffix}`;
+  
+  const deal = await tx.deal.create({
+    data: {
+      companyId: opportunity.companyId,
+      branchId: opportunity.branchId || null,
+      dealNumber,
+      opportunityId: opportunity.id,
+      leadId: opportunity.leadId,
+      outcome: status,
+      closingDate: new Date(),
+      finalAmount: opportunity.expectedRevenue,
+      reasonId: reasonId || null,
+      remarks: remarks || null,
+      closedById: performedById,
+      createdById: performedById,
+    },
+  });
 
   // Deal history
   await tx.dealHistory.create({
@@ -144,7 +135,8 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
     if (!existingCustomer) {
       const customerCount = await tx.customer.count({ where: { companyId: opportunity.companyId } });
       const customerSeq = (customerCount + 1).toString().padStart(4, '0');
-      const customerCode = `CUST-${companyCode}-${currentYear}-${customerSeq}`;
+      const custRandomSuffix = Math.floor(1000 + Math.random() * 9000);
+      const customerCode = `CUST-${companyCode}-${currentYear}-${customerSeq}-${custRandomSuffix}`;
       customer = await tx.customer.create({
         data: {
           companyId: opportunity.companyId,
