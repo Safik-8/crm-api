@@ -900,6 +900,7 @@ model Followup {
   @@index([scheduledAt])
   @@index([assignedToId, status, scheduledAt])
   @@index([companyId, assignedToId, status, scheduledAt])
+  @@index([companyId, completedById, status])
   @@map("followups")
 }
 
@@ -1091,6 +1092,7 @@ model CommunicationLog {
   @@index([branchId])
   @@index([communicationType])
   @@index([interactionDate])
+  @@index([companyId, createdById, communicationType, interactionDate])
   @@map("communication_logs")
 }
 
@@ -1337,6 +1339,7 @@ model Deal {
   @@index([closingDate])
   @@index([companyId, outcome, closingDate])
   @@index([companyId, branchId, closingDate])
+  @@index([companyId, closedById, outcome])
   @@map("deals")
 }
 
