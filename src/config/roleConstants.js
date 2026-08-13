@@ -32,7 +32,7 @@ export const ROLE_RANKS = {
   COMPANY_ADMIN  : 80,
   BRANCH_MANAGER : 60,
   BDE            : 40,
-  ISE            : 40,
+  ISE            : 20,
 }
 
 // ── SYSTEM ROLE NAMES ────────────────────────────────────────────
@@ -48,7 +48,7 @@ export const ROLE_CREATION_RULES = {
   [ROLE_NAMES.SUPER_ADMIN]    : [ROLE_NAMES.SUPER_ADMIN, ROLE_NAMES.COMPANY_ADMIN, ROLE_NAMES.BRANCH_MANAGER, ROLE_NAMES.BDE, ROLE_NAMES.ISE],
   [ROLE_NAMES.COMPANY_ADMIN]  : [ROLE_NAMES.BRANCH_MANAGER, ROLE_NAMES.BDE, ROLE_NAMES.ISE],
   [ROLE_NAMES.BRANCH_MANAGER] : [ROLE_NAMES.BDE, ROLE_NAMES.ISE],
-  [ROLE_NAMES.BDE]            : [],
+  [ROLE_NAMES.BDE]            : [ROLE_NAMES.ISE],
   [ROLE_NAMES.ISE]            : [],
 }
 
@@ -73,12 +73,14 @@ export const MODULES = [
   "LEAD",
   "LEAD_ASSIGNMENT",
   "PIPELINE",
+  "OPPORTUNITY_PIPELINE",
   "FOLLOWUP",
   "TASK",
   "ACTIVITY",
   "COURSE",
   "TARGET",
   "CUSTOMER",
+  "DEAL",
   "APPROVAL",
   "DASHBOARD",
   "REPORT",
@@ -86,6 +88,8 @@ export const MODULES = [
   "AUDIT",
   "LEAD_SOURCE",
   "LEAD_STATUS",
+  "QUALIFICATION",
+  "OPPORTUNITY",
 ]
 
 // ── PERMISSION ACTIONS ───────────────────────────────────────────

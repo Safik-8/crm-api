@@ -7,6 +7,7 @@ import {
     ROLE_RANKS,
     MODULES,
 } from "./roleConstants.js"
+import { ensureCompanyCriteriaSeeded } from "../modules/qualification/qualification-settings.service.js"
 
 // ══════════════════════════════════════
 // SYSTEM ROLES — seeds on every startup
@@ -44,12 +45,14 @@ const ROLE_PERMISSIONS = {
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         LEAD_ASSIGNMENT: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        OPPORTUNITY_PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         FOLLOWUP: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         COURSE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         TARGET: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         CUSTOMER: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        DEAL: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         APPROVAL: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -57,6 +60,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         LEAD_STATUS: { canView: true, canCreate: true, canEdit: true, canDelete: true, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
     },
 
     COMPANY_ADMIN: {
@@ -69,12 +74,14 @@ const ROLE_PERMISSIONS = {
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         LEAD_ASSIGNMENT: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        OPPORTUNITY_PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         FOLLOWUP: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TASK: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         ACTIVITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         COURSE: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         TARGET: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         CUSTOMER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        DEAL: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         APPROVAL: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -82,6 +89,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         LEAD_STATUS: { canView: true, canCreate: true, canEdit: true, canDelete: false, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+        OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
     },
 
     BRANCH_MANAGER: {
@@ -94,12 +103,14 @@ const ROLE_PERMISSIONS = {
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         LEAD_ASSIGNMENT: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        OPPORTUNITY_PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         FOLLOWUP: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TASK: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         ACTIVITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         COURSE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TARGET: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         CUSTOMER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        DEAL: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         APPROVAL: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -107,6 +118,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
     },
 
     BDE: {
@@ -119,12 +132,14 @@ const ROLE_PERMISSIONS = {
         LEAD: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         LEAD_ASSIGNMENT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         PIPELINE: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+        OPPORTUNITY_PIPELINE: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         FOLLOWUP: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         COURSE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TARGET: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         CUSTOMER: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        DEAL: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         APPROVAL: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -132,6 +147,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
     },
 
     ISE: {
@@ -144,12 +161,14 @@ const ROLE_PERMISSIONS = {
         LEAD: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         LEAD_ASSIGNMENT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         PIPELINE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        OPPORTUNITY_PIPELINE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         FOLLOWUP: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         TASK: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         ACTIVITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         COURSE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         TARGET: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         CUSTOMER: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        DEAL: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         APPROVAL: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         REPORT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
@@ -157,6 +176,8 @@ const ROLE_PERMISSIONS = {
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
+        QUALIFICATION: { canView: true, canCreate: true, canEdit: false, canDelete: false },
+        OPPORTUNITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     },
 }
 
@@ -261,7 +282,7 @@ export const initializeSystem = async () => {
         }
 
         if (permsToCreate.length) {
-            await prisma.permission.createMany({ data: permsToCreate })
+            await prisma.permission.createMany({ data: permsToCreate, skipDuplicates: true })
         }
         for (const p of permsToUpdate) {
             await prisma.permission.update({ where: { id: p.id }, data: p.data })
@@ -560,6 +581,21 @@ export const initializeSystem = async () => {
 
             console.log("✅ Default StackDot Hierarchy Seeded Successfully!");
         }
+
+        // ── STEP 6: SEED QUALIFICATION CRITERIA FOR ALL COMPANIES ──
+        // This runs at every startup — idempotent, safe, and ensures
+        // every company always has default BANT criteria + pass thresholds.
+        // This is the CORRECT pattern: seed at startup after companies exist,
+        // NOT inside read-request API handlers.
+        const allCompanies = await prisma.company.findMany({
+            where: { status: 'ACTIVE' },
+            select: { id: true, name: true }
+        })
+        for (const company of allCompanies) {
+            await ensureCompanyCriteriaSeeded(company.id)
+            console.log(`✅ Qualification criteria verified for company: ${company.name} (ID: ${company.id})`)
+        }
+
     } catch (error) {
         console.error("System initialization failed:", error)
         throw error

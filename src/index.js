@@ -30,6 +30,12 @@ import courseRoutes from "./modules/course/course.routes.js"
 import teamRoutes from "./modules/team/team.routes.js"
 import followupRoutes from "./modules/followup/followup.routes.js"
 import notificationRoutes from "./modules/notification/notification.routes.js"
+import opportunityRoutes from "./modules/opportunity/opportunity.routes.js"
+import qualificationRoutes from "./modules/qualification/qualification.routes.js"
+import qualificationSettingsRoutes from "./modules/qualification/qualification-settings.routes.js"
+import customerRoutes from "./modules/customer/customer.routes.js"
+import dealRoutes from "./modules/deal/deal.routes.js"
+import proposalRoutes from "./modules/proposal/proposal.routes.js"
 import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -94,6 +100,8 @@ app.use("/api/lead-sources", leadSourceRoutes);
 app.use("/api/lead-statuses", leadStatusRoutes);
 app.use("/api/pipelines", pipelineRoutes);
 app.use("/api/stages", stageRoutes);
+app.use("/api/qualification-settings", qualificationSettingsRoutes);
+app.use("/api/leads", qualificationRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/users", userRoutes);
@@ -104,6 +112,10 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/followups", followupRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/opportunities", opportunityRoutes);
+app.use("/api/customers", customerRoutes);
+app.use("/api/deals", dealRoutes);
+app.use("/api/proposals", proposalRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════
