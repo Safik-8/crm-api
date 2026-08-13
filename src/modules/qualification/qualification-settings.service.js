@@ -75,10 +75,12 @@ export const DEFAULT_SETTINGS = {
 };
 
 /**
- * Seed default BANT criteria for a company if none exist
+ * Seed default BANT qualification criteria for a company — only if none exist yet.
+ * Called at startup (via initSystem.js) after the company is guaranteed to exist.
+ * NEVER called from a read-request handler.
  */
 export const ensureCompanyCriteriaSeeded = async (companyId) => {
-  // Deduplicate existing duplicate criteria rows if any exist
+  // Deduplicate any duplicate active criteria rows that may exist
   const allCriteria = await prisma.companyQualificationCriteria.findMany({
     where: { companyId, isActive: true },
     orderBy: { id: 'asc' },
@@ -100,18 +102,18 @@ export const ensureCompanyCriteriaSeeded = async (companyId) => {
     });
   }
 
+  // Seed default BANT criteria only if none exist for this company
   if (seenKeys.size === 0) {
-    const dataToCreate = DEFAULT_QUALIFICATION_CRITERIA.map((item) => ({
-      ...item,
-      companyId,
-      isActive: true,
-    }));
-
     await prisma.companyQualificationCriteria.createMany({
-      data: dataToCreate,
+      data: DEFAULT_QUALIFICATION_CRITERIA.map((item) => ({
+        ...item,
+        companyId,
+        isActive: true,
+      })),
     });
   }
 
+  // Seed company qualification pass/hold threshold settings if missing
   const settings = await prisma.companyQualificationSettings.findUnique({
     where: { companyId },
   });
