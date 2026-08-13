@@ -65,6 +65,7 @@ const LIST_INCLUDE = {
       opportunityName: true,
       status: true,
       leadId: true,
+      ownerId: true,
       lead: { select: { id: true, name: true } },
       owner: { select: { id: true, name: true } }
     }
@@ -75,6 +76,14 @@ const LIST_INCLUDE = {
 
 const DETAIL_INCLUDE = {
   ...LIST_INCLUDE,
+  company: {
+    select: {
+      id: true,
+      name: true,
+      address: true,
+      website: true
+    }
+  },
   versions: {
     orderBy: { versionNumber: 'desc' },
     include: {

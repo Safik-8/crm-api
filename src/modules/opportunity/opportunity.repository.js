@@ -434,10 +434,17 @@ export const updateOpportunityTx = async (id, companyId, data, updatedById) => {
         owner: { select: { id: true, name: true, email: true } },
         lead: { select: { id: true, name: true, mobile: true, email: true } },
         proposals: {
+          where: { isDeleted: false },
           orderBy: { createdAt: 'desc' },
           include: {
             createdBy: { select: { id: true, name: true } },
-            product: { select: { id: true, name: true } }
+            product: { select: { id: true, name: true } },
+            versions: {
+              orderBy: { versionNumber: 'desc' },
+              include: {
+                modifiedBy: { select: { id: true, name: true } }
+              }
+            }
           }
         },
         stageHistory: {
@@ -574,10 +581,17 @@ export const findOpportunityById = async (id, companyId) => {
       owner: { select: { id: true, name: true, email: true } },
       lead: { select: { id: true, name: true, mobile: true, email: true } },
       proposals: {
+        where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
         include: {
           createdBy: { select: { id: true, name: true } },
-          product: { select: { id: true, name: true } }
+          product: { select: { id: true, name: true } },
+          versions: {
+            orderBy: { versionNumber: 'desc' },
+            include: {
+              modifiedBy: { select: { id: true, name: true } }
+            }
+          }
         }
       },
       stageHistory: {

@@ -47,6 +47,9 @@ router.post(
   opportunityController.createOpportunity
 );
 
+// Fetch active win/loss reasons for the company (used when closing opportunities as LOST)
+router.get('/reasons', hasPermission('LEAD', 'canView'), opportunityController.getWinLossReasons);
+
 /**
  * @route   GET /api/opportunities/:id
  * @desc    Get detailed single opportunity profile
@@ -77,8 +80,5 @@ router.post(
   validateBody(closeOpportunitySchema),
   opportunityController.closeOpportunity
 );
-
-// Fetch active win/loss reasons for the company (used when closing opportunities as LOST)
-router.get('/reasons', hasPermission('LEAD', 'canView'), opportunityController.getWinLossReasons);
 
 export default router;

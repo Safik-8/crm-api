@@ -375,12 +375,28 @@ export const deleteProposal = async (actor, id) => {
     throw new ValidationError('Cannot delete an accepted proposal.');
   }
 
-  return prisma.proposal.update({
-    where: { id: proposal.id },
-    data: {
-      isDeleted: true,
-      deletedById: actor.id,
-      deletedAt: new Date()
-    }
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.proposal.update({
+      where: { id: proposal.id },
+      data: {
+        isDeleted: true,
+        deletedById: actor.id,
+        deletedAt: new Date()
+      }
+    });
+
+    await tx.leadActivity.create({
+      data: {
+        leadId: proposal.opportunity.leadId,
+        companyId: proposal.companyId,
+        activityType: 'PROPOSAL_DELETED',
+        description: `Proposal ${proposal.proposalNumber} deleted`,
+        relatedEntityType: 'PROPOSAL',
+        relatedEntityId: proposal.id,
+        performedById: actor.id
+      }
+    });
+
+    return updated;
   });
 };
