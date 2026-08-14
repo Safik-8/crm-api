@@ -79,38 +79,33 @@ export const createBranchService = async (data, actor) => {
  * Fetches all branches in a company (raw list for dropdowns).
  */
 export const getBranchesService = async (query, actor) => {
-  const { company_id } = query
-
-  // ── 1. DETERMINE COMPANY SCOPE ─────────────────────────
+  const compIdParam = query.company_id || query.companyId
   const scopedCompanyId = actor.primaryRole === "SUPER_ADMIN"
-    ? Number(company_id)
+    ? (compIdParam ? Number(compIdParam) : undefined)
     : actor.companyId
 
-  if (!scopedCompanyId) {
+  if (actor.primaryRole !== "SUPER_ADMIN" && !scopedCompanyId) {
     throw new ValidationError("Validation failed", [
       { field: "company_id", message: "company_id is required" }
     ])
   }
 
   // ── 2. NON SUPER ADMIN CHECK ───────────────────────────
-  if (actor.primaryRole !== "SUPER_ADMIN" && company_id) {
-    assertCompanyScope(actor, Number(company_id))
+  if (actor.primaryRole !== "SUPER_ADMIN" && compIdParam) {
+    assertCompanyScope(actor, Number(compIdParam))
   }
 
-  // ── 3. CHECK COMPANY EXISTS
-  const company = await prisma.company.findUnique({
-    where: { id: scopedCompanyId }
-  })
-  if (!company) {
-    throw new NotFoundError("Company")
+  // ── 3. FETCH ALL BRANCHES
+  const where = {}
+  if (scopedCompanyId) {
+    where.companyId = scopedCompanyId
   }
-
-  // ── 4. FETCH ALL BRANCHES
-  const where = { companyId: scopedCompanyId }
 
   // If the actor is not a system or company administrator, lock views to their own branch
   if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
-    where.id = actor.branchId
+    if (actor.branchId) {
+      where.id = actor.branchId
+    }
   }
 
   const branches = await findBranches({

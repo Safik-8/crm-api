@@ -171,7 +171,7 @@ const ROLE_PERMISSIONS = {
         DEAL: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         APPROVAL: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         DASHBOARD: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-        REPORT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+        REPORT: { canView: true, canCreate: false, canEdit: false, canDelete: false },
         NOTIFICATION: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         AUDIT: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         LEAD_SOURCE: { canView: true, canCreate: false, canEdit: false, canDelete: false },
