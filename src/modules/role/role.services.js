@@ -40,21 +40,26 @@ export const getRolesService = async (query, actor) => {
   // Scope filtering: COMPANY_ADMIN can only see their own company's roles and global system roles.
   // SUPER_ADMIN can optionally filter by query.companyId.
   let where = {}
+  let companyIdFilter = null
+
   if (actor.primaryRole !== "SUPER_ADMIN") {
+    companyIdFilter = actor.companyId
     where = {
       OR: [
         { companyId: actor.companyId },
         { companyId: null } // Include global system roles
       ],
-      rank: { lt: actor.primaryRoleRank } // Hide roles equal to or above their rank (only show assignable roles)
+      rank: { lte: actor.primaryRoleRank } // Hide roles above their rank (show assignable/equal roles)
     }
-  } else if (query.companyId) {
-    const targetCompanyId = parseInt(query.companyId, 10)
-    where = {
-      OR: [
-        { companyId: targetCompanyId },
-        { companyId: null } // Include global system roles
-      ]
+  } else {
+    if (query.companyId) {
+      companyIdFilter = parseInt(query.companyId, 10)
+      where = {
+        OR: [
+          { companyId: companyIdFilter },
+          { companyId: null } // Include global system roles
+        ]
+      }
     }
   }
 
@@ -83,6 +88,30 @@ export const getRolesService = async (query, actor) => {
     }),
     countRoles(where)
   ])
+
+  // Filter the role user counts if a company scope is active
+  if (companyIdFilter !== null) {
+    const counts = await prisma.userRole.groupBy({
+      by: ["roleId"],
+      where: {
+        companyId: companyIdFilter
+      },
+      _count: {
+        id: true
+      }
+    })
+
+    const countMap = {}
+    counts.forEach(c => {
+      countMap[c.roleId] = c._count.id
+    })
+
+    roles.forEach(role => {
+      role._count = {
+        userRoles: countMap[role.id] || 0
+      }
+    })
+  }
 
   return {
     roles,

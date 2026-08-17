@@ -8,9 +8,9 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 // COMPANY & BRANCH
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 
 model Company {
   id        Int      @id @default(autoincrement())
@@ -61,6 +61,16 @@ model Company {
   customers                  Customer[]
   revenueLogs                RevenueLog[]
 
+  // SPRINT 6 RELATIONS
+  reports              Report[]
+  reportFilters        ReportFilter[]
+  dashboardWidgets     DashboardWidget[]
+  userDashboardConfigs UserDashboardConfig[]
+  kpiTargets           KpiTarget[]
+  kpiAchievementLogs   KpiAchievementLog[]
+  exportLogs           ExportLog[]
+  analyticsSnapshots   AnalyticsSnapshot[]
+
   @@map("companies")
 }
 
@@ -103,8 +113,13 @@ model Branch {
   dealHistories             DealHistory[]
   customers                 Customer[]
   revenueLogs               RevenueLog[]
-  leadQualifications         LeadQualification[]
+  leadQualifications        LeadQualification[]
   leadQualificationHistories LeadQualificationHistory[]
+
+  // SPRINT 6 RELATIONS
+  reportFilters      ReportFilter[]
+  kpiTargets         KpiTarget[]
+  exportLogs         ExportLog[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -112,9 +127,9 @@ model Branch {
   @@map("branches")
 }
 
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 // USERS, ROLES & PERMISSIONS
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 
 model User {
   id                 Int       @id @default(autoincrement())
@@ -202,6 +217,18 @@ model User {
   updatedCustomers              Customer[]                 @relation("CustomerUpdatedBy")
   deletedCustomers              Customer[]                 @relation("CustomerDeletedBy")
   createdRevenueLogs            RevenueLog[]               @relation("RevenueLogCreatedBy")
+
+  // SPRINT 6 RELATIONS
+  reportsCreated       Report[]             @relation("ReportCreatedBy")
+  reportsUpdated       Report[]             @relation("ReportUpdatedBy")
+  userFavoriteReports  UserFavoriteReport[]
+  reportViewLogs       ReportViewLog[]
+  savedReportFilters   ReportFilter[]       @relation("UserSavedReportFilters")
+  dashboardConfig      UserDashboardConfig?
+  kpiTargets           KpiTarget[]          @relation("UserKpiTargets")
+  kpiTargetsCreated    KpiTarget[]          @relation("KpiTargetCreatedBy")
+  kpiTargetsUpdated    KpiTarget[]          @relation("KpiTargetUpdatedBy")
+  exportLogs           ExportLog[]          @relation("UserExportLogs")
 
   @@index([companyId])
   @@index([branchId])
@@ -303,9 +330,9 @@ model PasswordReset {
   @@map("password_resets")
 }
 
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 // LEAD SOURCE & PIPELINE
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 
 model LeadSource {
   id          Int       @id @default(autoincrement())
@@ -385,9 +412,9 @@ model PipelineStage {
   @@map("pipeline_stages")
 }
 
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 // LEAD
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 
 model Lead {
   id Int @id @default(autoincrement())
@@ -426,8 +453,6 @@ model Lead {
   date          DateTime @default(now())
   interestedFor String?  @map("interested_for")
 
-  // FIX #11: DENORMALIZED MIRRORS of LeadQualification Ã¢â‚¬â€ MUST be updated in same
-  // Prisma transaction as LeadQualification record. Exists for fast list filtering.
   qualificationStatus String  @default("UNQUALIFIED") @map("qualification_status")
   qualificationScore  Int?    @map("qualification_score")
   isQualified         Boolean @default(false) @map("is_qualified")
@@ -491,6 +516,16 @@ model Lead {
   @@index([qualificationStatus])
   @@index([isQualified])
   @@index([createdAt])
+
+  // SPRINT 6 ANALYTICS PERFORMANCE INDEXES
+  @@index([companyId, createdAt])
+  @@index([companyId, branchId, createdAt])
+  @@index([companyId, teamId, createdAt])
+  @@index([companyId, sourceId])
+  @@index([companyId, assignedToId, createdAt])
+  @@index([companyId, isQualified, createdAt])
+  @@index([companyId, branchId, isQualified])
+  @@index([companyId, teamId, isQualified])
   @@map("leads")
 }
 
@@ -605,9 +640,9 @@ model DailyBranchReport {
   @@map("daily_branch_reports")
 }
 
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 // USER PROFILES, SETTINGS, TEAMS, COURSES
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
 
 model UserProfile {
   id        Int  @id @default(autoincrement())
@@ -674,9 +709,13 @@ model Team {
   leadAssignmentsReceived   LeadAssignment[] @relation("TeamAssignmentsReceived")
   leadAssignmentsAsPrevious LeadAssignment[] @relation("TeamAssignmentsAsPrevious")
 
-  // SPRINT 5 Ã¢â‚¬â€ FIX #14: team-level revenue analytics
+  // SPRINT 5 RELATIONS
   opportunities Opportunity[]
   customers     Customer[]
+
+  // SPRINT 6 RELATIONS
+  kpiTargets  KpiTarget[]
+  revenueLogs RevenueLog[]
 
   @@unique([companyId, code])
   @@unique([branchId, name])
@@ -731,9 +770,9 @@ model Course {
   // SPRINT 5 RELATIONS
   opportunities    Opportunity[]
   proposals        Proposal[]
-  proposalVersions ProposalVersion[] // FIX #13
+  proposalVersions ProposalVersion[]
   customers        Customer[]
-  revenueLogs      RevenueLog[] // FIX #15
+  revenueLogs      RevenueLog[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -761,9 +800,9 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-// SPRINT 4 TABLES
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+// ============================================================================
+// LEAD ASSIGNMENTS, HISTORY & FOLLOWUPS
+// ============================================================================
 
 model LeadAssignment {
   id               Int      @id @default(autoincrement())
@@ -860,10 +899,11 @@ model Followup {
   @@index([status])
   @@index([scheduledAt])
   @@index([assignedToId, status, scheduledAt])
+  @@index([companyId, assignedToId, status, scheduledAt])
+  @@index([companyId, completedById, status])
   @@map("followups")
 }
 
-// FIX #6: Added opportunityId FK for Sprint 5 opportunity stage-move notifications
 model Notification {
   id               Int       @id @default(autoincrement())
   userId           Int       @map("user_id")
@@ -897,10 +937,14 @@ model Notification {
   @@map("notifications")
 }
 
+// ============================================================================
+// SPRINT 5 TABLES — QUALIFICATION, OPPORTUNITY, PROPOSAL, DEAL, CUSTOMER
+// ============================================================================
+
 model LeadQualification {
-  id        Int @id @default(autoincrement())
-  leadId    Int @unique @map("lead_id")
-  companyId Int @map("company_id")
+  id        Int  @id @default(autoincrement())
+  leadId    Int  @unique @map("lead_id")
+  companyId Int  @map("company_id")
   branchId  Int? @map("branch_id")
 
   status String @default("UNQUALIFIED") @map("status")
@@ -996,7 +1040,6 @@ model CompanyQualificationSettings {
   @@map("company_qualification_settings")
 }
 
-// FIX #5: Added compound index [relatedEntityType, relatedEntityId]
 model LeadActivity {
   id                Int      @id @default(autoincrement())
   leadId            Int      @map("lead_id")
@@ -1049,16 +1092,9 @@ model CommunicationLog {
   @@index([branchId])
   @@index([communicationType])
   @@index([interactionDate])
+  @@index([companyId, createdById, communicationType, interactionDate])
   @@map("communication_logs")
 }
-
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-// SPRINT 5 NEW TABLES
-// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-
-// TASK 1: LEAD QUALIFICATION (Defined above in SPRINT 5 SECTION)
-
-// TASK 3: OPPORTUNITY STAGES Ã¢â‚¬â€ FIX #2: companyId non-nullable
 
 model OpportunityStage {
   id                    Int      @id @default(autoincrement())
@@ -1088,8 +1124,6 @@ model OpportunityStage {
   @@index([displayOrder])
   @@map("opportunity_stages")
 }
-
-// TASK 2 & 3: OPPORTUNITY Ã¢â‚¬â€ FIX #6 (notifications), FIX #14 (teamId)
 
 model Opportunity {
   id                    Int      @id @default(autoincrement())
@@ -1139,6 +1173,11 @@ model Opportunity {
   @@index([ownerId])
   @@index([status])
   @@index([closingDate])
+  @@index([companyId, createdAt])
+  @@index([companyId, ownerId, status])
+  @@index([companyId, stageId, status])
+  @@index([companyId, teamId, status])
+  @@index([companyId, branchId, status])
   @@map("opportunities")
 }
 
@@ -1165,8 +1204,6 @@ model OpportunityStageHistory {
   @@index([changedAt])
   @@map("opportunity_stage_histories")
 }
-
-// TASK 4: PROPOSAL Ã¢â‚¬â€ FIX #4 (soft-delete)
 
 model Proposal {
   id             Int      @id @default(autoincrement())
@@ -1210,8 +1247,6 @@ model Proposal {
   @@map("proposals")
 }
 
-// FIX #13: productId snapshot added
-
 model ProposalVersion {
   id            Int      @id @default(autoincrement())
   proposalId    Int      @map("proposal_id")
@@ -1242,8 +1277,6 @@ model ProposalVersion {
   @@map("proposal_versions")
 }
 
-// TASK 5 & 8: WIN/LOSS REASONS Ã¢â‚¬â€ FIX #3 (non-nullable companyId)
-
 model WinLossReason {
   id          Int      @id @default(autoincrement())
   companyId   Int      @map("company_id")
@@ -1263,8 +1296,6 @@ model WinLossReason {
   @@index([reasonType])
   @@map("win_loss_reasons")
 }
-
-// TASK 5: DEAL Ã¢â‚¬â€ FIX #7 (no default on closingDate)
 
 model Deal {
   id            Int      @id @default(autoincrement())
@@ -1306,10 +1337,11 @@ model Deal {
   @@index([leadId])
   @@index([outcome])
   @@index([closingDate])
+  @@index([companyId, outcome, closingDate])
+  @@index([companyId, branchId, closingDate])
+  @@index([companyId, closedById, outcome])
   @@map("deals")
 }
-
-// FIX #8: branchId added for branch-scoped deal history
 
 model DealHistory {
   id             Int      @id @default(autoincrement())
@@ -1332,8 +1364,6 @@ model DealHistory {
   @@index([branchId])
   @@map("deal_histories")
 }
-
-// TASK 6: CUSTOMER Ã¢â‚¬â€ FIX #10 (soft-delete)
 
 model Customer {
   id                 Int      @id @default(autoincrement())
@@ -1387,12 +1417,11 @@ model Customer {
   @@map("customers")
 }
 
-// TASK 7: REVENUE LOG Ã¢â‚¬â€ FIX #1 (unique dealId), #9 (compound indexes), #15 (productId)
-
 model RevenueLog {
   id            Int      @id @default(autoincrement())
   companyId     Int      @map("company_id")
   branchId      Int?     @map("branch_id")
+  teamId        Int?     @map("team_id")
   dealId        Int      @map("deal_id")
   customerId    Int      @map("customer_id")
   productId     Int?     @map("product_id")
@@ -1407,6 +1436,7 @@ model RevenueLog {
 
   company   Company  @relation(fields: [companyId], references: [id])
   branch    Branch?  @relation(fields: [branchId], references: [id])
+  team      Team?    @relation(fields: [teamId], references: [id])
   deal      Deal     @relation(fields: [dealId], references: [id])
   customer  Customer @relation(fields: [customerId], references: [id])
   product   Course?  @relation(fields: [productId], references: [id])
@@ -1415,13 +1445,231 @@ model RevenueLog {
   @@unique([dealId])
   @@index([companyId])
   @@index([branchId])
-  @@index([dealId])
+  @@index([teamId])
   @@index([customerId])
   @@index([productId])
   @@index([revenueDate])
   @@index([companyId, revenueDate])
   @@index([branchId, revenueDate])
   @@index([companyId, branchId, revenueDate])
+  @@index([companyId, teamId, revenueDate])
   @@index([companyId, productId])
   @@map("revenue_logs")
+}
+
+// ============================================================================
+// SPRINT 6 TABLES — REPORTS, ANALYTICS & DASHBOARD MODULE
+// ============================================================================
+
+model Report {
+  id             Int      @id @default(autoincrement())
+  companyId      Int?     @map("company_id")
+  reportName     String   @map("report_name")
+  reportCode     String   @unique @map("report_code")
+  reportType     String   @map("report_type")
+  category       String   @map("category")
+  description    String?  @db.Text
+  allowedRoles   Json?    @map("allowed_roles") // Task 1.6: E.g. ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER"]
+  isSystem       Boolean  @default(false) @map("is_system")
+  status         String   @default("ACTIVE")
+  createdById    Int?     @map("created_by_id")
+  updatedById    Int?     @map("updated_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  company      Company?             @relation(fields: [companyId], references: [id])
+  createdBy    User?                @relation("ReportCreatedBy", fields: [createdById], references: [id])
+  updatedBy    User?                @relation("ReportUpdatedBy", fields: [updatedById], references: [id])
+  savedFilters ReportFilter[]
+  exportLogs   ExportLog[]
+  favoritedBy  UserFavoriteReport[]
+  viewLogs     ReportViewLog[]
+
+  @@index([companyId])
+  @@index([category])
+  @@index([reportType])
+  @@map("reports")
+}
+
+model UserFavoriteReport {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  reportId  Int      @map("report_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reportId])
+  @@index([userId])
+  @@map("user_favorite_reports")
+}
+
+model ReportViewLog {
+  id       Int      @id @default(autoincrement())
+  userId   Int      @map("user_id")
+  reportId Int      @map("report_id")
+  viewedAt DateTime @default(now()) @map("viewed_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([userId, viewedAt])
+  @@index([reportId])
+  @@map("report_view_logs")
+}
+
+model ReportFilter {
+  id           Int      @id @default(autoincrement())
+  companyId    Int      @map("company_id")
+  branchId     Int?     @map("branch_id")
+  reportId     Int?     @map("report_id")
+  userId       Int      @map("user_id")
+  filterName   String   @map("filter_name")
+  reportConfig Json     @map("report_config") // Stores filters, date ranges, selected columns, sorting, grouping
+  isDefault    Boolean  @default(false) @map("is_default")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  branch  Branch? @relation(fields: [branchId], references: [id])
+  report  Report? @relation(fields: [reportId], references: [id])
+  user    User    @relation("UserSavedReportFilters", fields: [userId], references: [id])
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([reportId])
+  @@map("report_filters")
+}
+
+model DashboardWidget {
+  id              Int      @id @default(autoincrement())
+  companyId       Int?     @map("company_id")
+  widgetName      String   @map("widget_name")
+  widgetCode      String   @map("widget_code")
+  widgetType      String   @map("widget_type")
+  roleAccess      Json     @map("role_access")
+  displayOrder    Int      @default(0) @map("display_order")
+  refreshInterval Int      @default(300) @map("refresh_interval")
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@index([widgetType])
+  @@map("dashboard_widgets")
+}
+
+model UserDashboardConfig {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @unique @map("user_id")
+  companyId    Int      @map("company_id")
+  layoutConfig Json     @map("layout_config") // Grid coordinates, visible widget IDs, custom refresh preferences
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@map("user_dashboard_configs")
+}
+
+model KpiTarget {
+  id            Int      @id @default(autoincrement())
+  companyId     Int      @map("company_id")
+  branchId      Int?     @map("branch_id")
+  teamId        Int?     @map("team_id")
+  employeeId    Int?     @map("employee_id")
+  kpiType       String   @map("kpi_type")
+  targetValue   Decimal  @db.Decimal(12, 2) @map("target_value")
+  achievedValue Decimal  @default(0.00) @db.Decimal(12, 2) @map("achieved_value")
+  duration      String   @default("MONTHLY") @map("duration")
+  startDate     DateTime @map("start_date")
+  endDate       DateTime @map("end_date")
+  status        String   @default("ACTIVE")
+  createdById   Int      @map("created_by_id")
+  updatedById   Int?     @map("updated_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  company          Company             @relation(fields: [companyId], references: [id])
+  branch           Branch?             @relation(fields: [branchId], references: [id])
+  team             Team?               @relation(fields: [teamId], references: [id])
+  employee         User?               @relation("UserKpiTargets", fields: [employeeId], references: [id])
+  createdBy        User                @relation("KpiTargetCreatedBy", fields: [createdById], references: [id])
+  updatedBy        User?               @relation("KpiTargetUpdatedBy", fields: [updatedById], references: [id])
+  achievementLogs  KpiAchievementLog[]
+
+  @@index([companyId])
+  @@index([branchId])
+  @@index([teamId])
+  @@index([employeeId])
+  @@index([kpiType])
+  @@index([startDate, endDate])
+  @@index([companyId, kpiType, startDate, endDate])
+  @@map("kpi_targets")
+}
+
+model KpiAchievementLog {
+  id               Int      @id @default(autoincrement())
+  kpiTargetId      Int      @map("kpi_target_id")
+  companyId        Int      @map("company_id")
+  achievedValue    Decimal  @db.Decimal(12, 2) @map("achieved_value")
+  sourceEntityType String?  @map("source_entity_type")
+  sourceEntityId   Int?     @map("source_entity_id")
+  recordedAt       DateTime @default(now()) @map("recorded_at")
+
+  kpiTarget KpiTarget @relation(fields: [kpiTargetId], references: [id], onDelete: Cascade)
+  company   Company   @relation(fields: [companyId], references: [id])
+
+  @@index([kpiTargetId])
+  @@index([companyId])
+  @@index([recordedAt])
+  @@map("kpi_achievement_logs")
+}
+
+model ExportLog {
+  id           Int      @id @default(autoincrement())
+  companyId    Int      @map("company_id")
+  branchId     Int?     @map("branch_id")
+  reportId     Int?     @map("report_id")
+  reportName   String   @map("report_name")
+  exportType   String   @map("export_type")
+  fileName     String   @map("file_name")
+  filtersUsed  Json?    @map("filters_used")
+  exportedById Int      @map("exported_by_id")
+  exportedAt   DateTime @default(now()) @map("exported_at")
+
+  company    Company @relation(fields: [companyId], references: [id])
+  branch     Branch? @relation(fields: [branchId], references: [id])
+  report     Report? @relation(fields: [reportId], references: [id])
+  exportedBy User    @relation("UserExportLogs", fields: [exportedById], references: [id])
+
+  @@index([companyId])
+  @@index([branchId])
+  @@index([exportedById])
+  @@index([exportedAt])
+  @@map("export_logs")
+}
+
+model AnalyticsSnapshot {
+  id           Int      @id @default(autoincrement())
+  companyId    Int      @map("company_id")
+  branchId     Int      @default(0) @map("branch_id") // 0 = Company-level snapshot (prevents PostgreSQL NULL != NULL unique index bypass)
+  snapshotType String   @map("snapshot_type")
+  snapshotDate DateTime @map("snapshot_date")
+  snapshotData Json     @map("snapshot_data")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, branchId, snapshotType, snapshotDate])
+  @@index([companyId])
+  @@index([companyId, snapshotType])
+  @@index([snapshotDate])
+  @@map("analytics_snapshots")
 }

@@ -36,6 +36,7 @@ import qualificationSettingsRoutes from "./modules/qualification/qualification-s
 import customerRoutes from "./modules/customer/customer.routes.js"
 import dealRoutes from "./modules/deal/deal.routes.js"
 import proposalRoutes from "./modules/proposal/proposal.routes.js"
+import reportRoutes from "./modules/report/report.routes.js"
 import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -116,6 +117,7 @@ app.use("/api/opportunities", opportunityRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/deals", dealRoutes);
 app.use("/api/proposals", proposalRoutes);
+app.use("/api/reports", reportRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════
