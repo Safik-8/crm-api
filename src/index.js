@@ -14,7 +14,7 @@ import { errorHandler, notFound } from "./middleware/errorHandler.js"
 
 import authRoutes from "./modules/auth/auth.routes.js"
 import companyRoutes from "./modules/company/company.routes.js"
-import branchRoutes  from "./modules/branch/branch.routes.js"
+import branchRoutes from "./modules/branch/branch.routes.js"
 import leadSourceRoutes from "./modules/leadsources/leadsources.routes.js"
 import leadStatusRoutes from "./modules/leadstatuses/leadstatuses.routes.js"
 import pipelineRoutes from "./modules/pipeline/pipeline.routes.js"
@@ -38,6 +38,7 @@ import dealRoutes from "./modules/deal/deal.routes.js"
 import proposalRoutes from "./modules/proposal/proposal.routes.js"
 import salesPerformanceRoutes from "./modules/salesPerformance/salesPerformance.routes.js"
 import revenueReportRoutes from "./modules/revenueReport/revenueReport.routes.js"
+import reportRoutes from "./modules/report/report.routes.js"
 import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -68,7 +69,7 @@ const limiter = rateLimit({
 app.use(limiter)
 
 app.use(cors({
-  origin:  process.env.CLIENT_URL || "http://localhost:5173",
+  origin: process.env.CLIENT_URL || "http://localhost:5173",
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
@@ -97,7 +98,7 @@ app.get("/", (req, res) => {
 
 app.use("/api", authRoutes);
 app.use("/api/companies", companyRoutes);
-app.use("/api/branches",  branchRoutes);
+app.use("/api/branches", branchRoutes);
 app.use("/api/lead-sources", leadSourceRoutes);
 app.use("/api/lead-statuses", leadStatusRoutes);
 app.use("/api/pipelines", pipelineRoutes);
@@ -120,6 +121,7 @@ app.use("/api/deals", dealRoutes);
 app.use("/api/proposals", proposalRoutes);
 app.use("/api/sales-performance", salesPerformanceRoutes);
 app.use("/api/reports/revenue", revenueReportRoutes);
+app.use("/api/reports", reportRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════

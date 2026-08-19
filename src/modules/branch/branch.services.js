@@ -95,12 +95,21 @@ export const getBranchesService = async (query, actor) => {
     assertCompanyScope(actor, Number(compIdParam))
   }
 
-  // ── 3. FETCH ALL BRANCHES
+  // ── 3. CHECK COMPANY EXISTS
+  if (scopedCompanyId) {
+    const company = await prisma.company.findUnique({
+      where: { id: scopedCompanyId }
+    })
+    if (!company) {
+      throw new NotFoundError("Company")
+    }
+  }
+
+  // ── 4. FETCH ALL BRANCHES
   const where = {}
   if (scopedCompanyId) {
     where.companyId = scopedCompanyId
   }
-
   // If the actor is not a system or company administrator, lock views to their own branch
   if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
     if (actor.branchId) {

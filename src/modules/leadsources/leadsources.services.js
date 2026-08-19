@@ -91,7 +91,13 @@ export const getLeadSourcesService = async (query, actor) => {
   let where = {}
 
   if (!actor.companyId) {
-    // Super Admin → sees everything
+    // Super Admin → sees everything or filters by companyId
+    if (query.companyId) {
+      where.OR = [
+        { companyId: null },
+        { companyId: parseInt(query.companyId) }
+      ]
+    }
     if (search) {
       where.name = { contains: search.trim(), mode: "insensitive" }
     }

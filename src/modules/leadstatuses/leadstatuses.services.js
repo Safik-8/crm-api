@@ -102,7 +102,10 @@ export const getLeadStatusesService = async (query, actor) => {
   const where = {}
 
   if (actor.companyId === null) {
-    // SuperAdmin — sees all (global + all company)
+    // SuperAdmin — sees all (global + all company) or filters by companyId
+    if (query.companyId) {
+      where.OR = [{ companyId: null }, { companyId: parseInt(query.companyId) }]
+    }
   } else {
     // Others — global + own company only
     where.OR = [{ companyId: null }, { companyId: actor.companyId }]

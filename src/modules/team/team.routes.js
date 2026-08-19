@@ -1,6 +1,7 @@
 // src/modules/team/team.routes.js
 
 import { Router } from "express";
+import prisma from "../../config/db.js";
 import {
   createTeam,
   getTeams,
@@ -25,6 +26,36 @@ const router = Router();
 
 // Secure all endpoints with authentication middleware
 router.use(authenticate);
+
+// GET /api/teams/membership/active - Fetch active team of logged-in user
+router.get(
+  "/membership/active",
+  async (req, res, next) => {
+    try {
+      const userId = req.user.id;
+      // Check led team first (BDE)
+      let team = await prisma.team.findFirst({
+        where: { bdeId: userId, isDeleted: false },
+        select: { id: true, name: true }
+      });
+      
+      if (!team) {
+        // Check membership (ISE)
+        const membership = await prisma.teamMember.findFirst({
+          where: { userId, removedAt: null },
+          include: { team: { select: { id: true, name: true } } }
+        });
+        if (membership) {
+          team = membership.team;
+        }
+      }
+      
+      return res.json({ success: true, data: { team } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // POST /api/teams - Create a new team
 router.post(

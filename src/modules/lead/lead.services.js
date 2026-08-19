@@ -122,15 +122,46 @@ const assertLeadScope = async (actor, lead) => {
     }
   }
 
-  // HRABAC Check: If user rank is BDE/ISE (< 60), restrict to self + subordinates
+  // HRABAC Check: If user rank is BDE/ISE (< 60), restrict to self + subordinates + team unassigned + created by
   if (actor.primaryRoleRank < 60) {
     const subordinates = await getSubordinateIds(actor.id, actor.companyId);
     const allowedUserIds = new Set([actor.id, ...subordinates]);
 
     const assignedToId = lead.assignedToId;
     const createdById  = lead.createdById;
+    const teamId       = lead.teamId;
 
-    const hasAccess = allowedUserIds.has(assignedToId) || allowedUserIds.has(createdById);
+    let isTeamAccess = false;
+    const ledTeam = await prisma.team.findFirst({
+      where: { bdeId: actor.id, isDeleted: false },
+      select: { id: true }
+    });
+    const membership = await prisma.teamMember.findFirst({
+      where: { userId: actor.id, removedAt: null },
+      select: { teamId: true }
+    });
+    
+    const activeTeamId = ledTeam?.id || membership?.teamId;
+
+    if (activeTeamId) {
+      if (teamId === activeTeamId) {
+        isTeamAccess = true;
+      } else if (assignedToId) {
+        // Is assignedToId in this team?
+        const assigneeMember = await prisma.teamMember.findFirst({
+          where: { userId: assignedToId, teamId: activeTeamId, removedAt: null }
+        });
+        const teamObj = await prisma.team.findUnique({
+          where: { id: activeTeamId },
+          select: { bdeId: true }
+        });
+        if (assigneeMember || teamObj?.bdeId === assignedToId) {
+          isTeamAccess = true;
+        }
+      }
+    }
+
+    const hasAccess = allowedUserIds.has(assignedToId) || allowedUserIds.has(createdById) || isTeamAccess;
     if (!hasAccess) {
       throw new ForbiddenError("You do not have permission to access this lead");
     }
@@ -467,10 +498,42 @@ export const getLeadsService = async (query, actor) => {
   const where = { isDeleted: false, ...actorScope(actor) };
 
   // Apply HRBAC Filters for roles with Rank < 60 (BDE/ISE)
-  // Strict Model: Reps see leads assigned to them or their direct subordinates
+  // Strict Model: Reps see leads assigned to them, their direct subordinates, created by them, or unassigned in their team
   if (actor.primaryRoleRank < 60) {
     const subordinates = await getSubordinateIds(actor.id, actor.companyId);
-    const allowedAssigneeIds = [actor.id, ...subordinates];
+    let allowedAssigneeIds = [actor.id, ...subordinates];
+
+    let activeTeamId = null;
+    const ledTeam = await prisma.team.findFirst({
+      where: { bdeId: actor.id, isDeleted: false },
+      select: { id: true }
+    });
+    if (ledTeam) {
+      activeTeamId = ledTeam.id;
+    } else {
+      const membership = await prisma.teamMember.findFirst({
+        where: { userId: actor.id, removedAt: null },
+        select: { teamId: true }
+      });
+      if (membership) activeTeamId = membership.teamId;
+    }
+
+    const viewMode = query?.viewMode || 'INDIVIDUAL';
+    
+    if (viewMode === 'TEAM' && activeTeamId) {
+      const teamMembers = await prisma.teamMember.findMany({
+        where: { teamId: activeTeamId, removedAt: null },
+        select: { userId: true }
+      });
+      const teamOwner = await prisma.team.findUnique({
+        where: { id: activeTeamId },
+        select: { bdeId: true }
+      });
+      const teamMemberIds = teamMembers.map(tm => tm.userId);
+      if (teamOwner?.bdeId) teamMemberIds.push(teamOwner.bdeId);
+      
+      allowedAssigneeIds = Array.from(new Set([...allowedAssigneeIds, ...teamMemberIds]));
+    }
 
     if (query?.assignedToId) {
       const filterAssignee = Number(query.assignedToId);
@@ -480,7 +543,18 @@ export const getLeadsService = async (query, actor) => {
         where.assignedToId = -1; // Not allowed: force empty results
       }
     } else {
-      where.assignedToId = { in: allowedAssigneeIds };
+      const orConditions = [
+        { assignedToId: { in: allowedAssigneeIds } },
+        { createdById: actor.id }
+      ];
+      
+      if (viewMode === 'TEAM' && activeTeamId) {
+        orConditions.push({ teamId: activeTeamId });
+      } else if (viewMode === 'INDIVIDUAL' && activeTeamId) {
+        // If individual, we don't include unassigned team leads, so no action needed.
+      }
+      
+      where.OR = orConditions;
     }
   } else {
     if (query?.assignedToId) {
