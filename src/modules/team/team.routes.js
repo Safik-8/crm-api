@@ -10,7 +10,9 @@ import {
   toggleTeamStatus,
   deleteTeam,
   removeTeamMember,
-  replaceTeamOwner
+  replaceTeamOwner,
+  getTeamISEDailyStats,
+  bdeAssignLeadToISE
 } from "./team.controllers.js";
 import {
   createTeamSchema,
@@ -115,6 +117,20 @@ router.put(
   hasPermission("TEAM", "canEdit"),
   validateBody(replaceTeamOwnerSchema),
   replaceTeamOwner
+);
+
+// GET /api/teams/:id/ise-daily-stats - BDE: fetch ISE daily assignment counts + limit
+router.get(
+  "/:id/ise-daily-stats",
+  hasPermission("TEAM", "canView"),
+  getTeamISEDailyStats
+);
+
+// POST /api/teams/:id/bde-assign - BDE: assign a team-pool lead to one of their ISEs
+router.post(
+  "/:id/bde-assign",
+  hasPermission("LEAD_ASSIGNMENT", "canEdit"),
+  bdeAssignLeadToISE
 );
 
 export default router;

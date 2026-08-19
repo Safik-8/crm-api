@@ -8,7 +8,9 @@ import {
   getTeamByIdService,
   getTeamsListService,
   removeTeamMemberService,
-  replaceTeamOwnerService
+  replaceTeamOwnerService,
+  getTeamISEDailyStatsService,
+  bdeAssignLeadToISEService
 } from "./team.services.js";
 import { sendSuccess } from "../../utils/response.js";
 
@@ -81,6 +83,24 @@ export const replaceTeamOwner = async (req, res, next) => {
     const { bdeId } = req.body;
     const result = await replaceTeamOwnerService(req.params.id, bdeId, req.user);
     return sendSuccess(res, { team: result }, "Team owner reassigned successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getTeamISEDailyStats = async (req, res, next) => {
+  try {
+    const stats = await getTeamISEDailyStatsService(req.params.id, req.user);
+    return sendSuccess(res, stats, "ISE daily stats fetched successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const bdeAssignLeadToISE = async (req, res, next) => {
+  try {
+    const lead = await bdeAssignLeadToISEService(req.params.id, req.body, req.user);
+    return sendSuccess(res, { lead }, "Lead assigned to ISE successfully");
   } catch (err) {
     next(err);
   }

@@ -524,3 +524,242 @@ export const replaceTeamOwnerService = async (id, newBdeId, actor) => {
   return updatedTeam;
 };
 
+
+// ──────────────────────────────────────────────────────────────────────────────
+// BDE-SCOPED ISE ASSIGNMENT (My Team — restricted to own team only)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns today's assignment count for each active ISE in the BDE's team,
+ * together with the branch daily limit. Used to show the "42/50 today" badges
+ * in the assignment drawer so the BDE can make informed decisions.
+ *
+ * Only callable by the BDE who owns the team.
+ */
+export const getTeamISEDailyStatsService = async (teamId, actor) => {
+  const id = Number(teamId);
+
+  // 1. Fetch team and assert ownership
+  const team = await prisma.team.findUnique({
+    where: { id, isDeleted: false },
+    include: {
+      branch: { select: { id: true, maxDailyLeadsPerUser: true } },
+      members: {
+        where: { removedAt: null },
+        include: {
+          user: {
+            select: { id: true, name: true, status: true }
+          }
+        }
+      }
+    }
+  });
+
+  if (!team) throw new NotFoundError("Team");
+
+  // Only the BDE who owns this team may call this
+  if (team.bdeId !== actor.id && actor.primaryRole !== "BRANCH_MANAGER" &&
+      actor.primaryRole !== "COMPANY_ADMIN" && actor.primaryRole !== "SUPER_ADMIN") {
+    throw new ForbiddenError("You do not have permission to view this team's stats");
+  }
+
+  const maxLimit = team.branch?.maxDailyLeadsPerUser ?? 50;
+
+  // 2. Build today's date range
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+
+  // 3. Fetch today's assignment counts for all members in one query
+  const activeMembers = team.members.filter(m => m.user?.status === "ACTIVE");
+  const memberUserIds = activeMembers.map(m => m.userId);
+
+  const todayAssignments = await prisma.leadAssignment.groupBy({
+    by: ["assignedToUserId"],
+    where: {
+      assignedToUserId: { in: memberUserIds },
+      assignedAt: { gte: startOfToday, lte: endOfToday }
+    },
+    _count: { id: true }
+  });
+
+  const countMap = {};
+  for (const row of todayAssignments) {
+    countMap[row.assignedToUserId] = row._count.id;
+  }
+
+  const memberStats = activeMembers.map(m => ({
+    userId: m.userId,
+    name: m.user.name,
+    memberRole: m.memberRole,
+    todayCount: countMap[m.userId] || 0,
+    maxLimit,
+    isAtLimit: (countMap[m.userId] || 0) >= maxLimit
+  }));
+
+  return { memberStats, maxLimit };
+};
+
+/**
+ * BDE assigns a lead (from their own team's pool OR already with one of their ISEs)
+ * to a specific ISE on the same team.
+ *
+ * Restrictions enforced here (NOT delegated to the general assignLeadsService):
+ *  - Actor must be the BDE who owns teamId
+ *  - Lead must belong to that team (lead.teamId === teamId)
+ *  - Target ISE must be an active member of that team
+ *  - Daily limit check (same rule as the auto-assignment engine)
+ *  - BDE cannot assign to themselves via this endpoint
+ */
+export const bdeAssignLeadToISEService = async (teamId, data, actor) => {
+  const { leadId, assignedToId } = data;
+  const id = Number(teamId);
+  const targetUserId = Number(assignedToId);
+  const targetLeadId = Number(leadId);
+
+  // 1. Actor must be BDE role
+  if (actor.primaryRole !== "BDE") {
+    throw new ForbiddenError("Only a BDE can use this assignment endpoint");
+  }
+
+  // 2. Fetch team and assert BDE ownership
+  const team = await prisma.team.findUnique({
+    where: { id, isDeleted: false },
+    include: {
+      branch: { select: { id: true, maxDailyLeadsPerUser: true } },
+      members: {
+        where: { removedAt: null },
+        include: { user: { select: { id: true, name: true, status: true } } }
+      }
+    }
+  });
+
+  if (!team) throw new NotFoundError("Team");
+  if (team.bdeId !== actor.id) {
+    throw new ForbiddenError("You can only assign leads within your own team");
+  }
+
+  // 3. BDE cannot assign to themselves
+  if (targetUserId === actor.id) {
+    throw new ValidationError("BDE cannot assign a lead to themselves via this endpoint");
+  }
+
+  // 4. Target user must be an active ISE member of this team
+  const membership = team.members.find(
+    m => m.userId === targetUserId && m.user?.status === "ACTIVE"
+  );
+  if (!membership) {
+    throw new ValidationError("Target user is not an active ISE member of your team");
+  }
+
+  // 5. Fetch and validate lead
+  const lead = await prisma.lead.findUnique({
+    where: { id: targetLeadId },
+    include: {
+      assignedTo: { select: { id: true, name: true } },
+      team: { select: { id: true, name: true } }
+    }
+  });
+
+  if (!lead || lead.isDeleted) throw new NotFoundError("Lead");
+
+  // Lead must belong to this team (either unassigned pool or already with a team member)
+  if (lead.teamId !== id) {
+    throw new ValidationError("Lead does not belong to your team's pool");
+  }
+
+  // 6. Daily limit check — same rule as autoAssignLead engine
+  const maxLimit = team.branch?.maxDailyLeadsPerUser ?? 50;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+
+  const todayCount = await prisma.leadAssignment.count({
+    where: {
+      assignedToUserId: targetUserId,
+      assignedAt: { gte: startOfToday, lte: endOfToday }
+    }
+  });
+
+  if (todayCount >= maxLimit) {
+    throw new ValidationError(
+      `${membership.user.name} has already received ${todayCount}/${maxLimit} leads today. Daily limit reached.`
+    );
+  }
+
+  // 7. Execute in transaction
+  return await prisma.$transaction(async (tx) => {
+    const prevUserId = lead.assignedToId;
+    const prevTeamId = lead.teamId;
+
+    // Update lead: assign to ISE, keep teamId intact
+    const updatedLead = await tx.lead.update({
+      where: { id: targetLeadId },
+      data: {
+        assignedToId: targetUserId,
+        teamId: id,
+        updatedById: actor.id
+      },
+      include: {
+        assignedTo: { select: { id: true, name: true } },
+        team: { select: { id: true, name: true } }
+      }
+    });
+
+    const assignmentType = prevUserId ? "REASSIGNMENT" : "MANUAL";
+
+    // LeadAssignment history record
+    await tx.leadAssignment.create({
+      data: {
+        leadId: targetLeadId,
+        companyId: lead.companyId ?? actor.companyId,
+        branchId: lead.branchId,
+        assignmentType,
+        assignedToUserId: targetUserId,
+        assignedToTeamId: id,
+        previousUserId: prevUserId,
+        previousTeamId: prevTeamId,
+        assignedById: actor.id,
+        notes: data.notes || null,
+        reason: "BDE manual assignment"
+      }
+    });
+
+    // Audit log
+    await tx.auditLog.create({
+      data: {
+        companyId: lead.companyId ?? actor.companyId,
+        entityId: targetLeadId,
+        entityType: "LEAD",
+        action: "UPDATE",
+        oldValue: JSON.stringify({ assignedToId: prevUserId, teamId: prevTeamId }),
+        newValue: JSON.stringify({ assignedToId: targetUserId, teamId: id }),
+        performedById: actor.id
+      }
+    });
+
+    // Lead activity entry
+    const activityType = prevUserId ? "REASSIGNED" : "ASSIGNED";
+    const assigneeName = membership.user.name;
+    await tx.leadActivity.create({
+      data: {
+        leadId: targetLeadId,
+        companyId: lead.companyId ?? actor.companyId,
+        activityType,
+        description: `Lead ${activityType.toLowerCase()} to ${assigneeName} by BDE`,
+        performedById: actor.id,
+        metadata: {
+          previousUserId: prevUserId,
+          previousTeamId: prevTeamId,
+          nextUserId: targetUserId,
+          nextTeamId: id,
+          reason: "BDE manual assignment"
+        }
+      }
+    });
+
+    return updatedLead;
+  });
+};
