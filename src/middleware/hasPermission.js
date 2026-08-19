@@ -31,7 +31,26 @@ export const hasPermission = (module, action) => {
       }
     }
 
-    // 4. Module permission check from req.user.permissions matrix
+    // 4. Flexible permission check for Lead Assignment: users with LEAD or TEAM rights or BDE/Manager roles can assign leads
+    if (module === "LEAD_ASSIGNMENT") {
+      const leadPerms = req.user.permissions?.["LEAD"]
+      const teamPerms = req.user.permissions?.["TEAM"]
+      const isSalesLeadOrManager =
+        req.user.primaryRole === "BDE" ||
+        req.user.primaryRole === "BRANCH_MANAGER" ||
+        req.user.primaryRole === "COMPANY_ADMIN" ||
+        (req.user.primaryRoleRank && Number(req.user.primaryRoleRank) >= 30)
+
+      if (
+        (leadPerms && (leadPerms.canEdit || leadPerms.canCreate || leadPerms.canView)) ||
+        (teamPerms && (teamPerms.canEdit || teamPerms.canCreate || teamPerms.canView)) ||
+        isSalesLeadOrManager
+      ) {
+        return next()
+      }
+    }
+
+    // 5. Module permission check from req.user.permissions matrix
     const modulePerms = req.user.permissions?.[module]
     if (!modulePerms || !modulePerms[action]) {
       return next(new PermissionDeniedError(module, action))

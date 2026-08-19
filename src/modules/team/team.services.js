@@ -618,12 +618,7 @@ export const bdeAssignLeadToISEService = async (teamId, data, actor) => {
   const targetUserId = Number(assignedToId);
   const targetLeadId = Number(leadId);
 
-  // 1. Actor must be BDE role
-  if (actor.primaryRole !== "BDE") {
-    throw new ForbiddenError("Only a BDE can use this assignment endpoint");
-  }
-
-  // 2. Fetch team and assert BDE ownership
+  // 1. Fetch team and assert ownership or management scoping
   const team = await prisma.team.findUnique({
     where: { id, isDeleted: false },
     include: {
@@ -636,7 +631,15 @@ export const bdeAssignLeadToISEService = async (teamId, data, actor) => {
   });
 
   if (!team) throw new NotFoundError("Team");
-  if (team.bdeId !== actor.id) {
+
+  const isOwner = team.bdeId === actor.id;
+  const isManagerOrAdmin =
+    actor.primaryRole === "SUPER_ADMIN" ||
+    actor.primaryRole === "COMPANY_ADMIN" ||
+    actor.primaryRole === "BRANCH_MANAGER" ||
+    actor.primaryRole === "BDE";
+
+  if (!isOwner && !isManagerOrAdmin) {
     throw new ForbiddenError("You can only assign leads within your own team");
   }
 
