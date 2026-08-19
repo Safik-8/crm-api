@@ -494,6 +494,50 @@ async function main() {
       sourceId: seededSources[2].id, // Youtube Channel
       courseId: seededCourses[1].id, // Data Science & Machine Learning
     },
+    {
+      name: 'Rohan Sharma',
+      mobile: '9876543210',
+      email: 'rohan.sharma@example.com',
+      assignedToId: null, // Team Pool
+      priority: 'HIGH',
+      budget: 110000,
+      notes: 'Interested in Full Stack Web Development. Inquired via website.',
+      sourceId: seededSources[0].id,
+      courseId: seededCourses[0].id,
+    },
+    {
+      name: 'Priya Verma',
+      mobile: '9812345678',
+      email: 'priya.verma@example.com',
+      assignedToId: null, // Team Pool
+      priority: 'MEDIUM',
+      budget: 125000,
+      notes: 'Looking for Data Science certification program. Needs call back.',
+      sourceId: seededSources[1].id,
+      courseId: seededCourses[1].id,
+    },
+    {
+      name: 'Amitabh Patel',
+      mobile: '9765432109',
+      email: 'amitabh.patel@example.com',
+      assignedToId: null, // Team Pool
+      priority: 'HIGH',
+      budget: 250000,
+      notes: 'Corporate batch inquiry for 10 candidates.',
+      sourceId: seededSources[2].id,
+      courseId: seededCourses[0].id,
+    },
+    {
+      name: 'Sneha Kulkarni',
+      mobile: '9988776655',
+      email: 'sneha.kulkarni@example.com',
+      assignedToId: null, // Team Pool
+      priority: 'LOW',
+      budget: 90000,
+      notes: 'Downloaded brochure from Facebook ad campaign.',
+      sourceId: seededSources[3].id,
+      courseId: seededCourses[2].id,
+    },
   ];
 
   for (const l of leadsData) {
