@@ -27,30 +27,66 @@ const router = Router();
 // Secure all endpoints with authentication middleware
 router.use(authenticate);
 
-// GET /api/teams/membership/active - Fetch active team of logged-in user
+// GET /api/teams/membership/active - Fetch active team of logged-in user and leadership status
 router.get(
   "/membership/active",
   async (req, res, next) => {
     try {
       const userId = req.user.id;
-      // Check led team first (BDE)
-      let team = await prisma.team.findFirst({
-        where: { bdeId: userId, isDeleted: false },
-        select: { id: true, name: true }
-      });
-      
-      if (!team) {
-        // Check membership (ISE)
-        const membership = await prisma.teamMember.findFirst({
-          where: { userId, removedAt: null },
-          include: { team: { select: { id: true, name: true } } }
-        });
-        if (membership) {
-          team = membership.team;
+
+      // 1. Check if user is the active Team Leader (bdeId of an ACTIVE, non-deleted team)
+      const ledTeam = await prisma.team.findFirst({
+        where: { bdeId: userId, status: "ACTIVE", isDeleted: false },
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          bdeId: true,
+          members: {
+            where: { removedAt: null },
+            select: {
+              userId: true,
+              user: { select: { id: true, name: true, email: true } }
+            }
+          }
         }
-      }
-      
-      return res.json({ success: true, data: { team } });
+      });
+
+      // 2. Check if user is a member of an active team
+      const membership = await prisma.teamMember.findFirst({
+        where: { userId, removedAt: null, team: { status: "ACTIVE", isDeleted: false } },
+        include: {
+          team: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              bdeId: true,
+              members: {
+                where: { removedAt: null },
+                select: {
+                  userId: true,
+                  user: { select: { id: true, name: true, email: true } }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      const memberTeam = membership ? membership.team : null;
+      const isTeamLeader = Boolean(ledTeam);
+      const team = ledTeam || memberTeam;
+
+      return res.json({
+        success: true,
+        data: {
+          team,
+          isTeamLeader,
+          ledTeam,
+          memberTeam
+        }
+      });
     } catch (err) {
       next(err);
     }
