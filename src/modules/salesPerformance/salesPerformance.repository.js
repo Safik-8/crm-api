@@ -419,3 +419,24 @@ export async function findBranchPerformanceMetrics({ companyId, branchId, startD
 
   return results;
 }
+
+/**
+ * Create AuditLog entry for Report Export
+ */
+export async function createExportAuditLog({ companyId, performedById, reportType, format, filters, rowCount }) {
+  return await prisma.auditLog.create({
+    data: {
+      companyId: companyId || null,
+      entityType: "REPORT_EXPORT",
+      action: "EXPORT",
+      performedById: performedById,
+      newValue: {
+        reportType,
+        format,
+        filters: filters || {},
+        rowCount: rowCount || 0
+      }
+    }
+  });
+}
+

@@ -239,3 +239,21 @@ export async function getPerformanceRankings(actor, queryFilters) {
     topTeams: teamReport.data.slice(0, 5)
   };
 }
+
+/**
+ * Service: Log Export Action in AuditLog
+ */
+export async function logExportAction(actor, payload) {
+  const { reportType, format, filters, rowCount } = payload;
+  const auditLog = await salesPerformanceRepo.createExportAuditLog({
+    companyId: actor.companyId,
+    performedById: actor.id,
+    reportType: reportType || 'sales-performance',
+    format: format || 'XLSX',
+    filters: filters || {},
+    rowCount: rowCount || 0
+  });
+
+  return auditLog;
+}
+

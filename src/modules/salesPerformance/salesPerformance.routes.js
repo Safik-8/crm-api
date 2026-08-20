@@ -17,5 +17,7 @@ router.get("/ise", hasPermission("REPORT", "canView"), validateQuery(performance
 router.get("/team", hasPermission("REPORT", "canView"), validateQuery(performanceFilterQuerySchema), salesPerformanceController.getTeamPerformance);
 router.get("/branch", hasPermission("REPORT", "canView"), validateQuery(performanceFilterQuerySchema), salesPerformanceController.getBranchPerformance);
 router.get("/rankings", hasPermission("REPORT", "canView"), validateQuery(performanceFilterQuerySchema), salesPerformanceController.getPerformanceRankings);
+router.post("/export-log", hasPermission("REPORT", "canView"), salesPerformanceController.logExportAction);
 
 export default router;
+
