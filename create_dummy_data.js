@@ -359,6 +359,7 @@ async function main() {
   ];
 
   console.log("\nCreating dummy leads...");
+  const createdLeads = [];
   for (const l of leadsToCreate) {
     let lead = await prisma.lead.findFirst({
       where: {
@@ -375,10 +376,81 @@ async function main() {
     } else {
       console.log(`Lead with mobile ${l.mobile} already exists.`);
     }
+    createdLeads.push(lead);
+  }
+
+  // Create Dummy Opportunities
+  console.log("\nCreating dummy opportunities...");
+  let regularStages = await prisma.opportunityStage.findMany({
+    where: { companyId: company.id, status: 'ACTIVE' }
+  });
+
+  if (regularStages.length === 0) {
+    console.log("Creating default opportunity stages...");
+    const defaults = [
+      { name: 'Qualification', code: 'QUALIFICATION', stageType: 'REGULAR', displayOrder: 1, defaultProbabilityPct: 10 },
+      { name: 'Proposal Sent', code: 'PROPOSAL', stageType: 'REGULAR', displayOrder: 2, defaultProbabilityPct: 50 },
+      { name: 'Negotiation', code: 'NEGOTIATION', stageType: 'REGULAR', displayOrder: 3, defaultProbabilityPct: 75 },
+    ];
+    for (const def of defaults) {
+      const created = await prisma.opportunityStage.create({
+        data: {
+          companyId: company.id,
+          name: def.name,
+          code: def.code,
+          stageType: def.stageType,
+          displayOrder: def.displayOrder,
+          defaultProbabilityPct: def.defaultProbabilityPct,
+          colorCode: '#6366f1',
+          isSystem: false,
+          status: 'ACTIVE',
+        },
+      });
+      regularStages.push(created);
+    }
+  }
+
+  for (let i = 0; i < createdLeads.length; i++) {
+    const lead = createdLeads[i];
+    const oppStage = regularStages[i % regularStages.length];
+    
+    // Check if opportunity already exists for this lead
+    let existingOpp = await prisma.opportunity.findFirst({
+      where: {
+        companyId: company.id,
+        leadId: lead.id
+      }
+    });
+
+    if (!existingOpp) {
+      const closingDate = new Date();
+      closingDate.setDate(closingDate.getDate() + 15 + i * 5);
+
+      const opportunity = await prisma.opportunity.create({
+        data: {
+          companyId: company.id,
+          branchId: lead.branchId,
+          opportunityName: `${lead.name} - Upgrade Inquiry`,
+          leadId: lead.id,
+          productId: lead.courseId,
+          stageId: oppStage.id,
+          ownerId: lead.assignedToId || creatorUser.id,
+          expectedRevenue: (lead.courseId === courses[0].id ? 15000 : 12000),
+          probabilityPercentage: oppStage.defaultProbabilityPct || 20,
+          closingDate: closingDate,
+          status: 'OPEN',
+          notes: `Dummy opportunity for ${lead.name} generated via seed script.`,
+          createdById: creatorUser.id
+        }
+      });
+      console.log(`Created Opportunity: ${opportunity.opportunityName} (Stage: ${oppStage.name})`);
+    } else {
+      console.log(`Opportunity for lead ${lead.name} already exists.`);
+    }
   }
 
   console.log("\n==================================================================================");
-  console.log("LEAD DATA CREATED SUCCESSFULLY!");
+  console.log("LEAD & OPPORTUNITY DATA CREATED SUCCESSFULLY!");
   console.log("==================================================================================");
 }
 

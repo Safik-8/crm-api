@@ -1,10 +1,159 @@
+-- DropForeignKey
+ALTER TABLE "daily_branch_reports" DROP CONSTRAINT "daily_branch_reports_updated_by_fkey";
+
+-- DropIndex
+DROP INDEX "roles_name_key";
+
+-- AlterTable
+ALTER TABLE "branches" ADD COLUMN     "address" TEXT,
+ADD COLUMN     "assignment_algorithm" TEXT,
+ADD COLUMN     "assignment_resolution_level" TEXT NOT NULL DEFAULT 'PERSON',
+ADD COLUMN     "auto_assignment_enabled" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "location" TEXT,
+ADD COLUMN     "max_daily_leads_per_user" INTEGER;
+
+-- AlterTable
+ALTER TABLE "companies" ADD COLUMN     "address" TEXT,
+ADD COLUMN     "industry" TEXT,
+ADD COLUMN     "logo" TEXT,
+ADD COLUMN     "website" TEXT;
+
+-- AlterTable
+ALTER TABLE "daily_branch_reports" DROP COLUMN "joining_formalities",
+DROP COLUMN "revenue",
+DROP COLUMN "seminar_tasks",
+DROP COLUMN "updated_at",
+DROP COLUMN "updated_by";
+
+-- AlterTable
+ALTER TABLE "lead_notes" ALTER COLUMN "updated_at" DROP DEFAULT;
+
+-- AlterTable
+ALTER TABLE "lead_sources" ADD COLUMN     "deleted_at" TIMESTAMP(3),
+ALTER COLUMN "updated_at" DROP DEFAULT;
+
+-- AlterTable
+ALTER TABLE "lead_statuses" ALTER COLUMN "updated_at" DROP DEFAULT;
+
 -- AlterTable
 ALTER TABLE "leads" ADD COLUMN     "is_qualified" BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN     "qualification_score" INTEGER,
 ADD COLUMN     "qualification_status" TEXT NOT NULL DEFAULT 'UNQUALIFIED';
 
 -- AlterTable
-ALTER TABLE "notifications" ADD COLUMN     "opportunity_id" INTEGER;
+ALTER TABLE "permissions" ADD COLUMN     "can_archive" BOOLEAN NOT NULL DEFAULT false;
+
+-- AlterTable
+ALTER TABLE "refresh_tokens" ADD COLUMN     "browser" TEXT,
+ADD COLUMN     "deviceName" TEXT,
+ADD COLUMN     "ip_address" TEXT,
+ADD COLUMN     "last_active" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN     "os" TEXT;
+
+-- AlterTable
+ALTER TABLE "roles" ADD COLUMN     "company_id" INTEGER,
+ADD COLUMN     "created_by" INTEGER,
+ADD COLUMN     "is_system" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "rank" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+ADD COLUMN     "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- AlterTable
+ALTER TABLE "stages" ADD COLUMN     "code" TEXT,
+ADD COLUMN     "color_code" TEXT,
+ADD COLUMN     "display_order" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "stage_type" TEXT NOT NULL DEFAULT 'REGULAR',
+ADD COLUMN     "status" TEXT NOT NULL DEFAULT 'ACTIVE';
+
+-- CreateTable
+CREATE TABLE "password_resets" (
+    "id" SERIAL NOT NULL,
+    "user_id" INTEGER NOT NULL,
+    "company_id" INTEGER,
+    "otp" TEXT NOT NULL,
+    "is_verified" BOOLEAN NOT NULL DEFAULT false,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "password_resets_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "lead_assignments" (
+    "id" SERIAL NOT NULL,
+    "lead_id" INTEGER NOT NULL,
+    "company_id" INTEGER NOT NULL,
+    "branch_id" INTEGER,
+    "assignment_type" TEXT NOT NULL,
+    "assigned_to_user_id" INTEGER,
+    "assigned_to_team_id" INTEGER,
+    "previous_user_id" INTEGER,
+    "previous_team_id" INTEGER,
+    "assigned_by_id" INTEGER NOT NULL,
+    "notes" TEXT,
+    "reason" TEXT,
+    "assigned_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "lead_assignments_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "pipeline_histories" (
+    "id" SERIAL NOT NULL,
+    "lead_id" INTEGER NOT NULL,
+    "company_id" INTEGER NOT NULL,
+    "branch_id" INTEGER,
+    "previous_stage_id" INTEGER,
+    "new_stage_id" INTEGER NOT NULL,
+    "changed_by_id" INTEGER NOT NULL,
+    "reason" TEXT,
+    "changed_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "pipeline_histories_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "followups" (
+    "id" SERIAL NOT NULL,
+    "lead_id" INTEGER NOT NULL,
+    "company_id" INTEGER NOT NULL,
+    "branch_id" INTEGER,
+    "followup_type" TEXT NOT NULL,
+    "scheduled_at" TIMESTAMP(3) NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "notes" TEXT,
+    "completion_notes" TEXT,
+    "completed_at" TIMESTAMP(3),
+    "completed_by_id" INTEGER,
+    "assigned_to_id" INTEGER NOT NULL,
+    "created_by" INTEGER NOT NULL,
+    "updated_by" INTEGER,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "followups_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "notifications" (
+    "id" SERIAL NOT NULL,
+    "user_id" INTEGER NOT NULL,
+    "lead_id" INTEGER,
+    "company_id" INTEGER,
+    "branch_id" INTEGER,
+    "followup_id" INTEGER,
+    "opportunity_id" INTEGER,
+    "notification_type" TEXT NOT NULL,
+    "message" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'UNREAD',
+    "read_at" TIMESTAMP(3),
+    "expires_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "notifications_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateTable
 CREATE TABLE "lead_qualifications" (
@@ -19,6 +168,7 @@ CREATE TABLE "lead_qualifications" (
     "purchase_timeline" TEXT,
     "decision_maker_available" BOOLEAN NOT NULL DEFAULT false,
     "product_fit" BOOLEAN NOT NULL DEFAULT false,
+    "criteria_values" JSONB,
     "notes" TEXT,
     "remarks" TEXT,
     "evaluated_by_id" INTEGER,
@@ -39,10 +189,80 @@ CREATE TABLE "lead_qualification_histories" (
     "new_status" TEXT NOT NULL,
     "score" INTEGER,
     "remarks" TEXT,
+    "criteria_snapshot" JSONB,
     "changed_by_id" INTEGER NOT NULL,
     "changed_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "lead_qualification_histories_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "company_qualification_criteria" (
+    "id" SERIAL NOT NULL,
+    "company_id" INTEGER NOT NULL,
+    "key" TEXT NOT NULL,
+    "label" TEXT NOT NULL,
+    "description" TEXT,
+    "field_type" TEXT NOT NULL,
+    "max_points" INTEGER NOT NULL,
+    "options" JSONB,
+    "default_value" TEXT,
+    "is_required" BOOLEAN NOT NULL DEFAULT false,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "display_order" INTEGER NOT NULL DEFAULT 0,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "company_qualification_criteria_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "company_qualification_settings" (
+    "id" SERIAL NOT NULL,
+    "company_id" INTEGER NOT NULL,
+    "pass_threshold" INTEGER NOT NULL DEFAULT 60,
+    "hold_threshold" INTEGER NOT NULL DEFAULT 40,
+    "valid_statuses" JSONB NOT NULL DEFAULT '["QUALIFIED","NOT_QUALIFIED","ON_HOLD","UNQUALIFIED"]',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "company_qualification_settings_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "lead_activities" (
+    "id" SERIAL NOT NULL,
+    "lead_id" INTEGER NOT NULL,
+    "company_id" INTEGER NOT NULL,
+    "activity_type" TEXT NOT NULL,
+    "description" TEXT,
+    "metadata" JSONB,
+    "related_entity_type" TEXT,
+    "related_entity_id" INTEGER,
+    "performed_by_id" INTEGER,
+    "performed_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "lead_activities_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "communication_logs" (
+    "id" SERIAL NOT NULL,
+    "lead_id" INTEGER NOT NULL,
+    "company_id" INTEGER NOT NULL,
+    "branch_id" INTEGER,
+    "communication_type" TEXT NOT NULL,
+    "summary" TEXT,
+    "interaction_date" TIMESTAMP(3) NOT NULL,
+    "is_deleted" BOOLEAN NOT NULL DEFAULT false,
+    "deleted_by" INTEGER,
+    "deleted_at" TIMESTAMP(3),
+    "created_by" INTEGER NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "communication_logs_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -250,6 +470,90 @@ CREATE TABLE "revenue_logs" (
 );
 
 -- CreateIndex
+CREATE INDEX "password_resets_user_id_idx" ON "password_resets"("user_id");
+
+-- CreateIndex
+CREATE INDEX "password_resets_company_id_idx" ON "password_resets"("company_id");
+
+-- CreateIndex
+CREATE INDEX "lead_assignments_lead_id_idx" ON "lead_assignments"("lead_id");
+
+-- CreateIndex
+CREATE INDEX "lead_assignments_company_id_idx" ON "lead_assignments"("company_id");
+
+-- CreateIndex
+CREATE INDEX "lead_assignments_branch_id_idx" ON "lead_assignments"("branch_id");
+
+-- CreateIndex
+CREATE INDEX "lead_assignments_assigned_to_user_id_idx" ON "lead_assignments"("assigned_to_user_id");
+
+-- CreateIndex
+CREATE INDEX "lead_assignments_assigned_to_team_id_idx" ON "lead_assignments"("assigned_to_team_id");
+
+-- CreateIndex
+CREATE INDEX "lead_assignments_lead_id_assigned_at_idx" ON "lead_assignments"("lead_id", "assigned_at");
+
+-- CreateIndex
+CREATE INDEX "pipeline_histories_lead_id_idx" ON "pipeline_histories"("lead_id");
+
+-- CreateIndex
+CREATE INDEX "pipeline_histories_company_id_idx" ON "pipeline_histories"("company_id");
+
+-- CreateIndex
+CREATE INDEX "pipeline_histories_branch_id_idx" ON "pipeline_histories"("branch_id");
+
+-- CreateIndex
+CREATE INDEX "pipeline_histories_previous_stage_id_idx" ON "pipeline_histories"("previous_stage_id");
+
+-- CreateIndex
+CREATE INDEX "pipeline_histories_new_stage_id_idx" ON "pipeline_histories"("new_stage_id");
+
+-- CreateIndex
+CREATE INDEX "followups_lead_id_idx" ON "followups"("lead_id");
+
+-- CreateIndex
+CREATE INDEX "followups_company_id_idx" ON "followups"("company_id");
+
+-- CreateIndex
+CREATE INDEX "followups_branch_id_idx" ON "followups"("branch_id");
+
+-- CreateIndex
+CREATE INDEX "followups_assigned_to_id_idx" ON "followups"("assigned_to_id");
+
+-- CreateIndex
+CREATE INDEX "followups_status_idx" ON "followups"("status");
+
+-- CreateIndex
+CREATE INDEX "followups_scheduled_at_idx" ON "followups"("scheduled_at");
+
+-- CreateIndex
+CREATE INDEX "followups_assigned_to_id_status_scheduled_at_idx" ON "followups"("assigned_to_id", "status", "scheduled_at");
+
+-- CreateIndex
+CREATE INDEX "notifications_user_id_idx" ON "notifications"("user_id");
+
+-- CreateIndex
+CREATE INDEX "notifications_lead_id_idx" ON "notifications"("lead_id");
+
+-- CreateIndex
+CREATE INDEX "notifications_status_idx" ON "notifications"("status");
+
+-- CreateIndex
+CREATE INDEX "notifications_created_at_idx" ON "notifications"("created_at");
+
+-- CreateIndex
+CREATE INDEX "notifications_company_id_idx" ON "notifications"("company_id");
+
+-- CreateIndex
+CREATE INDEX "notifications_branch_id_idx" ON "notifications"("branch_id");
+
+-- CreateIndex
+CREATE INDEX "notifications_followup_id_idx" ON "notifications"("followup_id");
+
+-- CreateIndex
+CREATE INDEX "notifications_opportunity_id_idx" ON "notifications"("opportunity_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "lead_qualifications_lead_id_key" ON "lead_qualifications"("lead_id");
 
 -- CreateIndex
@@ -275,6 +579,48 @@ CREATE INDEX "lead_qualification_histories_branch_id_idx" ON "lead_qualification
 
 -- CreateIndex
 CREATE INDEX "lead_qualification_histories_changed_at_idx" ON "lead_qualification_histories"("changed_at");
+
+-- CreateIndex
+CREATE INDEX "company_qualification_criteria_company_id_idx" ON "company_qualification_criteria"("company_id");
+
+-- CreateIndex
+CREATE INDEX "company_qualification_criteria_is_active_idx" ON "company_qualification_criteria"("is_active");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "company_qualification_settings_company_id_key" ON "company_qualification_settings"("company_id");
+
+-- CreateIndex
+CREATE INDEX "lead_activities_lead_id_idx" ON "lead_activities"("lead_id");
+
+-- CreateIndex
+CREATE INDEX "lead_activities_company_id_idx" ON "lead_activities"("company_id");
+
+-- CreateIndex
+CREATE INDEX "lead_activities_performed_at_idx" ON "lead_activities"("performed_at");
+
+-- CreateIndex
+CREATE INDEX "lead_activities_activity_type_idx" ON "lead_activities"("activity_type");
+
+-- CreateIndex
+CREATE INDEX "lead_activities_lead_id_performed_at_idx" ON "lead_activities"("lead_id", "performed_at");
+
+-- CreateIndex
+CREATE INDEX "lead_activities_related_entity_type_related_entity_id_idx" ON "lead_activities"("related_entity_type", "related_entity_id");
+
+-- CreateIndex
+CREATE INDEX "communication_logs_lead_id_idx" ON "communication_logs"("lead_id");
+
+-- CreateIndex
+CREATE INDEX "communication_logs_company_id_idx" ON "communication_logs"("company_id");
+
+-- CreateIndex
+CREATE INDEX "communication_logs_branch_id_idx" ON "communication_logs"("branch_id");
+
+-- CreateIndex
+CREATE INDEX "communication_logs_communication_type_idx" ON "communication_logs"("communication_type");
+
+-- CreateIndex
+CREATE INDEX "communication_logs_interaction_date_idx" ON "communication_logs"("interaction_date");
 
 -- CreateIndex
 CREATE INDEX "opportunity_stages_company_id_idx" ON "opportunity_stages"("company_id");
@@ -445,16 +791,109 @@ CREATE INDEX "revenue_logs_company_id_product_id_idx" ON "revenue_logs"("company
 CREATE UNIQUE INDEX "revenue_logs_deal_id_key" ON "revenue_logs"("deal_id");
 
 -- CreateIndex
-CREATE INDEX "lead_activities_related_entity_type_related_entity_id_idx" ON "lead_activities"("related_entity_type", "related_entity_id");
-
--- CreateIndex
 CREATE INDEX "leads_qualification_status_idx" ON "leads"("qualification_status");
 
 -- CreateIndex
 CREATE INDEX "leads_is_qualified_idx" ON "leads"("is_qualified");
 
 -- CreateIndex
-CREATE INDEX "notifications_opportunity_id_idx" ON "notifications"("opportunity_id");
+CREATE INDEX "roles_company_id_idx" ON "roles"("company_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "roles_company_id_name_key" ON "roles"("company_id", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "stages_code_key" ON "stages"("code");
+
+-- AddForeignKey
+ALTER TABLE "roles" ADD CONSTRAINT "roles_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "roles" ADD CONSTRAINT "roles_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "password_resets" ADD CONSTRAINT "password_resets_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "password_resets" ADD CONSTRAINT "password_resets_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_assigned_to_user_id_fkey" FOREIGN KEY ("assigned_to_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_assigned_to_team_id_fkey" FOREIGN KEY ("assigned_to_team_id") REFERENCES "teams"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_previous_user_id_fkey" FOREIGN KEY ("previous_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_previous_team_id_fkey" FOREIGN KEY ("previous_team_id") REFERENCES "teams"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_assigned_by_id_fkey" FOREIGN KEY ("assigned_by_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_previous_stage_id_fkey" FOREIGN KEY ("previous_stage_id") REFERENCES "stages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_new_stage_id_fkey" FOREIGN KEY ("new_stage_id") REFERENCES "stages"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_changed_by_id_fkey" FOREIGN KEY ("changed_by_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "followups" ADD CONSTRAINT "followups_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "followups" ADD CONSTRAINT "followups_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "followups" ADD CONSTRAINT "followups_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "followups" ADD CONSTRAINT "followups_completed_by_id_fkey" FOREIGN KEY ("completed_by_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "followups" ADD CONSTRAINT "followups_assigned_to_id_fkey" FOREIGN KEY ("assigned_to_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "followups" ADD CONSTRAINT "followups_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "followups" ADD CONSTRAINT "followups_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_followup_id_fkey" FOREIGN KEY ("followup_id") REFERENCES "followups"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_opportunity_id_fkey" FOREIGN KEY ("opportunity_id") REFERENCES "opportunities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -482,6 +921,36 @@ ALTER TABLE "lead_qualification_histories" ADD CONSTRAINT "lead_qualification_hi
 
 -- AddForeignKey
 ALTER TABLE "lead_qualification_histories" ADD CONSTRAINT "lead_qualification_histories_changed_by_id_fkey" FOREIGN KEY ("changed_by_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "company_qualification_criteria" ADD CONSTRAINT "company_qualification_criteria_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "company_qualification_settings" ADD CONSTRAINT "company_qualification_settings_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_activities" ADD CONSTRAINT "lead_activities_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_activities" ADD CONSTRAINT "lead_activities_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "lead_activities" ADD CONSTRAINT "lead_activities_performed_by_id_fkey" FOREIGN KEY ("performed_by_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "communication_logs" ADD CONSTRAINT "communication_logs_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "communication_logs" ADD CONSTRAINT "communication_logs_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "communication_logs" ADD CONSTRAINT "communication_logs_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "communication_logs" ADD CONSTRAINT "communication_logs_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "communication_logs" ADD CONSTRAINT "communication_logs_deleted_by_fkey" FOREIGN KEY ("deleted_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "opportunity_stages" ADD CONSTRAINT "opportunity_stages_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
