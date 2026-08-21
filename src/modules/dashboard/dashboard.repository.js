@@ -112,7 +112,7 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
   const dateFilter = makeDateFilter(startDate, endDate);
   const [
     totalLeads, qualifiedLeads, activeOpportunities, dealsWonAgg,
-    activeCustomers, followupsToday, bdeCount, iseCount,
+    activeCustomers, followupsToday, bdeCount, iseCount, rawBranchStaff,
   ] = await Promise.all([
     prisma.lead.count({ where: { ...w, isDeleted: false, ...(startDate && { createdAt: dateFilter }) } }),
     prisma.lead.count({ where: { ...w, isQualified: true, isDeleted: false } }),
@@ -122,7 +122,32 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
     prisma.followup.count({ where: { ...w, status: "PENDING", scheduledAt: { gte: new Date(new Date().setHours(0,0,0,0)), lte: new Date(new Date().setHours(23,59,59,999)) } } }),
     prisma.user.count({ where: { ...w, status: "ACTIVE", userRoles: { some: { role: { name: "BDE" } } } } }),
     prisma.user.count({ where: { ...w, status: "ACTIVE", userRoles: { some: { role: { name: "ISE" } } } } }),
+    prisma.user.findMany({
+      where: { ...w, status: "ACTIVE", userRoles: { some: { role: { name: { in: ["BDE", "ISE"] } } } } },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        userRoles: { select: { role: { select: { name: true } } } },
+        ownedTeams: { where: { isDeleted: false }, select: { name: true } },
+        teamMemberships: { where: { removedAt: null, team: { isDeleted: false } }, select: { team: { select: { name: true } } } },
+        assignedLeads: { where: { isDeleted: false, ...(startDate && { createdAt: dateFilter }) }, select: { id: true } },
+        closedDeals: { where: { outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, select: { id: true, finalAmount: true } },
+      },
+    }),
   ]);
+
+  const teamPerformance = (rawBranchStaff || []).map((u) => ({
+    userId: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.userRoles?.[0]?.role?.name || 'Representative',
+    teamName: u.ownedTeams?.[0]?.name || u.teamMemberships?.[0]?.team?.name || null,
+    leadsCount: u.assignedLeads?.length || 0,
+    wonDealsCount: u.closedDeals?.length || 0,
+    revenue: (u.closedDeals || []).reduce((sum, d) => sum + Number(d.finalAmount || 0), 0),
+  }));
+
   const conversionRate = totalLeads > 0 ? +((dealsWonAgg._count.id / totalLeads) * 100).toFixed(2) : 0;
   return {
     totalLeads, qualifiedLeads, activeOpportunities, activeCustomers,
@@ -130,6 +155,7 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
     wonDeals: dealsWonAgg._count.id || 0,
     revenue: Number(dealsWonAgg._sum.finalAmount || 0),
     conversionRate,
+    teamPerformance,
   };
 }
 

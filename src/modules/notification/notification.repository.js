@@ -101,18 +101,47 @@ export const findOverdueFollowups = () =>
 
 /**
  * Fetch summary counts for the dashboard reminder widget.
- * Always user-scoped (assignedToId = userId) regardless of actor rank.
+ * Respects role scoping:
+ * - Super Admin: global or company
+ * - Company Admin: company-wide
+ * - Branch Manager: branch-wide
+ * - Reps (BDE/ISE): assigned to user
  * Returns: { todayCount, upcomingCount, overdueCount, total }
  */
-export const fetchReminderSummary = async (userId) => {
-  const now      = new Date();
-  const todayEnd = new Date(new Date().setHours(23, 59, 59, 999));
-  const baseWhere = { assignedToId: userId, status: "PENDING" };
+export const fetchReminderSummary = async (actor) => {
+  const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
+  const todayEnd     = new Date(new Date().setHours(23, 59, 59, 999));
+
+  const baseWhere = { status: "PENDING" };
+
+  if (typeof actor === "object" && actor !== null) {
+    if (actor.companyId && actor.primaryRoleRank < 100) {
+      baseWhere.companyId = actor.companyId;
+    }
+    if (actor.branchId && actor.primaryRoleRank < 80) {
+      baseWhere.branchId = actor.branchId;
+    }
+    if (actor.primaryRoleRank < 60 && actor.primaryRole !== "BDE") {
+      baseWhere.assignedToId = actor.id;
+    }
+  } else if (typeof actor === "number") {
+    baseWhere.assignedToId = actor;
+  }
 
   const [todayCount, upcomingCount, overdueCount] = await Promise.all([
-    prisma.followup.count({ where: { ...baseWhere, scheduledAt: { gte: now, lte: todayEnd } } }),
+    prisma.followup.count({ where: { ...baseWhere, scheduledAt: { gte: startOfToday, lte: todayEnd } } }),
     prisma.followup.count({ where: { ...baseWhere, scheduledAt: { gt: todayEnd } } }),
-    prisma.followup.count({ where: { ...baseWhere, scheduledAt: { lt: now } } }),
+    prisma.followup.count({
+      where: {
+        ...(baseWhere.companyId && { companyId: baseWhere.companyId }),
+        ...(baseWhere.branchId && { branchId: baseWhere.branchId }),
+        ...(baseWhere.assignedToId && { assignedToId: baseWhere.assignedToId }),
+        OR: [
+          { status: "MISSED" },
+          { status: "PENDING", scheduledAt: { lt: startOfToday } },
+        ],
+      },
+    }),
   ]);
 
   return {

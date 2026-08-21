@@ -3,8 +3,32 @@
 import prisma from "../../config/db.js";
 
 const FOLLOWUP_INCLUDE = {
-  lead:        { select: { id: true, name: true, mobile: true, companyId: true, branchId: true, teamId: true } },
-  assignedTo:  { select: { id: true, name: true, email: true } },
+  lead: {
+    select: {
+      id: true,
+      name: true,
+      mobile: true,
+      companyId: true,
+      branchId: true,
+      teamId: true,
+      assignedTo: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          userRoles: { select: { role: { select: { name: true } } } },
+        },
+      },
+    },
+  },
+  assignedTo: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      userRoles: { select: { role: { select: { name: true } } } },
+    },
+  },
   createdBy:   { select: { id: true, name: true } },
   completedBy: { select: { id: true, name: true } },
   updatedBy:   { select: { id: true, name: true } },
