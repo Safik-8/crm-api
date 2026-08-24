@@ -508,6 +508,34 @@ export const validateKpiDurationDates = (duration, startDateStr, endDateStr) => 
   }
 };
 
+/**
+ * Helper to retrieve all team IDs led by a specific user.
+ */
+export const getUserLedTeamIds = async (userId) => {
+  if (!userId) return [];
+  const bdeLeaderTeams = await prisma.team.findMany({
+    where: { bdeId: Number(userId), isDeleted: false },
+    select: { id: true },
+  });
+
+  const memberLeaderRecords = await prisma.teamMember.findMany({
+    where: {
+      userId: Number(userId),
+      removedAt: null,
+      memberRole: { in: ["LEADER", "BDE_LEADER", "TEAM_LEADER"] },
+      team: { isDeleted: false },
+    },
+    select: { teamId: true },
+  });
+
+  const teamIds = new Set([
+    ...bdeLeaderTeams.map((t) => t.id),
+    ...memberLeaderRecords.map((m) => m.teamId),
+  ]);
+
+  return Array.from(teamIds);
+};
+
 export const createKpiTarget = async (user, data) => {
   const { employeeId, teamId, assignmentType, scopeType, kpiType, targetValue, duration, startDate, endDate, calculationMeta } = data;
 
@@ -532,8 +560,14 @@ export const createKpiTarget = async (user, data) => {
   const targetEmployeeId = employeeId ? Number(employeeId) : null;
   const targetTeamId = teamId ? Number(teamId) : null;
 
-  // Rank Authority Guard: Users cannot assign targets to superiors
-  if (targetEmployeeId && user.primaryRole !== "SUPER_ADMIN") {
+  const actorRole = user.primaryRole || "";
+  const actorRank = Number(user.primaryRoleRank || 0);
+  const isSuperAdmin = actorRole === "SUPER_ADMIN" || actorRank >= 100;
+  const isCompanyAdmin = isSuperAdmin || actorRole === "COMPANY_ADMIN" || actorRank >= 80;
+  const isBranchManager = isCompanyAdmin || actorRole === "BRANCH_MANAGER" || actorRank >= 60;
+
+  // 1. Strict Scope Validation for Individual Employee Assignment
+  if (targetEmployeeId && !isSuperAdmin) {
     const targetUser = await prisma.user.findUnique({
       where: { id: targetEmployeeId },
       include: {
@@ -544,19 +578,89 @@ export const createKpiTarget = async (user, data) => {
       },
     });
 
-    if (targetUser) {
-      const targetRoleName = targetUser.userRoles?.[0]?.role?.name || "";
-      const targetRank = targetUser.userRoles?.[0]?.role?.rank ?? 0;
-      const actorRank = Number(user.primaryRoleRank || 0);
+    if (!targetUser) {
+      const err = new Error("Selected employee not found.");
+      err.statusCode = 404;
+      throw err;
+    }
 
-      if (
-        targetRoleName === "SUPER_ADMIN" ||
-        (user.primaryRole !== "COMPANY_ADMIN" && targetRoleName === "COMPANY_ADMIN") ||
-        (actorRank > 0 && targetRank > actorRank)
-      ) {
-        const err = new Error("Forbidden: You cannot assign performance targets to a user with higher authority rank than yourself.");
-        err.statusCode = 403;
-        throw err;
+    const targetRoleName = targetUser.userRoles?.[0]?.role?.name || "";
+    const targetRank = targetUser.userRoles?.[0]?.role?.rank ?? 0;
+
+    // Multitenancy Company Boundary
+    if (user.companyId && targetUser.companyId !== user.companyId) {
+      const err = new Error("Unauthorized KPI assignment: Target employee is outside your company.");
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (!isCompanyAdmin) {
+      if (isBranchManager) {
+        // Branch Manager Scope
+        if (user.branchId && targetUser.branchId !== user.branchId) {
+          const err = new Error("Unauthorized KPI assignment: Target employee is outside your branch.");
+          err.statusCode = 403;
+          throw err;
+        }
+        if (targetRoleName === "SUPER_ADMIN" || targetRoleName === "COMPANY_ADMIN" || (actorRank > 0 && targetRank > actorRank)) {
+          const err = new Error("Unauthorized KPI assignment: You cannot assign targets to a user with higher rank than yourself.");
+          err.statusCode = 403;
+          throw err;
+        }
+      } else {
+        // Team Leader / BDE Scope: Must be a member of user's led teams or self
+        const ledTeamIds = await getUserLedTeamIds(user.id);
+        if (targetUser.id !== user.id) {
+          const isMember = await prisma.teamMember.findFirst({
+            where: {
+              userId: targetUser.id,
+              teamId: { in: ledTeamIds.length > 0 ? ledTeamIds : [-1] },
+              removedAt: null,
+            },
+          });
+          if (!isMember) {
+            const err = new Error("Unauthorized KPI assignment: Target employee is not in any team under your leadership.");
+            err.statusCode = 403;
+            throw err;
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Strict Scope Validation for Sales Team Assignment
+  if (targetTeamId && !isSuperAdmin) {
+    const targetTeam = await prisma.team.findUnique({
+      where: { id: targetTeamId, isDeleted: false },
+    });
+
+    if (!targetTeam) {
+      const err = new Error("Selected sales team not found.");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (user.companyId && targetTeam.companyId !== user.companyId) {
+      const err = new Error("Unauthorized KPI assignment: Target team is outside your company.");
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (!isCompanyAdmin) {
+      if (isBranchManager) {
+        if (user.branchId && targetTeam.branchId !== user.branchId) {
+          const err = new Error("Unauthorized KPI assignment: Target team is outside your branch.");
+          err.statusCode = 403;
+          throw err;
+        }
+      } else {
+        // Team Leader Scope: Must be a team led by user
+        const ledTeamIds = await getUserLedTeamIds(user.id);
+        if (!ledTeamIds.includes(targetTeam.id)) {
+          const err = new Error("Unauthorized KPI assignment: You are not authorized to assign targets to this team.");
+          err.statusCode = 403;
+          throw err;
+        }
       }
     }
   }

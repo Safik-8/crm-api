@@ -32,10 +32,10 @@ export const hasPermission = (module, action) => {
     }
 
     // 4. Fallback permission check for KPI module
-    if (module === "KPI") {
+    if (module === "KPI" || (typeof module === "string" && module.includes("KPI"))) {
       const kpiPerms = req.user.permissions?.["KPI"]
       if (kpiPerms) {
-        if (action === "canManage" && (kpiPerms.canManage || kpiPerms.canCreate || kpiPerms.canEdit)) {
+        if ((action === "canManage" || action === "canCreate") && (kpiPerms.canManage || kpiPerms.canCreate || kpiPerms.canEdit)) {
           return next()
         }
         if (kpiPerms[action] !== undefined && kpiPerms[action]) {
@@ -45,7 +45,7 @@ export const hasPermission = (module, action) => {
       if (action === "canView") return next()
       if (action === "canManage" || action === "canCreate" || action === "canEdit") {
         const rank = Number(req.user.primaryRoleRank || 0)
-        if (req.user.primaryRole === "SUPER_ADMIN" || req.user.primaryRole === "COMPANY_ADMIN" || req.user.primaryRole === "BRANCH_MANAGER" || rank >= 60) {
+        if (req.user.primaryRole === "SUPER_ADMIN" || req.user.primaryRole === "COMPANY_ADMIN" || req.user.primaryRole === "BRANCH_MANAGER" || rank >= 40) {
           return next()
         }
         return next(new PermissionDeniedError(module, action))
