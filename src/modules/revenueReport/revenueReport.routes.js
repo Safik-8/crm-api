@@ -19,56 +19,56 @@ router.use(authenticate);
 // RBAC & Permission Protected Endpoints
 router.get(
   "/summary",
-  hasPermission("REPORT", "canView"),
+  hasPermission("REVENUE_REPORT", "canView"),
   validateQuery(revenueFilterQuerySchema),
   revenueReportController.getRevenueSummary
 );
 
 router.get(
   "/monthly",
-  hasPermission("REPORT", "canView"),
+  hasPermission("REVENUE_REPORT", "canView"),
   validateQuery(revenueFilterQuerySchema),
   revenueReportController.getMonthlyRevenue
 );
 
 router.get(
   "/quarterly",
-  hasPermission("REPORT", "canView"),
+  hasPermission("REVENUE_REPORT", "canView"),
   validateQuery(revenueFilterQuerySchema),
   revenueReportController.getQuarterlyRevenue
 );
 
 router.get(
   "/product",
-  hasPermission("REPORT", "canView"),
+  hasPermission("REVENUE_REPORT", "canView"),
   validateQuery(revenueFilterQuerySchema),
   revenueReportController.getProductRevenue
 );
 
 router.get(
   "/team",
-  hasPermission("REPORT", "canView"),
+  hasPermission("REVENUE_REPORT", "canView"),
   validateQuery(revenueFilterQuerySchema),
   revenueReportController.getTeamRevenue
 );
 
 router.get(
   "/branch",
-  hasPermission("REPORT", "canView"),
+  hasPermission("REVENUE_REPORT", "canView"),
   validateQuery(revenueFilterQuerySchema),
   revenueReportController.getBranchRevenue
 );
 
 router.get(
   "/trend",
-  hasPermission("REPORT", "canView"),
+  hasPermission("REVENUE_REPORT", "canView"),
   validateQuery(revenueFilterQuerySchema),
   revenueReportController.getRevenueTrend
 );
 
 router.post(
   "/export-log",
-  hasPermission("REPORT", "canCreate"),
+  hasPermission("REVENUE_REPORT", "canCreate"),
   validateBody(createExportLogSchema),
   revenueReportController.logExportAction
 );

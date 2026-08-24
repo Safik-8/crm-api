@@ -91,6 +91,8 @@ export const MODULES = [
   "QUALIFICATION",
   "OPPORTUNITY",
   "KPI",
+  "REVENUE_REPORT",
+  "SALES_PERFORMANCE",
 ]
 
 // ── PERMISSION ACTIONS ───────────────────────────────────────────
