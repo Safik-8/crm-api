@@ -531,6 +531,35 @@ export const createKpiTarget = async (user, data) => {
   const resolvedScope = scopeType || assignmentType || (employeeId ? "INDIVIDUAL" : teamId ? "TEAM" : "COMPANY");
   const targetEmployeeId = employeeId ? Number(employeeId) : null;
   const targetTeamId = teamId ? Number(teamId) : null;
+
+  // Rank Authority Guard: Users cannot assign targets to superiors
+  if (targetEmployeeId && user.primaryRole !== "SUPER_ADMIN") {
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetEmployeeId },
+      include: {
+        userRoles: {
+          where: { isPrimary: true },
+          include: { role: { select: { name: true, rank: true } } },
+        },
+      },
+    });
+
+    if (targetUser) {
+      const targetRoleName = targetUser.userRoles?.[0]?.role?.name || "";
+      const targetRank = targetUser.userRoles?.[0]?.role?.rank ?? 0;
+      const actorRank = Number(user.primaryRoleRank || 0);
+
+      if (
+        targetRoleName === "SUPER_ADMIN" ||
+        (user.primaryRole !== "COMPANY_ADMIN" && targetRoleName === "COMPANY_ADMIN") ||
+        (actorRank > 0 && targetRank > actorRank)
+      ) {
+        const err = new Error("Forbidden: You cannot assign performance targets to a user with higher authority rank than yourself.");
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+  }
   const targetCompanyId = user.companyId || 1;
   let targetBranchId = user.branchId || null;
   if (!targetBranchId) {
