@@ -90,6 +90,7 @@ export const MODULES = [
   "LEAD_STATUS",
   "QUALIFICATION",
   "OPPORTUNITY",
+  "KPI",
 ]
 
 // ── PERMISSION ACTIONS ───────────────────────────────────────────
