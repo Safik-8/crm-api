@@ -363,26 +363,25 @@ export const generateReportData = async (user, filters) => {
   };
 
   const resolveTargetEmployees = async () => {
-    // For roles below Manager
+    // For roles below Manager (e.g. BDE / ISE)
     if (rank < 60) {
       if (filters.viewMode === 'TEAM' && activeTeamId) {
-        if (rank >= 40) {
-          const teamMembers = await prisma.teamMember.findMany({
-            where: { teamId: activeTeamId, removedAt: null },
-            select: { userId: true }
-          });
-          const teamOwner = await prisma.team.findUnique({
-            where: { id: activeTeamId },
-            select: { bdeId: true }
-          });
-          const memberIds = teamMembers.map(tm => tm.userId);
-          if (teamOwner?.bdeId) {
-            memberIds.push(teamOwner.bdeId);
-          }
-          return Array.from(new Set(memberIds));
-        } else {
-          return [user.id];
+        if (filters.employeeId) {
+          return [parseInt(filters.employeeId)];
         }
+        const teamMembers = await prisma.teamMember.findMany({
+          where: { teamId: activeTeamId, removedAt: null },
+          select: { userId: true }
+        });
+        const teamOwner = await prisma.team.findUnique({
+          where: { id: activeTeamId },
+          select: { bdeId: true }
+        });
+        const memberIds = teamMembers.map(tm => tm.userId);
+        if (teamOwner?.bdeId) {
+          memberIds.push(teamOwner.bdeId);
+        }
+        return Array.from(new Set(memberIds));
       }
       return [user.id];
     }
@@ -592,7 +591,7 @@ export const generateReportData = async (user, filters) => {
             { createdById: user.id }
           ];
           if (filters.viewMode === 'TEAM') {
-            where.OR.push({ teamId: activeTeamId, ownerId: null });
+            where.OR.push({ teamId: activeTeamId });
           }
         } else {
           where.OR = [
@@ -660,7 +659,7 @@ export const generateReportData = async (user, filters) => {
 
     case 'DEAL_REPORT': {
       const where = buildBaseWhere();
-      where.isDeleted = false;
+
 
       if (rank < 60) {
         if (activeTeamId) {
@@ -669,7 +668,7 @@ export const generateReportData = async (user, filters) => {
             { createdById: user.id }
           ];
           if (filters.viewMode === 'TEAM') {
-            where.OR.push({ opportunity: { teamId: activeTeamId }, closedById: null });
+            where.OR.push({ opportunity: { teamId: activeTeamId } });
           }
         } else {
           where.OR = [

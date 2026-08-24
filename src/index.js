@@ -40,6 +40,7 @@ import salesPerformanceRoutes from "./modules/salesPerformance/salesPerformance.
 import revenueReportRoutes from "./modules/revenueReport/revenueReport.routes.js"
 import reportRoutes from "./modules/report/report.routes.js"
 import kpiRoutes from "./modules/kpi/kpi.routes.js"
+import dashboardRoutes from "./modules/dashboard/dashboard.routes.js"
 import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -124,6 +125,7 @@ app.use("/api/sales-performance", salesPerformanceRoutes);
 app.use("/api/reports/revenue", revenueReportRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/kpi", kpiRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════

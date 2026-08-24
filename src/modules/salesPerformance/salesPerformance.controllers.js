@@ -62,3 +62,16 @@ export async function getPerformanceRankings(req, res, next) {
     next(error);
   }
 }
+
+/**
+ * Controller: Log Report Export Action in AuditLog
+ */
+export async function logExportAction(req, res, next) {
+  try {
+    const auditLog = await salesPerformanceService.logExportAction(req.user, req.body);
+    return sendSuccess(res, auditLog, "Export action logged successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
