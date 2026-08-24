@@ -45,8 +45,8 @@ const router = Router();
 router.use(authenticate);
 
 // ── Dropdown helpers — must be registered BEFORE /:id routes ─────────────────
-router.get("/branch-users", hasPermission("LEAD", "canCreate"), getBranchUsersForLead);
-router.get("/form-data",    hasPermission("LEAD", "canCreate"), getLeadFormData);
+router.get("/branch-users", hasPermission("LEAD", "canView"), getBranchUsersForLead);
+router.get("/form-data",    hasPermission("LEAD", "canView"), getLeadFormData);
 
 // ── Bulk Excel import & logs ─────────────────────────────────────────────────
 router.post("/import-excel",       hasPermission("LEAD", "canCreate"), importLeadsFromExcel);

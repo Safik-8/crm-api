@@ -39,6 +39,7 @@ import proposalRoutes from "./modules/proposal/proposal.routes.js"
 import salesPerformanceRoutes from "./modules/salesPerformance/salesPerformance.routes.js"
 import revenueReportRoutes from "./modules/revenueReport/revenueReport.routes.js"
 import reportRoutes from "./modules/report/report.routes.js"
+import dashboardRoutes from "./modules/dashboard/dashboard.routes.js"
 import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -122,6 +123,7 @@ app.use("/api/proposals", proposalRoutes);
 app.use("/api/sales-performance", salesPerformanceRoutes);
 app.use("/api/reports/revenue", revenueReportRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════

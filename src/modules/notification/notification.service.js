@@ -85,9 +85,9 @@ export const getUnreadCountService = async (actor) => {
 
 export const getReminderSummaryService = async (actor) => {
   const perm = actor.permissions?.NOTIFICATION;
-  if (!perm?.canView) throw new ForbiddenError("You do not have permission to view reminders");
-  // Summary is always user-scoped (actor's own assigned followups)
-  return fetchReminderSummary(actor.id);
+  const isSupervisor = actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN";
+  if (!isSupervisor && !perm?.canView) throw new ForbiddenError("You do not have permission to view reminders");
+  return fetchReminderSummary(actor);
 };
 
 export const markNotificationReadService = async (id, actor) => {
