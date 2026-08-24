@@ -11,13 +11,13 @@ const router = Router();
 // Protect all routes with authentication
 router.use(authenticate);
 
-// RBAC Protected endpoints using MODULE: 'SALES_PERFORMANCE' (with fallback to 'REPORT')
+// RBAC Protected endpoints using singular MODULE: 'REPORT'
 router.get("/bde", hasPermission("SALES_PERFORMANCE", "canView"), validateQuery(performanceFilterQuerySchema), salesPerformanceController.getBDEPerformance);
 router.get("/ise", hasPermission("SALES_PERFORMANCE", "canView"), validateQuery(performanceFilterQuerySchema), salesPerformanceController.getISEPerformance);
 router.get("/team", hasPermission("SALES_PERFORMANCE", "canView"), validateQuery(performanceFilterQuerySchema), salesPerformanceController.getTeamPerformance);
 router.get("/branch", hasPermission("SALES_PERFORMANCE", "canView"), validateQuery(performanceFilterQuerySchema), salesPerformanceController.getBranchPerformance);
 router.get("/rankings", hasPermission("SALES_PERFORMANCE", "canView"), validateQuery(performanceFilterQuerySchema), salesPerformanceController.getPerformanceRankings);
-router.post("/export-log", hasPermission("SALES_PERFORMANCE", "canCreate"), salesPerformanceController.logExportAction);
+router.post("/export-log", hasPermission("SALES_PERFORMANCE", "canView"), salesPerformanceController.logExportAction);
 
 export default router;
 

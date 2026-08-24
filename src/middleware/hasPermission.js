@@ -52,20 +52,20 @@ export const hasPermission = (module, action) => {
       }
     }
 
-    // 5. Module permission check from req.user.permissions matrix
-    const modulePerms = req.user.permissions?.[module]
-    if (modulePerms && modulePerms[action]) {
-      return next()
-    }
-
-    // 6. Fallback permission check for REVENUE_REPORT and SALES_PERFORMANCE to general REPORT module
+    // 5. Fallback permission check for REVENUE_REPORT and SALES_PERFORMANCE
     if (module === "REVENUE_REPORT" || module === "SALES_PERFORMANCE") {
-      const reportPerms = req.user.permissions?.["REPORT"]
-      if (reportPerms && reportPerms[action]) {
-        return next()
+      const specificPerms = req.user.permissions?.[module];
+      const reportPerms = req.user.permissions?.["REPORT"];
+      if ((specificPerms && specificPerms[action]) || (reportPerms && reportPerms[action])) {
+        return next();
       }
     }
 
-    return next(new PermissionDeniedError(module, action))
+    // 6. Module permission check from req.user.permissions matrix
+    const modulePerms = req.user.permissions?.[module]
+    if (!modulePerms || !modulePerms[action]) {
+      return next(new PermissionDeniedError(module, action))
+    }
+    next()
   }
 }

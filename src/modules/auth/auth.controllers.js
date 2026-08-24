@@ -17,15 +17,17 @@ dotenv.config()
 // Cookie options
 const ACCESS_COOKIE_OPTIONS = {
     httpOnly: true,
-    secure: false,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
+    path: "/",
     maxAge: 15 * 60 * 1000  // 15 minutes
 }
 
 const REFRESH_COOKIE_OPTIONS = {
     httpOnly: true,
-    secure: false,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
+    path: "/",
     maxAge: 7 * 24 * 60 * 60 * 1000  // 7 days
 }
 

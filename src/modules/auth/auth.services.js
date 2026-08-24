@@ -42,7 +42,8 @@ export const loginUserService = async (email, password, metadata = {}) => {
   // ── 1. VALIDATE INPUT WITH ZOD ──────────────────────────
   const validation = loginSchema.safeParse({ email, password })
   if (!validation.success) {
-    const fields = validation.error.errors.map(err => ({
+    const issues = validation.error?.issues || validation.error?.errors || []
+    const fields = issues.map(err => ({
       field: err.path.join("."),
       message: err.message
     }))
@@ -176,10 +177,14 @@ export const loginUserService = async (email, password, metadata = {}) => {
 // REFRESH TOKEN SERVICE
 // ══════════════════════════════════════
 export const refreshTokenService = async (refreshToken, metadata = {}) => {
-  // ── 1. VALIDATE WITH ZOD ───────────────────────────────
+  if (!refreshToken) {
+    throw new UnauthorizedError("Refresh token not found")
+  }
+
   const validation = refreshSchema.safeParse({ refreshToken })
   if (!validation.success) {
-    const fields = validation.error.errors.map(err => ({
+    const issues = validation.error?.issues || validation.error?.errors || []
+    const fields = issues.map(err => ({
       field: err.path.join("."),
       message: err.message
     }))
@@ -335,7 +340,8 @@ export const forgotPasswordService = async (email) => {
   // Validate email
   const validation = forgotPasswordSchema.safeParse({ email })
   if (!validation.success) {
-    const fields = validation.error.errors.map(err => ({
+    const issues = validation.error?.issues || validation.error?.errors || []
+    const fields = issues.map(err => ({
       field: err.path.join("."),
       message: err.message
     }))
@@ -371,7 +377,8 @@ export const resetPasswordService = async (email, otp, newPassword) => {
   // Validate fields
   const validation = resetPasswordSchema.safeParse({ email, otp, password: newPassword })
   if (!validation.success) {
-    const fields = validation.error.errors.map(err => ({
+    const issues = validation.error?.issues || validation.error?.errors || []
+    const fields = issues.map(err => ({
       field: err.path.join("."),
       message: err.message
     }))

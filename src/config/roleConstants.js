@@ -84,6 +84,8 @@ export const MODULES = [
   "APPROVAL",
   "DASHBOARD",
   "REPORT",
+  "REVENUE_REPORT",
+  "SALES_PERFORMANCE",
   "NOTIFICATION",
   "AUDIT",
   "LEAD_SOURCE",
@@ -91,8 +93,6 @@ export const MODULES = [
   "QUALIFICATION",
   "OPPORTUNITY",
   "KPI",
-  "REVENUE_REPORT",
-  "SALES_PERFORMANCE",
 ]
 
 // ── PERMISSION ACTIONS ───────────────────────────────────────────
