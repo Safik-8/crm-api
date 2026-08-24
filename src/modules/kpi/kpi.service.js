@@ -532,7 +532,22 @@ export const createKpiTarget = async (user, data) => {
   const targetEmployeeId = employeeId ? Number(employeeId) : null;
   const targetTeamId = teamId ? Number(teamId) : null;
   const targetCompanyId = user.companyId || 1;
-  const targetBranchId = user.branchId || null;
+  let targetBranchId = user.branchId || null;
+  if (!targetBranchId) {
+    if (targetEmployeeId) {
+      const emp = await prisma.user.findUnique({
+        where: { id: targetEmployeeId },
+        select: { branchId: true },
+      });
+      if (emp?.branchId) targetBranchId = emp.branchId;
+    } else if (targetTeamId) {
+      const t = await prisma.team.findUnique({
+        where: { id: targetTeamId },
+        select: { branchId: true },
+      });
+      if (t?.branchId) targetBranchId = t.branchId;
+    }
+  }
   const parsedStartDate = new Date(startDate);
   const parsedEndDate = new Date(endDate);
 
