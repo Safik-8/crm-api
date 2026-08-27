@@ -192,7 +192,7 @@ export const getLeadFormDataService = async (actor, query = {}) => {
 // CREATE LEAD
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const createLeadService = async (data, actor, txClient = prisma, skipDetail = false, skipAutoAssign = false) => {
+export const createLeadService = async (data, actor, txClient = prisma, skipDetail = false, skipAutoAssign = false, req = null) => {
   const companyId = actor.companyId ?? (data.companyId ? Number(data.companyId) : null);
   const branchId  = actor.branchId  ?? (data.branchId ? Number(data.branchId) : null);
 
@@ -407,16 +407,14 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
         }
       });
 
-      await tx.auditLog.create({
-        data: {
-          companyId:     lead.companyId,
-          entityId:      lead.id,
-          entityType:    "LEAD",
-          action:        "RESTORE",
-          newValue:      JSON.stringify({ name: lead.name, mobile: lead.mobile, restoredFromManual: true }),
-          performedById: actor.id
-        }
-      });
+      await createAuditLog({
+        req,
+        companyId:     lead.companyId,
+        entityId:      lead.id,
+        action:        "RESTORE",
+        newValue:      JSON.stringify({ name: lead.name, mobile: lead.mobile, restoredFromManual: true }),
+        performedById: actor.id
+      }, tx);
 
       await tx.leadActivity.create({
         data: {
@@ -431,6 +429,7 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
       lead = await createLead(payload, tx);
 
       await createAuditLog({
+        req,
         companyId:     lead.companyId,
         entityId:      lead.id,
         action:        "CREATE",
@@ -638,7 +637,7 @@ export const getLeadByIdService = async (leadId, actor) => {
 // UPDATE LEAD
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const updateLeadService = async (leadId, data, actor) => {
+export const updateLeadService = async (leadId, data, actor, req = null) => {
   const id = Number(leadId);
   if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
 
@@ -756,6 +755,7 @@ export const updateLeadService = async (leadId, data, actor) => {
     const updated = await updateLead(id, updateData, tx);
 
     await createAuditLog({
+      req,
       companyId:     lead.companyId,
       entityId:      id,
       action:        "UPDATE",
@@ -822,7 +822,7 @@ export const updateLeadService = async (leadId, data, actor) => {
 // DELETE LEAD (soft delete)
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const deleteLeadService = async (leadId, actor) => {
+export const deleteLeadService = async (leadId, actor, req = null) => {
   const id = Number(leadId);
   if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
 
@@ -840,6 +840,7 @@ export const deleteLeadService = async (leadId, actor) => {
     }, tx);
 
     await createAuditLog({
+      req,
       companyId:     lead.companyId,
       entityId:      id,
       action:        "DELETE",
@@ -855,7 +856,7 @@ export const deleteLeadService = async (leadId, actor) => {
   });
 };
 
-export const deleteAllLeadsService = async (actor) => {
+export const deleteAllLeadsService = async (actor, req = null) => {
   const scope = actorScope(actor);
   if (!scope.companyId) {
     throw new BadRequestError("Company scope could not be resolved.");
@@ -889,17 +890,15 @@ export const deleteAllLeadsService = async (actor) => {
     });
 
     // 3. Create a single audit log for the bulk operation
-    await tx.auditLog.create({
-      data: {
-        companyId: scope.companyId,
-        entityType: "LEAD",
-        entityId: 0, // 0 to represent bulk/all leads
-        action: "BULK_DELETE",
-        oldValue: JSON.stringify({ count, isDeleted: false }),
-        newValue: JSON.stringify({ count, isDeleted: true }),
-        performedById: actor.id
-      }
-    });
+    await createAuditLog({
+      req,
+      companyId: scope.companyId,
+      entityId: 0,
+      action: "BULK_DELETE",
+      oldValue: JSON.stringify({ count, isDeleted: false }),
+      newValue: JSON.stringify({ count, isDeleted: true }),
+      performedById: actor.id
+    }, tx);
 
     return { count };
   });
@@ -911,7 +910,7 @@ export const deleteAllLeadsService = async (actor) => {
 // UPDATE LEAD STAGE (Kanban board drag-drop)
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const updateLeadStageService = async (leadId, data, actor) => {
+export const updateLeadStageService = async (leadId, data, actor, req = null) => {
   const id      = Number(leadId);
   const stageId = data.stageId; // Already validated/coerced by Zod
   const reason  = data.reason?.trim() || null;
@@ -1018,7 +1017,8 @@ export const updateLeadStageService = async (leadId, data, actor) => {
       action:        "STAGE_CHANGE",
       oldValue:      JSON.stringify({ stageId: lead.stageId, stageName: lead.stage?.name }),
       newValue:      JSON.stringify({ stageId, stageName: targetStage.name, reason }),
-      performedById: actor.id
+      performedById: actor.id,
+      req,
     }, tx);
 
     return updated;
@@ -1111,7 +1111,8 @@ export const importLeadsFromExcelService = async (
   commit = false,
   fileName = "import.xlsx",
   overrideCompanyId = null,
-  overrideBranchId = null
+  overrideBranchId = null,
+  req = null
 ) => {
   if (!fileBuffer) throw new BadRequestError("No file provided");
 
@@ -1741,6 +1742,7 @@ export const importLeadsFromExcelService = async (
           });
 
           await createAuditLog({
+            req,
             companyId:     lead.companyId,
             entityId:      lead.id,
             action:        "CREATE",
@@ -1858,7 +1860,7 @@ export const getLeadNotesService = async (leadId, query = {}, actor) => {
   });
 };
 
-export const createLeadNoteService = async (leadId, data, actor) => {
+export const createLeadNoteService = async (leadId, data, actor, req = null) => {
   const id = Number(leadId);
   if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
 
@@ -1879,6 +1881,7 @@ export const createLeadNoteService = async (leadId, data, actor) => {
     }, tx);
 
     await createAuditLog({
+      req,
       companyId: lead.companyId,
       entityId: id,
       action: "NOTE_ADD",
@@ -1904,7 +1907,7 @@ export const createLeadNoteService = async (leadId, data, actor) => {
   });
 };
 
-export const updateLeadNoteService = async (leadId, noteId, data, actor) => {
+export const updateLeadNoteService = async (leadId, noteId, data, actor, req = null) => {
   const lid = Number(leadId);
   const nid = Number(noteId);
   if (!Number.isInteger(lid) || lid < 1) throw new BadRequestError("Invalid lead id");
@@ -1934,6 +1937,7 @@ export const updateLeadNoteService = async (leadId, noteId, data, actor) => {
     }, tx);
 
     await createAuditLog({
+      req,
       companyId: lead.companyId,
       entityId: lid,
       action: "NOTE_UPDATE",
@@ -1960,7 +1964,7 @@ export const updateLeadNoteService = async (leadId, noteId, data, actor) => {
   });
 };
 
-export const deleteLeadNoteService = async (leadId, noteId, actor) => {
+export const deleteLeadNoteService = async (leadId, noteId, actor, req = null) => {
   const lid = Number(leadId);
   const nid = Number(noteId);
   if (!Number.isInteger(lid) || lid < 1) throw new BadRequestError("Invalid lead id");
@@ -1986,6 +1990,7 @@ export const deleteLeadNoteService = async (leadId, noteId, actor) => {
     }, tx);
 
     await createAuditLog({
+      req,
       companyId: lead.companyId,
       entityId: lid,
       action: "NOTE_DELETE",
@@ -2243,7 +2248,7 @@ export const getImportErrorsCsvService = async (logId, actor) => {
 // RESTORE LEAD
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const restoreLeadService = async (leadId, actor) => {
+export const restoreLeadService = async (leadId, actor, req = null) => {
   const id = Number(leadId);
   if (!Number.isInteger(id) || id < 1) throw new BadRequestError("Invalid lead id");
 
@@ -2277,6 +2282,7 @@ export const restoreLeadService = async (leadId, actor) => {
     });
 
     await createAuditLog({
+      req,
       companyId: lead.companyId,
       entityId: id,
       action: "RESTORE",
@@ -2294,7 +2300,7 @@ export const restoreLeadService = async (leadId, actor) => {
   });
 };
 
-export const assignLeadsService = async (data, actor) => {
+export const assignLeadsService = async (data, actor, req = null) => {
   let { leadIds, teamId, assignedToId, notes, reason } = data;
 
   // Resolve team automatically if user is assigned directly
@@ -2486,27 +2492,25 @@ export const assignLeadsService = async (data, actor) => {
         });
 
         // Create Corresponding entry in LeadActivity (AuditLog)
-        await tx.auditLog.create({
-          data: {
-            companyId: lead.companyId ?? actor.companyId,
-            entityId: leadId,
-            entityType: "LEAD",
-            action: "UPDATE",
-            oldValue: JSON.stringify({
-              assignedToId: prevUserId,
-              teamId: prevTeamId,
-              assignedTo: lead.assignedTo,
-              team: lead.team
-            }),
-            newValue: JSON.stringify({
-              assignedToId: updatedLead.assignedToId,
-              teamId: updatedLead.teamId,
-              assignedTo: updatedLead.assignedTo,
-              team: updatedLead.team
-            }),
-            performedById: actor.id
-          }
-        });
+        await createAuditLog({
+          req,
+          companyId: lead.companyId ?? actor.companyId,
+          entityId: leadId,
+          action: "ASSIGNED",
+          oldValue: JSON.stringify({
+            assignedToId: prevUserId,
+            teamId: prevTeamId,
+            assignedTo: lead.assignedTo,
+            team: lead.team
+          }),
+          newValue: JSON.stringify({
+            assignedToId: updatedLead.assignedToId,
+            teamId: updatedLead.teamId,
+            assignedTo: updatedLead.assignedTo,
+            team: updatedLead.team
+          }),
+          performedById: actor.id
+        }, tx);
 
         const activityType = prevUserId ? "REASSIGNED" : "ASSIGNED";
         const assigneeName = updatedLead.assignedTo?.name || (targetUser?.name) || "User";

@@ -1,11 +1,10 @@
-// src/modules/team/team.repository.js
-
 import prisma from "../../config/db.js";
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
 
 /**
  * Creates a team, assigns the BDE as the team owner (TeamMember), and logs the audit entry in a single transaction.
  */
-export const createTeamTransaction = async (data, actorId) => {
+export const createTeamTransaction = async (data, actorId, req = null) => {
   const { companyId, branchId, name, code, bdeId, status, createdById, iseIds = [] } = data;
 
   return prisma.$transaction(async (tx) => {
@@ -46,21 +45,23 @@ export const createTeamTransaction = async (data, actorId) => {
     }
 
     // 3. Create Audit Log
-    await tx.auditLog.create({
-      data: {
-        companyId,
-        entityType: "TEAM",
-        entityId: team.id,
-        action: "CREATE",
-        newValue: {
-          name: team.name,
-          code: team.code,
-          branchId: team.branchId,
-          bdeId: team.bdeId,
-          status: team.status
-        },
-        performedById: actorId
-      }
+    await recordAuditLog({
+      req,
+      tx,
+      companyId,
+      moduleName: "TEAM",
+      actionType: "CREATE",
+      entityType: "TEAM",
+      entityId: team.id,
+      action: "TEAM_CREATED",
+      newValue: {
+        name: team.name,
+        code: team.code,
+        branchId: team.branchId,
+        bdeId: team.bdeId,
+        status: team.status
+      },
+      performedById: actorId
     });
 
     return team;
@@ -71,7 +72,7 @@ export const createTeamTransaction = async (data, actorId) => {
  * Reassigns team BDE owner atomically: updates team's bdeId, sets removedAt on previous BDE active team member entry,
  * adds the new BDE as active team member, and writes the audit log.
  */
-export const updateTeamOwnerTransaction = async (teamId, companyId, newBdeId, oldBdeId, actorId) => {
+export const updateTeamOwnerTransaction = async (teamId, companyId, newBdeId, oldBdeId, actorId, req = null) => {
   return prisma.$transaction(async (tx) => {
     // 1. Update the team owner (BDE ID)
     const updatedTeam = await tx.team.update({
@@ -128,16 +129,18 @@ export const updateTeamOwnerTransaction = async (teamId, companyId, newBdeId, ol
     }
 
     // 4. Log the audit entry
-    await tx.auditLog.create({
-      data: {
-        companyId,
-        entityType: "TEAM",
-        entityId: teamId,
-        action: "UPDATE",
-        oldValue: { bdeId: oldBdeId },
-        newValue: { bdeId: newBdeId },
-        performedById: actorId
-      }
+    await recordAuditLog({
+      req,
+      tx,
+      companyId,
+      moduleName: "TEAM",
+      actionType: "UPDATE",
+      entityType: "TEAM",
+      entityId: teamId,
+      action: "TEAM_UPDATED",
+      oldValue: { bdeId: oldBdeId },
+      newValue: { bdeId: newBdeId },
+      performedById: actorId
     });
 
     return updatedTeam;
@@ -216,7 +219,7 @@ export const checkTeamDuplicate = async (criteria) => {
 /**
  * Performs updates (e.g. name, status) on team and records audit log.
  */
-export const updateTeamAndLog = async (teamId, companyId, updates, oldValue, actorId) => {
+export const updateTeamAndLog = async (teamId, companyId, updates, oldValue, actorId, req = null) => {
   return prisma.$transaction(async (tx) => {
     const team = await tx.team.update({
       where: { id: teamId },
@@ -226,16 +229,18 @@ export const updateTeamAndLog = async (teamId, companyId, updates, oldValue, act
       }
     });
 
-    await tx.auditLog.create({
-      data: {
-        companyId,
-        entityType: "TEAM",
-        entityId: teamId,
-        action: "UPDATE",
-        oldValue,
-        newValue: updates,
-        performedById: actorId
-      }
+    await recordAuditLog({
+      req,
+      tx,
+      companyId,
+      moduleName: "TEAM",
+      actionType: "UPDATE",
+      entityType: "TEAM",
+      entityId: teamId,
+      action: "TEAM_UPDATED",
+      oldValue,
+      newValue: updates,
+      performedById: actorId
     });
 
     return team;
@@ -245,7 +250,7 @@ export const updateTeamAndLog = async (teamId, companyId, updates, oldValue, act
 /**
  * Soft deletes a team by setting isDeleted to true.
  */
-export const softDeleteTeamAndLog = async (teamId, companyId, actorId) => {
+export const softDeleteTeamAndLog = async (teamId, companyId, actorId, req = null) => {
   return prisma.$transaction(async (tx) => {
     const existingTeam = await tx.team.findUnique({
       where: { id: teamId }
@@ -270,21 +275,23 @@ export const softDeleteTeamAndLog = async (teamId, companyId, actorId) => {
       }
     });
 
-    await tx.auditLog.create({
-      data: {
-        companyId,
-        entityType: "TEAM",
-        entityId: teamId,
-        action: "DELETE",
-        newValue: {
-          isDeleted: true,
-          originalName,
-          originalCode,
-          archivedName,
-          archivedCode
-        },
-        performedById: actorId
-      }
+    await recordAuditLog({
+      req,
+      tx,
+      companyId,
+      moduleName: "TEAM",
+      actionType: "DELETE",
+      entityType: "TEAM",
+      entityId: teamId,
+      action: "TEAM_DELETED",
+      newValue: {
+        isDeleted: true,
+        originalName,
+        originalCode,
+        archivedName,
+        archivedCode
+      },
+      performedById: actorId
     });
 
     return team;
@@ -336,7 +343,7 @@ export const countTeams = async (where) => {
 /**
  * Updates team ISE members atomically.
  */
-export const updateTeamMembersTransaction = async (teamId, companyId, newIseIds, actorId) => {
+export const updateTeamMembersTransaction = async (teamId, companyId, newIseIds, actorId, req = null) => {
   return prisma.$transaction(async (tx) => {
     // 1. Get currently active ISE members
     const activeMembers = await tx.teamMember.findMany({
@@ -399,15 +406,17 @@ export const updateTeamMembersTransaction = async (teamId, companyId, newIseIds,
 
     // 6. Log audit entry for membership update
     if (idsToAdd.length > 0 || idsToRemove.length > 0) {
-      await tx.auditLog.create({
-        data: {
-          companyId,
-          entityType: "TEAM",
-          entityId: teamId,
-          action: "UPDATE",
-          newValue: { addedIseIds: idsToAdd, removedIseIds: idsToRemove },
-          performedById: actorId
-        }
+      await recordAuditLog({
+        req,
+        tx,
+        companyId,
+        moduleName: "TEAM",
+        actionType: "UPDATE",
+        entityType: "TEAM",
+        entityId: teamId,
+        action: "MEMBER_UPDATED",
+        newValue: { addedIseIds: idsToAdd, removedIseIds: idsToRemove },
+        performedById: actorId
       });
     }
   });
@@ -417,7 +426,7 @@ export const updateTeamMembersTransaction = async (teamId, companyId, newIseIds,
  * Removes a member (ISE) from a team atomically: marks the membership record ended (sets removedAt to current time)
  * and creates an audit log entry.
  */
-export const removeTeamMemberTransaction = async (teamId, companyId, userId, actorId) => {
+export const removeTeamMemberTransaction = async (teamId, companyId, userId, actorId, req = null) => {
   return prisma.$transaction(async (tx) => {
     // 1. Fetch active membership record
     const membership = await tx.teamMember.findFirst({
@@ -442,15 +451,17 @@ export const removeTeamMemberTransaction = async (teamId, companyId, userId, act
     });
 
     // 3. Log audit entry
-    await tx.auditLog.create({
-      data: {
-        companyId,
-        entityType: "TEAM",
-        entityId: teamId,
-        action: "MEMBER_REMOVE",
-        newValue: { userId },
-        performedById: actorId
-      }
+    await recordAuditLog({
+      req,
+      tx,
+      companyId,
+      moduleName: "TEAM",
+      actionType: "UPDATE",
+      entityType: "TEAM",
+      entityId: teamId,
+      action: "MEMBER_REMOVE",
+      newValue: { userId },
+      performedById: actorId
     });
 
     return updatedMembership;

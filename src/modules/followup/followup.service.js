@@ -2,6 +2,7 @@
 
 import prisma from "../../config/db.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../../utils/AppError.js";
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
 import {
   findFollowupById, findFollowups, countFollowups,
   createFollowupDb, updateFollowupDb, deleteFollowupDb,
@@ -72,7 +73,7 @@ const assertFollowupScope = (actor, followup, bdeTeamMemberIds = null) => {
  * Log a LeadActivity. Non-blocking — errors are swallowed.
  * metadata is a PLAIN JS OBJECT. Prisma Json? handles serialization natively.
  */
-const logFollowupActivity = async (leadId, companyId, activityType, description, metadata, performedById) => {
+const logFollowupActivity = async (leadId, companyId, activityType, description, metadata, performedById, req = null) => {
   try {
     await prisma.leadActivity.create({
       data: {
@@ -88,20 +89,17 @@ const logFollowupActivity = async (leadId, companyId, activityType, description,
     console.error("[FollowupService] Failed to log LeadActivity:", err.message);
   }
 
-  try {
-    await prisma.auditLog.create({
-      data: {
-        companyId: companyId ?? null,
-        entityType: "LEAD",
-        entityId: leadId,
-        action: activityType,
-        newValue: typeof metadata === 'string' ? metadata : JSON.stringify(metadata ?? {}),
-        performedById,
-      },
-    });
-  } catch (err) {
-    console.error("[FollowupService] Failed to log AuditLog:", err.message);
-  }
+  await recordAuditLog({
+    req,
+    companyId: companyId ?? null,
+    moduleName: "FOLLOWUP",
+    actionType: "CREATE",
+    entityType: "LEAD",
+    entityId: leadId,
+    action: activityType,
+    newValue: typeof metadata === 'string' ? metadata : JSON.stringify(metadata ?? {}),
+    performedById,
+  });
 };
 
 /**

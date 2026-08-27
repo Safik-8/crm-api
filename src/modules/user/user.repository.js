@@ -284,22 +284,37 @@ export const updateUserPassword = async (userId, passwordHash, mustChangePasswor
   })
 }
 
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
+
 /**
- * Writes a record to the AuditLog table.
+ * Writes a record to the AuditLog table using central recordAuditLog service.
  */
-export const createAuditLog = async (data, tx = prisma) => {
-  return tx.auditLog.create({
-    data: {
-      companyId: data.companyId,
-      entityType: data.entityType,
-      entityId: data.entityId,
-      action: data.action,
-      oldValue: data.oldValue || null,
-      newValue: data.newValue || null,
-      performedById: data.performedById
-    }
-  })
-}
+export const createAuditLog = async (data, tx = prisma, req = null) => {
+  const reqObj = data?.req || req;
+  const actionCode = data?.action || "RECORD_UPDATED";
+  let actionType = data?.actionType;
+
+  if (!actionType) {
+    const actUpper = String(actionCode).toUpperCase();
+    if (actUpper.includes("CREATE")) actionType = "CREATE";
+    else if (actUpper.includes("DELETE")) actionType = "DELETE";
+    else actionType = "UPDATE";
+  }
+
+  return recordAuditLog({
+    req: reqObj,
+    tx,
+    companyId: data?.companyId ?? null,
+    moduleName: "USER",
+    entityType: data?.entityType || "USER",
+    entityId: data?.entityId,
+    actionType,
+    action: actionCode,
+    oldValue: data?.oldValue ?? null,
+    newValue: data?.newValue ?? null,
+    performedById: data?.performedById ?? null,
+  });
+};
 
 /**
  * Fetches roles an actor is allowed to assign to a new user.

@@ -1,6 +1,7 @@
 // crm-api/src/modules/revenueReport/revenueReport.repository.js
 
 import prisma from "../../config/db.js";
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
 
 /**
  * Builds Prisma 'where' clause for RevenueLog table queries based on filters
@@ -637,7 +638,7 @@ export async function findRevenueTrendData(filters) {
 /**
  * Repository: Log Export Activity & Create Audit Record inside a Transaction
  */
-export async function createExportLogWithAudit(exportData, actor) {
+export async function createExportLogWithAudit(exportData, actor, req = null) {
   return await prisma.$transaction(async (tx) => {
     // 1. Insert into ExportLog
     const exportLog = await tx.exportLog.create({
@@ -653,20 +654,22 @@ export async function createExportLogWithAudit(exportData, actor) {
     });
 
     // 2. Insert into AuditLog using repo pattern
-    const auditLog = await tx.auditLog.create({
-      data: {
-        companyId: actor.companyId || null,
-        entityType: "REPORT_EXPORT",
-        entityId: exportLog.id,
-        action: `EXPORT_REVENUE_${exportData.exportType}`,
-        newValue: {
-          reportName: exportData.reportName,
-          exportType: exportData.exportType,
-          fileName: exportData.fileName,
-          filtersUsed: exportData.filtersUsed || {}
-        },
-        performedById: actor.id
-      }
+    const auditLog = await recordAuditLog({
+      req,
+      tx,
+      companyId: actor.companyId || null,
+      moduleName: "REPORT",
+      actionType: "EXPORT",
+      entityType: "REPORT_EXPORT",
+      entityId: exportLog.id,
+      action: `EXPORT_REVENUE_${exportData.exportType}`,
+      newValue: {
+        reportName: exportData.reportName,
+        exportType: exportData.exportType,
+        fileName: exportData.fileName,
+        filtersUsed: exportData.filtersUsed || {}
+      },
+      performedById: actor.id
     });
 
     return { exportLog, auditLog };

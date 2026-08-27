@@ -1,6 +1,7 @@
 // BackEnd/src/modules/kpi/kpi.service.js
 
 import prisma from "../../config/db.js";
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
 
 /**
  * Calculate live achievement value for a given KPI target based on existing CRM data.
@@ -833,7 +834,7 @@ export const getKpiDetail = async (user, targetId) => {
 /**
  * Update an existing KPI Target.
  */
-export const updateKpiTarget = async (user, targetId, data) => {
+export const updateKpiTarget = async (user, targetId, data, req = null) => {
   const id = Number(targetId);
 
   const updated = await prisma.kpiTarget.update({
@@ -848,20 +849,17 @@ export const updateKpiTarget = async (user, targetId, data) => {
   });
 
   // Log Audit Entry
-  try {
-    await prisma.auditLog.create({
-      data: {
-        companyId: user.companyId || 1,
-        userId: user.id,
-        action: "UPDATE",
-        entityType: "KPI_TARGET",
-        entityId: id,
-        newData: { targetValue: data.targetValue, duration: data.duration },
-      },
-    });
-  } catch (e) {
-    // Ignore audit log failure to avoid breaking core mutation
-  }
+  await recordAuditLog({
+    req,
+    companyId: user.companyId || 1,
+    moduleName: "KPI",
+    actionType: "UPDATE",
+    entityType: "KPI_TARGET",
+    entityId: id,
+    action: "KPI_TARGET_UPDATED",
+    newValue: { targetValue: data.targetValue, duration: data.duration },
+    performedById: user.id
+  });
 
   return updated;
 };
@@ -869,7 +867,7 @@ export const updateKpiTarget = async (user, targetId, data) => {
 /**
  * Soft delete a KPI Target.
  */
-export const deleteKpiTarget = async (user, targetId) => {
+export const deleteKpiTarget = async (user, targetId, req = null) => {
   const id = Number(targetId);
 
   const deleted = await prisma.kpiTarget.update({
@@ -882,19 +880,16 @@ export const deleteKpiTarget = async (user, targetId) => {
   });
 
   // Log Audit Entry
-  try {
-    await prisma.auditLog.create({
-      data: {
-        companyId: user.companyId || 1,
-        userId: user.id,
-        action: "DELETE",
-        entityType: "KPI_TARGET",
-        entityId: id,
-      },
-    });
-  } catch (e) {
-    // Ignore audit log failure
-  }
+  await recordAuditLog({
+    req,
+    companyId: user.companyId || 1,
+    moduleName: "KPI",
+    actionType: "DELETE",
+    entityType: "KPI_TARGET",
+    entityId: id,
+    action: "KPI_TARGET_DELETED",
+    performedById: user.id
+  });
 
   return deleted;
 };

@@ -42,7 +42,7 @@ export const getKpiDetail = async (req, res, next) => {
 
 export const updateKpiTarget = async (req, res, next) => {
   try {
-    const updated = await kpiService.updateKpiTarget(req.user, req.params.id, req.body);
+    const updated = await kpiService.updateKpiTarget(req.user, req.params.id, req.body, req);
     return res.status(200).json({
       success: true,
       message: "KPI target updated successfully",
@@ -55,7 +55,7 @@ export const updateKpiTarget = async (req, res, next) => {
 
 export const deleteKpiTarget = async (req, res, next) => {
   try {
-    const deleted = await kpiService.deleteKpiTarget(req.user, req.params.id);
+    const deleted = await kpiService.deleteKpiTarget(req.user, req.params.id, req);
     return res.status(200).json({
       success: true,
       message: "KPI target deleted successfully",

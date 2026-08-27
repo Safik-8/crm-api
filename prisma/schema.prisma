@@ -9,7 +9,7 @@ datasource db {
 }
 
 // ============================================================================
-// COMPANY & BRANCH
+// COMPANY & BRANCH MODULE
 // ============================================================================
 
 model Company {
@@ -71,6 +71,14 @@ model Company {
   exportLogs           ExportLog[]
   analyticsSnapshots   AnalyticsSnapshot[]
 
+  // SPRINT 7 RELATIONS
+  settings            CompanySettings?
+  globalSettings      GlobalSystemSetting[]
+  notificationConfigs NotificationEventConfig[]
+  backupLogs          BackupLog[]
+  restoreLogs         RestoreLog[]
+  loginAttempts       LoginAttemptLog[]
+
   @@map("companies")
 }
 
@@ -121,6 +129,9 @@ model Branch {
   kpiTargets         KpiTarget[]
   exportLogs         ExportLog[]
 
+  // SPRINT 7 RELATIONS
+  auditLogs          AuditLog[]
+
   @@unique([companyId, code])
   @@index([companyId])
   @@index([code])
@@ -128,7 +139,7 @@ model Branch {
 }
 
 // ============================================================================
-// USERS, ROLES & PERMISSIONS
+// USERS, ROLES & PERMISSIONS (RBAC & SECURITY)
 // ============================================================================
 
 model User {
@@ -190,6 +201,7 @@ model User {
   followupsCompleted        Followup[]         @relation("FollowupsCompleted")
   followupsUpdated          Followup[]         @relation("FollowupsUpdated")
   notificationsReceived     Notification[]     @relation("NotificationsReceived")
+  notificationsSent         Notification[]     @relation("NotificationsSent")
   leadActivitiesPerformed   LeadActivity[]     @relation("LeadActivitiesPerformed")
   communicationLogsCreated  CommunicationLog[] @relation("CommunicationLogsCreated")
   communicationLogsDeleted  CommunicationLog[] @relation("CommunicationLogsDeleted")
@@ -229,6 +241,12 @@ model User {
   kpiTargetsCreated    KpiTarget[]          @relation("KpiTargetCreatedBy")
   kpiTargetsUpdated    KpiTarget[]          @relation("KpiTargetUpdatedBy")
   exportLogs           ExportLog[]          @relation("UserExportLogs")
+
+  // SPRINT 7 RELATIONS
+  passwordHistories PasswordHistory[]
+  backupsTriggered  BackupLog[]          @relation("BackupTriggeredBy")
+  restoresTriggered RestoreLog[]         @relation("RestoreTriggeredBy")
+  loginAttempts     LoginAttemptLog[]
 
   @@index([companyId])
   @@index([branchId])
@@ -287,6 +305,12 @@ model Permission {
   canEdit    Boolean  @default(false) @map("can_edit")
   canDelete  Boolean  @default(false) @map("can_delete")
   canArchive Boolean  @default(false) @map("can_archive")
+
+  // SPRINT 7 ENHANCEMENTS (Task 4.2 & 4.3 Permission Matrix Finalization)
+  canExport  Boolean  @default(false) @map("can_export")
+  canAssign  Boolean  @default(false) @map("can_assign")
+  canApprove Boolean  @default(false) @map("can_approve")
+
   createdAt  DateTime @default(now()) @map("created_at")
 
   role Role @relation(fields: [roleId], references: [id])
@@ -304,12 +328,18 @@ model RefreshToken {
   deviceName String?
   ipAddress  String?   @map("ip_address")
   lastActive DateTime? @default(now()) @map("last_active")
+
+  // SPRINT 7 ENHANCEMENTS (Task 5.1 JWT Security Review & Revocation)
+  isRevoked  Boolean   @default(false) @map("is_revoked")
+  revokedAt  DateTime? @map("revoked_at")
+
   expiresAt  DateTime  @map("expires_at")
   createdAt  DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
+  @@index([token])
   @@map("refresh_tokens")
 }
 
@@ -328,6 +358,39 @@ model PasswordReset {
   @@index([userId])
   @@index([companyId])
   @@map("password_resets")
+}
+
+model PasswordHistory {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @map("user_id")
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("password_histories")
+}
+
+model LoginAttemptLog {
+  id            Int      @id @default(autoincrement())
+  companyId     Int?     @map("company_id")
+  userId        Int?     @map("user_id")
+  email         String
+  ipAddress     String   @map("ip_address")
+  browser       String?
+  device        String?
+  isSuccess     Boolean  @default(false) @map("is_success")
+  failureReason String?  @map("failure_reason")
+  attemptedAt   DateTime @default(now()) @map("attempted_at")
+
+  company Company? @relation(fields: [companyId], references: [id])
+  user    User?    @relation(fields: [userId], references: [id])
+
+  @@index([email, attemptedAt])
+  @@index([ipAddress, attemptedAt])
+  @@map("login_attempt_logs")
 }
 
 // ============================================================================
@@ -413,7 +476,7 @@ model PipelineStage {
 }
 
 // ============================================================================
-// LEAD
+// LEAD MODULE
 // ============================================================================
 
 model Lead {
@@ -641,7 +704,7 @@ model DailyBranchReport {
 }
 
 // ============================================================================
-// USER PROFILES, SETTINGS, TEAMS, COURSES
+// USER PROFILES, TEAMS, COURSES
 // ============================================================================
 
 model UserProfile {
@@ -780,23 +843,48 @@ model Course {
   @@map("courses")
 }
 
+// ============================================================================
+// AUDIT LOGS & ACTIVITY MONITORING (TASK 2)
+// ============================================================================
+
 model AuditLog {
   id            Int      @id @default(autoincrement())
   companyId     Int?     @map("company_id")
-  entityType    String   @map("entity_type")
-  entityId      Int      @map("entity_id")
+  branchId      Int?     @map("branch_id")
+
+  // SPRINT 7 ENHANCEMENTS (Task 2.2 Enterprise Audit Log Fields)
+  moduleName    String   @default("SYSTEM") @map("module_name")
+  actionType    String   @default("UPDATE") @map("action_type")
+  recordId      Int?     @map("record_id")
+
+  // Legacy fields preserved for backward compatibility
+  entityType    String   @default("RECORD") @map("entity_type")
+  entityId      Int      @default(0) @map("entity_id")
   action        String
+
   oldValue      Json?    @map("old_value")
   newValue      Json?    @map("new_value")
+
+  ipAddress     String?  @map("ip_address")
+  browserInfo   String?  @map("browser_info")
+  deviceInfo    String?  @map("device_info")
+
   performedById Int?     @map("performed_by_id")
   createdAt     DateTime @default(now()) @map("created_at")
 
   company     Company? @relation(fields: [companyId], references: [id])
+  branch      Branch?  @relation(fields: [branchId], references: [id])
   performedBy User?    @relation("AuditPerformedBy", fields: [performedById], references: [id])
 
   @@index([companyId])
+  @@index([branchId])
+  @@index([moduleName])
+  @@index([actionType])
   @@index([entityType, entityId])
   @@index([performedById])
+  @@index([createdAt])
+  @@index([companyId, createdAt])
+  @@index([moduleName, createdAt])
   @@map("audit_logs")
 }
 
@@ -904,21 +992,39 @@ model Followup {
   @@map("followups")
 }
 
+// ============================================================================
+// NOTIFICATION MANAGEMENT MODULE (TASK 1)
+// ============================================================================
+
 model Notification {
   id               Int       @id @default(autoincrement())
-  userId           Int       @map("user_id")
-  leadId           Int?      @map("lead_id")
+  title            String    @default("Notification")
+  message          String    @db.Text
+  notificationType String    @map("notification_type")
+  moduleName       String    @default("SYSTEM") @map("module_name")
+  relatedRecordId  Int?      @map("related_record_id")
+
+  senderId         Int?      @map("sender_id")
+  userId           Int       @map("user_id") // receiver_id
   companyId        Int?      @map("company_id")
   branchId         Int?      @map("branch_id")
+  leadId           Int?      @map("lead_id")
   followupId       Int?      @map("followup_id")
   opportunityId    Int?      @map("opportunity_id")
-  notificationType String    @map("notification_type")
-  message          String    @db.Text
+
+  priority         String    @default("MEDIUM")
+  isRead           Boolean   @default(false) @map("is_read")
+  deliveryChannel  String    @default("IN_APP") @map("delivery_channel")
+  emailSent        Boolean   @default(false) @map("email_sent")
+  pushSent         Boolean   @default(false) @map("push_sent")
+  actionUrl        String?   @map("action_url")
+
   status           String    @default("UNREAD")
   readAt           DateTime? @map("read_at")
   expiresAt        DateTime? @map("expires_at")
   createdAt        DateTime  @default(now()) @map("created_at")
 
+  sender      User?        @relation("NotificationsSent", fields: [senderId], references: [id])
   user        User         @relation("NotificationsReceived", fields: [userId], references: [id])
   lead        Lead?        @relation(fields: [leadId], references: [id])
   company     Company?     @relation(fields: [companyId], references: [id])
@@ -927,14 +1033,204 @@ model Notification {
   opportunity Opportunity? @relation(fields: [opportunityId], references: [id])
 
   @@index([userId])
+  @@index([senderId])
   @@index([leadId])
-  @@index([status])
-  @@index([createdAt])
   @@index([companyId])
   @@index([branchId])
   @@index([followupId])
   @@index([opportunityId])
+  @@index([status])
+  @@index([isRead])
+  @@index([priority])
+  @@index([moduleName])
+  @@index([createdAt])
+  @@index([userId, isRead, createdAt])
   @@map("notifications")
+}
+
+model NotificationEventConfig {
+  id             Int      @id @default(autoincrement())
+  companyId      Int?     @map("company_id")
+  eventType      String   @map("event_type")
+  moduleName     String   @map("module_name")
+  isEnabled      Boolean  @default(true) @map("is_enabled")
+  channels       Json     @default("{\"inApp\":true,\"email\":true,\"push\":false}")
+  rolesToNotify  Json?    @map("roles_to_notify")
+  templateTitle  String?  @map("template_title")
+  templateBody   String?  @db.Text @map("template_body")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, eventType])
+  @@index([companyId])
+  @@index([moduleName])
+  @@map("notification_event_configs")
+}
+
+// ============================================================================
+// SYSTEM SETTINGS MODULE (TASK 3)
+// ============================================================================
+
+model CompanySettings {
+  id        Int @id @default(autoincrement())
+  companyId Int @unique @map("company_id")
+
+  // 1. General Settings
+  companyName    String? @map("company_name")
+  companyLogo    String? @map("company_logo")
+  website        String?
+  timeZone       String  @default("UTC") @map("time_zone")
+  currency       String  @default("USD")
+  currencySymbol String  @default("$") @map("currency_symbol")
+  dateFormat     String  @default("YYYY-MM-DD") @map("date_format")
+  timeFormat     String  @default("24H") @map("time_format")
+  language       String  @default("en")
+
+  // 2. CRM Settings
+  defaultLeadStatusId         Int?    @map("default_lead_status_id")
+  autoAssignmentEnabled       Boolean @default(false) @map("auto_assignment_enabled")
+  defaultAssignmentAlgorithm  String  @default("ROUND_ROBIN") @map("default_assignment_algorithm")
+  opportunityDefaults         Json?   @map("opportunity_defaults")
+  pipelineDefaults            Json?   @map("pipeline_defaults")
+  defaultFollowupTime         String  @default("09:00") @map("default_followup_time")
+  leadNumberFormat            String  @default("LD-{YYYY}-{0000}") @map("lead_number_format")
+  opportunityNumberFormat     String  @default("OPP-{YYYY}-{0000}") @map("opportunity_number_format")
+  dealNumberFormat            String  @default("DEAL-{YYYY}-{0000}") @map("deal_number_format")
+
+  // 3. Notification Settings
+  reminderTimingMinutes    Int     @default(15) @map("reminder_timing_minutes")
+  enableEmailNotifications Boolean @default(true) @map("enable_email_notifications")
+  enableInAppNotifications Boolean @default(true) @map("enable_in_app_notifications")
+  enablePushNotifications  Boolean @default(false) @map("enable_push_notifications")
+  dailySummaryEnabled      Boolean @default(true) @map("daily_summary_enabled")
+  dailySummaryTime         String  @default("08:00") @map("daily_summary_time")
+
+  // 4. Security Settings
+  sessionTimeoutMinutes       Int     @default(60) @map("session_timeout_minutes")
+  maxLoginAttempts            Int     @default(5) @map("max_login_attempts")
+  lockoutDurationMinutes      Int     @default(15) @map("lockout_duration_minutes")
+  passwordExpiryDays          Int     @default(90) @map("password_expiry_days")
+  minPasswordLength           Int     @default(8) @map("min_password_length")
+  requireUppercase            Boolean @default(true) @map("require_uppercase")
+  requireLowercase            Boolean @default(true) @map("require_lowercase")
+  requireNumber               Boolean @default(true) @map("require_number")
+  requireSpecialChar          Boolean @default(true) @map("require_special_char")
+  preventPasswordReuseCount   Int     @default(5) @map("prevent_password_reuse_count")
+
+  // 5. Email Settings (SMTP)
+  smtpHost              String? @map("smtp_host")
+  smtpPort              Int?    @map("smtp_port")
+  smtpUser              String? @map("smtp_user")
+  smtpPasswordEncrypted String? @map("smtp_password_encrypted")
+  smtpSenderName        String? @map("smtp_sender_name")
+  smtpSenderEmail       String? @map("smtp_sender_email")
+  smtpEncryption        String  @default("TLS") @map("smtp_encryption")
+
+  // 6. Branding Settings
+  primaryColor   String  @default("#4f46e5") @map("primary_color")
+  secondaryColor String  @default("#06b6d4") @map("secondary_color")
+  accentColor    String  @default("#f59e0b") @map("accent_color")
+  themeMode      String  @default("DARK") @map("theme_mode")
+  customDomain   String? @map("custom_domain")
+  faviconUrl     String? @map("favicon_url")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@map("company_settings")
+}
+
+model GlobalSystemSetting {
+  id          Int      @id @default(autoincrement())
+  companyId   Int?     @map("company_id")
+  settingKey  String   @unique @map("setting_key")
+  settingValue Json    @map("setting_value")
+  category    String
+  description String?  @db.Text
+  isEncrypted Boolean  @default(false) @map("is_encrypted")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([category])
+  @@map("global_system_settings")
+}
+
+// ============================================================================
+// BACKUP & DISASTER RECOVERY MODULE (TASK 6)
+// ============================================================================
+
+model BackupLog {
+  id              Int       @id @default(autoincrement())
+  companyId       Int?      @map("company_id")
+  backupName      String    @map("backup_name")
+  backupType      String    @map("backup_type") // DAILY_INCREMENTAL, WEEKLY_FULL, MONTHLY_ARCHIVE
+  scope           String    @map("scope") // DATABASE, FILES, DOCUMENTS, CONFIGURATION, LOGS, FULL
+  storagePath     String    @map("storage_path")
+  fileSizeBytes   BigInt?   @map("file_size_bytes")
+  checksum        String?
+  isEncrypted     Boolean   @default(true) @map("is_encrypted")
+  status          String    @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED, FAILED, CORRUPTED
+  durationSeconds Int?      @map("duration_seconds")
+  triggeredByType String    @default("SYSTEM") @map("triggered_by_type") // SYSTEM_CRON, MANUAL_ADMIN
+  triggeredById   Int?      @map("triggered_by_id")
+  errorMessage    String?   @db.Text @map("error_message")
+  expiresAt       DateTime? @map("expires_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  company     Company?     @relation(fields: [companyId], references: [id])
+  triggeredBy User?        @relation("BackupTriggeredBy", fields: [triggeredById], references: [id])
+  restoreLogs RestoreLog[]
+
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([backupType])
+  @@map("backup_logs")
+}
+
+model RestoreLog {
+  id                 Int      @id @default(autoincrement())
+  backupLogId        Int      @map("backup_log_id")
+  companyId          Int?     @map("company_id")
+  restoreType        String   @map("restore_type") // FULL_DATABASE, SELECTED_TABLE, FILES, CONFIGURATION
+  status             String   @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED, FAILED
+  durationSeconds    Int?     @map("duration_seconds")
+  restoredById       Int      @map("restored_by_id")
+  verificationStatus String   @default("PENDING") @map("verification_status") // PASSED, FAILED
+  notes              String?  @db.Text
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  backupLog BackupLog @relation(fields: [backupLogId], references: [id])
+  company   Company?  @relation(fields: [companyId], references: [id])
+  restoredBy User     @relation("RestoreTriggeredBy", fields: [restoredById]  , references: [id])
+
+  @@index([backupLogId])
+  @@index([companyId])
+  @@index([createdAt])
+  @@map("restore_logs")
+}
+
+// ============================================================================
+// SYSTEM HEALTH & MONITORING (TASK 8)
+// ============================================================================
+
+model SystemHealthMetric {
+  id          Int      @id @default(autoincrement())
+  metricName  String   @map("metric_name")
+  metricValue Decimal  @db.Decimal(10, 2) @map("metric_value")
+  unit        String
+  serverNode  String?  @map("server_node")
+  recordedAt  DateTime @default(now()) @map("recorded_at")
+
+  @@index([metricName, recordedAt])
+  @@map("system_health_metrics")
 }
 
 // ============================================================================
@@ -1469,7 +1765,7 @@ model Report {
   reportType     String   @map("report_type")
   category       String   @map("category")
   description    String?  @db.Text
-  allowedRoles   Json?    @map("allowed_roles") // Task 1.6: E.g. ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER"]
+  allowedRoles   Json?    @map("allowed_roles")
   isSystem       Boolean  @default(false) @map("is_system")
   status         String   @default("ACTIVE")
   createdById    Int?     @map("created_by_id")
@@ -1500,7 +1796,7 @@ model UserFavoriteReport {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, reportId])
+  @@index([userId, reportId])
   @@index([userId])
   @@map("user_favorite_reports")
 }
@@ -1526,7 +1822,7 @@ model ReportFilter {
   reportId     Int?     @map("report_id")
   userId       Int      @map("user_id")
   filterName   String   @map("filter_name")
-  reportConfig Json     @map("report_config") // Stores filters, date ranges, selected columns, sorting, grouping
+  reportConfig Json     @map("report_config")
   isDefault    Boolean  @default(false) @map("is_default")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -1566,7 +1862,7 @@ model UserDashboardConfig {
   id           Int      @id @default(autoincrement())
   userId       Int      @unique @map("user_id")
   companyId    Int      @map("company_id")
-  layoutConfig Json     @map("layout_config") // Grid coordinates, visible widget IDs, custom refresh preferences
+  layoutConfig Json     @map("layout_config")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -1665,7 +1961,7 @@ model ExportLog {
 model AnalyticsSnapshot {
   id           Int      @id @default(autoincrement())
   companyId    Int      @map("company_id")
-  branchId     Int      @default(0) @map("branch_id") // 0 = Company-level snapshot (prevents PostgreSQL NULL != NULL unique index bypass)
+  branchId     Int      @default(0) @map("branch_id")
   snapshotType String   @map("snapshot_type")
   snapshotDate DateTime @map("snapshot_date")
   snapshotData Json     @map("snapshot_data")
@@ -1678,5 +1974,4 @@ model AnalyticsSnapshot {
   @@index([companyId])
   @@index([companyId, snapshotType])
   @@index([snapshotDate])
-  @@map("analytics_snapshots")
 }

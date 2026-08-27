@@ -8,13 +8,13 @@ import prisma from "../../config/db.js";
 
 /** Full detail include — used for single lead fetch, create, update, delete */
 export const leadDetailInclude = {
-  company:    { select: { id: true, name: true } },
-  branch:     { select: { id: true, name: true } },
-  pipeline:   { select: { id: true, name: true } },
-  stage:      { select: { id: true, name: true, stageType: true, colorCode: true, code: true } },
-  source:     { select: { id: true, name: true } },
-  course:     { select: { id: true, name: true } },
-  status:     { select: { id: true, name: true, code: true, displayColor: true } },
+  company: { select: { id: true, name: true } },
+  branch: { select: { id: true, name: true } },
+  pipeline: { select: { id: true, name: true } },
+  stage: { select: { id: true, name: true, stageType: true, colorCode: true, code: true } },
+  source: { select: { id: true, name: true } },
+  course: { select: { id: true, name: true } },
+  status: { select: { id: true, name: true, code: true, displayColor: true } },
   assignedTo: {
     select: {
       id: true,
@@ -23,10 +23,10 @@ export const leadDetailInclude = {
       reportingManager: { select: { id: true, name: true } }
     }
   },
-  team:       { select: { id: true, name: true } },
-  createdBy:  { select: { id: true, name: true } },
-  updatedBy:  { select: { id: true, name: true } },
-  deletedBy:  { select: { id: true, name: true } },
+  team: { select: { id: true, name: true } },
+  createdBy: { select: { id: true, name: true } },
+  updatedBy: { select: { id: true, name: true } },
+  deletedBy: { select: { id: true, name: true } },
   qualification: {
     select: {
       id: true,
@@ -48,8 +48,8 @@ export const leadDetailInclude = {
 
 /** Kanban list include — kept for backward compat with Kanban board */
 export const leadStageLogInclude = {
-  stage:          { select: { id: true, name: true, isDefault: true } },
-  previousStage:  { select: { id: true, name: true, isDefault: true } },
+  stage: { select: { id: true, name: true, isDefault: true } },
+  previousStage: { select: { id: true, name: true, isDefault: true } },
   stageChangedBy: { select: { id: true, name: true, email: true } },
 };
 
@@ -78,10 +78,10 @@ export const findBranchUsers = async (branchId, tx = prisma) => {
   });
 
   return users.map((u) => ({
-    id:    u.id,
-    name:  u.name,
+    id: u.id,
+    name: u.name,
     email: u.email,
-    role:  u.userRoles[0]?.role?.name ?? null
+    role: u.userRoles[0]?.role?.name ?? null
   }));
 };
 
@@ -260,7 +260,7 @@ export const findLeadById = async (id, tx = prisma) => {
     where: { id },
     include: {
       pipeline: { select: { id: true, companyId: true, branchId: true } },
-      stage:    { select: { id: true, name: true, stageType: true, status: true } }
+      stage: { select: { id: true, name: true, stageType: true, status: true } }
     }
   });
 };
@@ -361,9 +361,9 @@ export const findLeads = async (params, tx = prisma) => {
     skip: params.skip,
     take: params.take,
     include: {
-      source:     { select: { id: true, name: true } },
-      course:     { select: { id: true, name: true } },
-      status:     { select: { id: true, name: true, code: true, displayColor: true } },
+      source: { select: { id: true, name: true } },
+      course: { select: { id: true, name: true } },
+      status: { select: { id: true, name: true, code: true, displayColor: true } },
       assignedTo: {
         select: {
           id: true,
@@ -376,10 +376,10 @@ export const findLeads = async (params, tx = prisma) => {
           }
         }
       },
-      team:       { select: { id: true, name: true } },
-      pipeline:   { select: { id: true, name: true } },
-      stage:      { select: { id: true, name: true } },
-      createdBy:  { select: { id: true, name: true } },
+      team: { select: { id: true, name: true } },
+      pipeline: { select: { id: true, name: true } },
+      stage: { select: { id: true, name: true } },
+      createdBy: { select: { id: true, name: true } },
       qualification: {
         select: {
           id: true,
@@ -457,24 +457,55 @@ export const findLeadComments = async (leadId, tx = prisma) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
+import { parseUserAgent, normalizeIpAddress } from "../../utils/userAgentParser.js";
+import { sanitizeAuditPayload } from "../../utils/auditSanitizer.js";
+
 // AUDIT LOG
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
  * Creates an audit log entry for lead operations.
- * @param {object} data - { companyId, entityId, action, oldValue, newValue, performedById }
+ * @param {object} data - { companyId, entityId, action, actionType, oldValue, newValue, performedById, req }
  * @param {object} tx
+ * @param {object} [req=null]
  */
-export const createAuditLog = async (data, tx = prisma) => {
+export const createAuditLog = async (data, tx = prisma, req = null) => {
+  const reqObj = data?.req || req;
+  const actionCode = data?.action || "RECORD_UPDATED";
+  let actionType = data?.actionType;
+
+  if (!actionType) {
+    const actUpper = String(actionCode).toUpperCase();
+    if (actUpper.includes("CREATE")) actionType = "CREATE";
+    else if (actUpper.includes("DELETE")) actionType = "DELETE";
+    else actionType = "UPDATE";
+  }
+
+  let ipAddress = "SYSTEM";
+  let browserInfo = "SYSTEM";
+  let deviceInfo = "SYSTEM";
+
+  if (reqObj && (reqObj.headers || reqObj.ip || reqObj.socket)) {
+    const parsed = parseUserAgent(reqObj);
+    ipAddress = parsed.ipAddress ? normalizeIpAddress(parsed.ipAddress) : "Unknown";
+    browserInfo = parsed.browser || "Unknown Browser";
+    deviceInfo = parsed.deviceName || "Unknown Device";
+  }
+
   return tx.auditLog.create({
     data: {
-      companyId:     data.companyId ?? null,
-      entityType:    "LEAD",
-      entityId:      data.entityId,
-      action:        data.action,
-      oldValue:      data.oldValue ?? null,
-      newValue:      data.newValue ?? null,
-      performedById: data.performedById
+      companyId: data?.companyId ?? null,
+      moduleName: "LEAD",
+      actionType,
+      entityType: data?.entityType || "LEAD",
+      entityId: data?.entityId ? Number(data.entityId) : 0,
+      action: actionCode,
+      oldValue: sanitizeAuditPayload(data?.oldValue ?? null),
+      newValue: sanitizeAuditPayload(data?.newValue ?? null),
+      ipAddress,
+      browserInfo,
+      deviceInfo,
+      performedById: data?.performedById ?? null,
     }
   });
 };

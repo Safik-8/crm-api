@@ -1,4 +1,5 @@
 import prisma from "../../config/db.js";
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
 
 /**
  * Automatically assigns a lead to an eligible user or team in the lead's branch.
@@ -365,22 +366,17 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
       }
     });
 
-    await tx.auditLog.create({
-      data: {
-        companyId: lead.companyId,
-        entityId: leadId,
-        entityType: "LEAD",
-        action: "UPDATE",
-        oldValue: JSON.stringify({
-          assignedToId: null,
-          teamId: null
-        }),
-        newValue: JSON.stringify({
-          assignedToId,
-          teamId
-        }),
-        performedById: null // SYSTEM
-      }
+    await recordAuditLog({
+      tx,
+      companyId: lead.companyId,
+      moduleName: "LEAD",
+      actionType: "UPDATE",
+      entityType: "LEAD",
+      entityId: leadId,
+      action: "AUTO_ASSIGNED",
+      oldValue: { assignedToId: null, teamId: null },
+      newValue: { assignedToId, teamId },
+      performedById: lead.createdById
     });
   } else {
     // All candidates are full

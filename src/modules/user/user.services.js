@@ -70,7 +70,7 @@ const getUserRank = (user) => {
 }
 
 // Service to onboard a new user
-export const createUserService = async (data, actor) => {
+export const createUserService = async (data, actor, req = null) => {
   const { companyId, branchId, roleId, reportingManagerId, email, mobileNumber, employeeId } = data
 
   // 1. Multitenancy guard: Company Admins and Branch Managers can only onboard in their own company
@@ -181,6 +181,7 @@ export const createUserService = async (data, actor) => {
 
   // 9. Write audit log
   await createAuditLog({
+    req,
     companyId: Number(companyId),
     entityType: "USER",
     entityId: user.id,
@@ -210,7 +211,7 @@ export const createUserService = async (data, actor) => {
 }
 
 // Service to update an existing user
-export const updateUserService = async (id, data, actor) => {
+export const updateUserService = async (id, data, actor, req = null) => {
   const targetId = Number(id)
   const user = await findUserById(targetId)
   if (!user) throw new NotFoundError("User")
@@ -301,6 +302,7 @@ export const updateUserService = async (id, data, actor) => {
 
   // Write Audit Logs
   await createAuditLog({
+    req,
     companyId: user.companyId,
     entityType: "USER",
     entityId: targetId,
@@ -397,7 +399,7 @@ export const getUsersService = async (query, actor) => {
 }
 
 // Service to reset user password
-export const resetUserPasswordService = async (id, actor) => {
+export const resetUserPasswordService = async (id, actor, req = null) => {
   const targetId = Number(id)
   const user = await findUserById(targetId)
   if (!user) throw new NotFoundError("User")
@@ -426,6 +428,7 @@ export const resetUserPasswordService = async (id, actor) => {
 
   // Write audit trail
   await createAuditLog({
+    req,
     companyId: user.companyId,
     entityType: "USER",
     entityId: targetId,
@@ -440,7 +443,7 @@ export const resetUserPasswordService = async (id, actor) => {
 }
 
 // Service to toggle status (ACTIVE/INACTIVE)
-export const toggleUserStatusService = async (id, status, actor) => {
+export const toggleUserStatusService = async (id, status, actor, req = null) => {
   const targetId = Number(id)
   const user = await findUserById(targetId)
   if (!user) throw new NotFoundError("User")
@@ -471,6 +474,7 @@ export const toggleUserStatusService = async (id, status, actor) => {
 
   // Write audit trail
   await createAuditLog({
+    req,
     companyId: user.companyId,
     entityType: "USER",
     entityId: targetId,
@@ -550,7 +554,7 @@ export const getEligibleReplacementsService = async (targetId, actor) => {
 /**
  * Service to hard delete a user and reassign their leads & direct reports atomically.
  */
-export const deleteUserService = async (targetId, replacementUserId, actor) => {
+export const deleteUserService = async (targetId, replacementUserId, actor, req = null) => {
   const actorRank = actor.primaryRoleRank ?? 0
   if (actorRank < 80) {
     throw new ForbiddenError("Only Super Admins and Company Admins can hard delete users")
@@ -617,6 +621,7 @@ export const deleteUserService = async (targetId, replacementUserId, actor) => {
 
   // Write audit trail
   await createAuditLog({
+    req,
     companyId: targetUser.companyId,
     entityType: "USER",
     entityId: targetUserId,

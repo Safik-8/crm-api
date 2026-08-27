@@ -41,6 +41,7 @@ import revenueReportRoutes from "./modules/revenueReport/revenueReport.routes.js
 import reportRoutes from "./modules/report/report.routes.js"
 import kpiRoutes from "./modules/kpi/kpi.routes.js"
 import dashboardRoutes from "./modules/dashboard/dashboard.routes.js"
+import auditLogRoutes from "./modules/auditLog/auditLog.routes.js"
 import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -49,10 +50,17 @@ dotenv.config({ quiet: true })
 const app = express()
 const PORT = process.env.PORT || 5000
 
+// ── TRUST PROXY ──────────────────────────────────────────
+// Required for accurate req.ip when running behind Nginx / load balancer.
+// Value 1 = trust exactly one reverse proxy hop (standard for single Nginx).
+// Without this, req.ip returns the proxy's own address, not the real client IP.
+app.set('trust proxy', 1)
+
 // ══════════════════════════════════════════════════════════
 // MIDDLEWARES
 // ══════════════════════════════════════════════════════════
 app.use(helmet())
+
 
 // ── RATE LIMITING ─────────────────────────────────────────
 const limiter = rateLimit({
@@ -126,6 +134,8 @@ app.use("/api/reports/revenue", revenueReportRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/kpi", kpiRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/audit-logs", auditLogRoutes);
+
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER
 // ══════════════════════════════════════════════════════════

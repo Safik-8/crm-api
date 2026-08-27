@@ -69,7 +69,7 @@ export const getStagesAdmin = async (req, res, next) => {
 // Toggle a stage between ACTIVE and INACTIVE
 export const toggleStageStatus = async (req, res, next) => {
   try {
-    const stage = await toggleStageStatusService(req.params.id, req.body, req.user)
+    const stage = await toggleStageStatusService(req.params.id, req.body, req.user, req)
     return sendSuccess(res, { stage }, "Stage status updated")
   } catch (err) {
     next(err)
