@@ -1,29 +1,51 @@
 import { Router } from "express";
-import { authenticate }  from "../../middleware/Authenticate.js";
+import { authenticate } from "../../middleware/Authenticate.js";
 import { hasPermission } from "../../middleware/hasPermission.js";
 import {
-  getNotifications, getUnreadCount, getReminderSummary,
-  markAsRead, markAllRead, deleteNotif, deleteAllNotifs,
+  getNotificationsQuerySchema,
+  updateNotificationConfigSchema,
+  validateQuery,
+  validateBody,
+} from "./notification.validation.js";
+import {
+  getNotifications,
+  getUnreadCount,
+  getReminderSummary,
+  markAsRead,
+  markAllRead,
+  deleteNotif,
+  deleteAllNotifs,
+  getNotificationConfigs,
+  updateNotificationConfig,
 } from "./notification.controller.js";
 
 const router = Router();
 router.use(authenticate);
 
-// ── Lightweight badge (all authenticated users, no RBAC gate) ─────────────────
-router.get("/unread-count",      getUnreadCount);
+// ── Unread Badge Counter (All authenticated users) ──────────────────────────
+router.get("/unread-count", getUnreadCount);
 
-// ── Reminder summary for dashboard widget ─────────────────────────────────────
-router.get("/reminder-summary",  hasPermission("NOTIFICATION", "canView"),   getReminderSummary);
+// ── Reminder summary for dashboard widget ───────────────────────────────────
+router.get("/reminder-summary", getReminderSummary);
 
-// ── Full paginated list ────────────────────────────────────────────────────────
-router.get("/",                  hasPermission("NOTIFICATION", "canView"),   getNotifications);
+// ── Notification Event Configurations (Admin Only, guarded in service) ───────
+router.get("/configs", getNotificationConfigs);
+router.patch("/configs/:id", validateBody(updateNotificationConfigSchema), updateNotificationConfig);
 
-// ── Mark operations (CRITICAL: /read-all BEFORE /:id) ─────────────────────────
-router.patch("/read-all",        hasPermission("NOTIFICATION", "canEdit"),   markAllRead);
-router.patch("/:id/read",        hasPermission("NOTIFICATION", "canEdit"),   markAsRead);
+// ── Full paginated list & audit history (Personal by default, scoped in service)
+router.get(
+  "/",
+  validateQuery(getNotificationsQuerySchema),
+  getNotifications
+);
 
-// ── Delete operations (CRITICAL: /clear-all BEFORE /:id) ──────────────────────
-router.delete("/clear-all",      hasPermission("NOTIFICATION", "canEdit"),   deleteAllNotifs);
-router.delete("/:id",            hasPermission("NOTIFICATION", "canEdit"),   deleteNotif);
+// ── Mark operations (CRITICAL: /read-all BEFORE /:id) ───────────────────────
+router.patch("/read-all", markAllRead);
+router.patch("/:id/read", markAsRead);
+
+// ── Delete operations (CRITICAL: /clear-all BEFORE /:id) ────────────────────
+router.delete("/clear-all", deleteAllNotifs);
+router.delete("/:id", deleteNotif);
 
 export default router;
+

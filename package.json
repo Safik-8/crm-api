@@ -26,6 +26,7 @@
     "multer": "^2.0.1",
     "nodemailer": "^9.0.3",
     "prisma": "^6.19.3",
+    "socket.io": "^4.8.3",
     "ua-parser-js": "^2.0.10",
     "xlsx": "^0.18.5",
     "zod": "^4.4.3"

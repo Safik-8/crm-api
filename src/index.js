@@ -1,5 +1,6 @@
 // src/index.js
 
+import http from "http"
 import express from "express" // Trigger nodemon restart
 import dotenv from "dotenv"
 import cors from "cors"
@@ -9,6 +10,7 @@ import cookieParser from "cookie-parser"
 import { rateLimit } from "express-rate-limit"
 
 import prisma from "./config/db.js"
+import { initSockets } from "./sockets/index.js"
 
 import { errorHandler, notFound } from "./middleware/errorHandler.js"
 
@@ -145,9 +147,12 @@ const startServer = async () => {
     // Step 2 → Initialize roles and permissions
     await initializeSystem()
 
-    // Server startup file.
-    // Step 3 → Start listening
-    app.listen(PORT, () => {
+    // Step 3 → Create HTTP server and initialize sockets
+    const httpServer = http.createServer(app)
+    initSockets(httpServer)
+
+    // Step 4 → Start listening
+    httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`)
       console.log(`API URL: http://localhost:${PORT}`)
       console.log(`Client URL: ${process.env.CLIENT_URL}`)

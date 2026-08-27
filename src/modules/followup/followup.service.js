@@ -1,7 +1,6 @@
-// src/modules/followup/followup.service.js
-
 import prisma from "../../config/db.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../../utils/AppError.js";
+import { dispatchNotification } from "../notification/notification.dispatcher.js";
 import {
   findFollowupById, findFollowups, countFollowups,
   createFollowupDb, updateFollowupDb, deleteFollowupDb,
@@ -113,41 +112,6 @@ const logFollowupActivity = async (leadId, companyId, activityType, description,
  * @param {string} message      - Human-readable message body
  * @param {'SCHEDULED'|'COMPLETED'|'CANCELLED'} eventSubType - Controls icon on frontend
  */
-const notifyFollowupEvent = async (userId, followup, message, eventSubType = 'SCHEDULED') => {
-  const PREFIX_MAP = {
-    SCHEDULED:  '[SCHEDULED]',
-    COMPLETED:  '[COMPLETED]',
-    CANCELLED:  '[CANCELLED]',
-  };
-  const prefix = PREFIX_MAP[eventSubType] ?? '[SCHEDULED]';
-  try {
-    await prisma.notification.create({
-      data: {
-        userId,
-        leadId:           followup.leadId           ?? null,
-        companyId:        followup.companyId         ?? null,
-        branchId:         followup.branchId          ?? null,
-        followupId:       followup.id,
-        notificationType: "FOLLOWUP_ALERT",
-        message:          `${prefix} ${message}`,
-        status:           "UNREAD",
-      },
-    });
-  } catch (err) {
-    console.error(`[FollowupService] Failed to create FOLLOWUP_ALERT for user ${userId}:`, err.message);
-  }
-};
-
-/**
- * Industry-level fan-out: sends a separate notification row to every recipient
- * in the supervisor chain (assigned user → creator → branch manager → company admin → super admin).
- * Each row is independently owned — deleting one does NOT affect others.
- *
- * @param {Object} followup     - Full followup record
- * @param {string} message      - Notification message body
- * @param {string} eventSubType - 'SCHEDULED' | 'COMPLETED' | 'CANCELLED'
- * @param {number} [createdById] - Optional additional recipient (e.g. creator on complete/cancel)
- */
 const fanOutFollowupNotification = async (followup, message, eventSubType, createdById = null) => {
   try {
     const recipientIds = await buildNotificationRecipients({
@@ -157,10 +121,39 @@ const fanOutFollowupNotification = async (followup, message, eventSubType, creat
       branchId:     followup.branchId ?? null,
     });
 
-    // Fire all notifications in parallel — each is independent and non-blocking
-    await Promise.allSettled(
-      recipientIds.map((uid) => notifyFollowupEvent(uid, followup, message, eventSubType))
-    );
+    if (recipientIds.length === 0) return;
+
+    const PREFIX_MAP = {
+      SCHEDULED:  '[SCHEDULED]',
+      COMPLETED:  '[COMPLETED]',
+      CANCELLED:  '[CANCELLED]',
+    };
+    const prefix = PREFIX_MAP[eventSubType] ?? '[SCHEDULED]';
+
+    const EVENT_MAP = {
+      SCHEDULED: 'FOLLOWUP_REMINDER',
+      COMPLETED: 'FOLLOWUP_COMPLETED',
+      CANCELLED: 'FOLLOWUP_MISSED',
+    };
+    const eventType = EVENT_MAP[eventSubType] ?? 'FOLLOWUP_COMPLETED';
+
+    const titleMap = {
+      SCHEDULED: 'Follow-up Scheduled',
+      COMPLETED: 'Follow-up Completed',
+      CANCELLED: 'Follow-up Cancelled',
+    };
+
+    dispatchNotification({
+      eventType,
+      companyId: followup.companyId,
+      branchId: followup.branchId ?? null,
+      recipientIds,
+      leadId: followup.leadId ?? null,
+      followupId: followup.id,
+      title: titleMap[eventSubType] || 'Follow-up Notification',
+      message: `${prefix} ${message}`,
+      actionUrl: followup.leadId ? `/leads?leadId=${followup.leadId}` : '/followups',
+    });
   } catch (err) {
     console.error("[FollowupService] fanOutFollowupNotification failed:", err.message);
   }

@@ -2,6 +2,7 @@ import prisma from '../../config/db.js';
 import * as opportunityRepository from './opportunity.repository.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../utils/AppError.js';
 import { ROLE_RANKS } from '../../config/roleConstants.js';
+import { dispatchNotification } from '../notification/notification.dispatcher.js';
 
 /**
  * Creates a new Opportunity after applying HRBAC and qualification checks
@@ -93,13 +94,28 @@ export const createOpportunity = async (actor, payload) => {
   const targetCompanyId = actor.companyId || lead.companyId || 1;
   const targetBranchId = actor.branchId || lead.branchId;
 
-  return opportunityRepository.createOpportunityTx(
+  const createdOpp = await opportunityRepository.createOpportunityTx(
     targetCompanyId,
     targetBranchId,
     payload,
     ownerId,
     actor.id
   );
+
+  dispatchNotification({
+    eventType: "OPPORTUNITY_CREATED",
+    companyId: targetCompanyId,
+    branchId: targetBranchId,
+    senderId: actor.id,
+    recipientIds: [ownerId, actor.id].filter(Boolean),
+    opportunityId: createdOpp.id,
+    leadId: payload.leadId,
+    title: "New Opportunity Created",
+    message: `Opportunity "${createdOpp.opportunityName}" has been created.`,
+    actionUrl: `/opportunities/${createdOpp.id}`,
+  });
+
+  return createdOpp;
 };
 
 /**
@@ -126,7 +142,23 @@ export const updateOpportunity = async (actor, id, payload) => {
     throw new ForbiddenError('You can only edit opportunities within your branch.');
   }
 
-  return opportunityRepository.updateOpportunityTx(id, actor.companyId, payload, actor.id);
+  const updatedOpp = await opportunityRepository.updateOpportunityTx(id, actor.companyId, payload, actor.id);
+
+  if (payload.stageId && payload.stageId !== opportunity.stageId) {
+    dispatchNotification({
+      eventType: "OPPORTUNITY_STAGE_CHANGED",
+      companyId: actor.companyId,
+      branchId: opportunity.branchId,
+      senderId: actor.id,
+      recipientIds: [opportunity.ownerId, actor.id].filter(Boolean),
+      opportunityId: opportunity.id,
+      title: "Opportunity Stage Changed",
+      message: `Opportunity "${opportunity.opportunityName}" stage has been updated.`,
+      actionUrl: `/opportunities/${opportunity.id}`,
+    });
+  }
+
+  return updatedOpp;
 };
 
 /**
@@ -150,7 +182,22 @@ export const closeOpportunity = async (actor, id, payload) => {
     throw new ForbiddenError('You can only close opportunities within your branch.');
   }
 
-  return opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id, payload.remarks, payload.reasonId);
+  const closedOpp = await opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id, payload.remarks, payload.reasonId);
+
+  const isWon = payload.outcome === "WON";
+  dispatchNotification({
+    eventType: isWon ? "OPPORTUNITY_WON" : "OPPORTUNITY_LOST",
+    companyId: actor.companyId,
+    branchId: opportunity.branchId,
+    senderId: actor.id,
+    recipientIds: [opportunity.ownerId, actor.id].filter(Boolean),
+    opportunityId: opportunity.id,
+    title: isWon ? "Opportunity Won 🎉" : "Opportunity Closed",
+    message: `Opportunity "${opportunity.opportunityName}" was closed as ${payload.outcome}${payload.remarks ? `: ${payload.remarks}` : ""}.`,
+    actionUrl: `/opportunities/${opportunity.id}`,
+  });
+
+  return closedOpp;
 };
 
 /**
