@@ -6,7 +6,7 @@ import { sendSuccess } from '../../utils/response.js';
  */
 export const createOpportunity = async (req, res, next) => {
   try {
-    const opportunity = await opportunityService.createOpportunity(req.user, req.body);
+    const opportunity = await opportunityService.createOpportunity(req.user, req.body, req);
     return sendSuccess(res, opportunity, 'Opportunity created successfully', 201);
   } catch (error) {
     next(error);
@@ -32,7 +32,7 @@ export const getOpportunityById = async (req, res, next) => {
 export const updateOpportunity = async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
-    const opportunity = await opportunityService.updateOpportunity(req.user, id, req.body);
+    const opportunity = await opportunityService.updateOpportunity(req.user, id, req.body, req);
     return sendSuccess(res, opportunity, 'Opportunity updated successfully', 200);
   } catch (error) {
     next(error);
@@ -45,7 +45,7 @@ export const updateOpportunity = async (req, res, next) => {
 export const closeOpportunity = async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
-    const opportunity = await opportunityService.closeOpportunity(req.user, id, req.body);
+    const opportunity = await opportunityService.closeOpportunity(req.user, id, req.body, req);
     return sendSuccess(res, opportunity, `Opportunity closed as ${req.body.outcome}`, 200);
   } catch (error) {
     next(error);
@@ -205,7 +205,7 @@ export const bulkUpdateOpportunityStages = async (req, res, next) => {
 export const moveOpportunityStage = async (req, res, next) => {
   try {
     const id = parseInt(req.params.id);
-    const opportunity = await opportunityService.moveOpportunityStage(req.user, id, req.body);
+    const opportunity = await opportunityService.moveOpportunityStage(req.user, id, req.body, req);
     return res.status(200).json({
       success: true,
       statusCode: 200,

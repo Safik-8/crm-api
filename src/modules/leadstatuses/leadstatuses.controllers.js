@@ -7,7 +7,7 @@ import { sendSuccess } from "../../utils/response.js"
 
 export const createLeadStatus = async (req, res, next) => {
   try {
-    const status = await createLeadStatusService(req.body, req.user)
+    const status = await createLeadStatusService(req.body, req.user, req)
     return sendSuccess(res, { status }, "Lead status created successfully", 201)
   } catch (err) { next(err) }
 }
@@ -21,21 +21,21 @@ export const getLeadStatuses = async (req, res, next) => {
 
 export const updateLeadStatus = async (req, res, next) => {
   try {
-    const status = await updateLeadStatusService(req.params.id, req.body, req.user)
+    const status = await updateLeadStatusService(req.params.id, req.body, req.user, req)
     return sendSuccess(res, { status }, "Lead status updated successfully")
   } catch (err) { next(err) }
 }
 
 export const toggleLeadStatus = async (req, res, next) => {
   try {
-    const status = await toggleLeadStatusService(req.params.id, req.user)
+    const status = await toggleLeadStatusService(req.params.id, req.user, req)
     return sendSuccess(res, { status }, "Lead status toggled successfully")
   } catch (err) { next(err) }
 }
 
 export const deleteLeadStatus = async (req, res, next) => {
   try {
-    await deleteLeadStatusService(req.params.id, req.user)
+    await deleteLeadStatusService(req.params.id, req.user, req)
     return sendSuccess(res, null, "Lead status deleted successfully")
   } catch (err) { next(err) }
 }

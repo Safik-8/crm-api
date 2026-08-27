@@ -156,7 +156,7 @@ const buildLeadBoardQueryOptions = (query) => {
   }
 }
 
-export const createPipelineService = async (data, actor) => {
+export const createPipelineService = async (data, actor, req = null) => {
   const name = normalizeName(data?.name)
   if (!name) throw new ValidationError("Validation failed", [{ field: "name", message: "name is required" }])
 
@@ -165,6 +165,7 @@ export const createPipelineService = async (data, actor) => {
   const pipeline = await createPipelineTx(name, companyId, branchId, actor.id)
 
   await createAuditLog({
+    req,
     companyId,
     branchId,
     performedBy: actor.id,
@@ -388,7 +389,7 @@ export const getPipelineDetailsService = async (id, query, actor) => {
   }
 }
 
-export const updatePipelineService = async (id, data, actor) => {
+export const updatePipelineService = async (id, data, actor, req = null) => {
   const pipelineId = Number(id)
   if (!Number.isInteger(pipelineId) || pipelineId < 1) throw new BadRequestError("Invalid pipeline id")
 
@@ -402,6 +403,7 @@ export const updatePipelineService = async (id, data, actor) => {
   const updated = await updatePipelineDb(pipelineId, name, actor.id)
 
   await createAuditLog({
+    req,
     companyId: pipeline.companyId,
     branchId: pipeline.branchId,
     performedBy: actor.id,
@@ -413,7 +415,7 @@ export const updatePipelineService = async (id, data, actor) => {
   return updated
 }
 
-export const deletePipelineService = async (id, actor) => {
+export const deletePipelineService = async (id, actor, req = null) => {
   const pipelineId = Number(id)
   if (!Number.isInteger(pipelineId) || pipelineId < 1) throw new BadRequestError("Invalid pipeline id")
 
@@ -424,6 +426,7 @@ export const deletePipelineService = async (id, actor) => {
   const deleted = await softDeletePipelineDb(pipelineId, actor.id)
 
   await createAuditLog({
+    req,
     companyId: pipeline.companyId,
     branchId: pipeline.branchId,
     performedBy: actor.id,
@@ -435,7 +438,7 @@ export const deletePipelineService = async (id, actor) => {
   return deleted
 }
 
-export const assignStagesToPipelineService = async (pipelineId, data, actor) => {
+export const assignStagesToPipelineService = async (pipelineId, data, actor, req = null) => {
   const pid = Number(pipelineId)
   if (!Number.isInteger(pid) || pid < 1) throw new BadRequestError("Invalid pipeline id")
 
@@ -450,6 +453,7 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
   const assignedStages = await assignStagesToPipelineTx(pid, incomingStageIds, newStages, orderedStageIds, actor.id)
 
   await createAuditLog({
+    req,
     companyId: pipeline.companyId,
     branchId: pipeline.branchId,
     performedBy: actor.id,
@@ -461,7 +465,7 @@ export const assignStagesToPipelineService = async (pipelineId, data, actor) => 
   return assignedStages
 }
 
-export const updatePipelineStageOrderService = async (pipelineId, data, actor) => {
+export const updatePipelineStageOrderService = async (pipelineId, data, actor, req = null) => {
   const pid = Number(pipelineId)
   if (!Number.isInteger(pid) || pid < 1) throw new BadRequestError("Invalid pipeline id")
 
@@ -474,6 +478,7 @@ export const updatePipelineStageOrderService = async (pipelineId, data, actor) =
   const updatedStages = await updatePipelineStageOrderTx(pid, orderedStageIds, actor.id)
 
   await createAuditLog({
+    req,
     companyId: pipeline.companyId,
     branchId: pipeline.branchId,
     performedBy: actor.id,

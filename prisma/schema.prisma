@@ -1796,7 +1796,7 @@ model UserFavoriteReport {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, reportId])
+  @@index([userId, reportId])
   @@index([userId])
   @@map("user_favorite_reports")
 }

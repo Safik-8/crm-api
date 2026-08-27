@@ -420,23 +420,26 @@ export async function findBranchPerformanceMetrics({ companyId, branchId, startD
   return results;
 }
 
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
+
 /**
- * Create AuditLog entry for Report Export
+ * Create AuditLog entry for Report Export using central recordAuditLog service.
  */
-export async function createExportAuditLog({ companyId, performedById, reportType, format, filters, rowCount }) {
-  return await prisma.auditLog.create({
-    data: {
-      companyId: companyId || null,
-      entityType: "REPORT_EXPORT",
-      action: "EXPORT",
-      performedById: performedById,
-      newValue: {
-        reportType,
-        format,
-        filters: filters || {},
-        rowCount: rowCount || 0
-      }
-    }
+export async function createExportAuditLog({ companyId, performedById, reportType, format, filters, rowCount, req }) {
+  return await recordAuditLog({
+    req,
+    companyId: companyId || null,
+    moduleName: "REPORT",
+    actionType: "EXPORT",
+    entityType: "REPORT_EXPORT",
+    action: "REPORT_EXPORTED",
+    newValue: {
+      reportType,
+      format,
+      filters: filters || {},
+      rowCount: rowCount || 0
+    },
+    performedById
   });
 }
 

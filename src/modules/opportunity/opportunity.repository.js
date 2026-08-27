@@ -1,13 +1,17 @@
 import prisma from '../../config/db.js';
 import { Prisma } from '@prisma/client';
 import { ValidationError, NotFoundError } from '../../utils/AppError.js';
+import { recordAuditLog } from '../auditLog/auditLog.service.js';
+
+// Delegate buildTxAuditData helper directly to central recordAuditLog service
+const buildTxAuditData = (data) => recordAuditLog(data);
 
 /**
  * Idempotent helper: create Deal (one per opportunity), Customer and Revenue (only for WON)
  * Operates using the provided Prisma transaction client `tx`.
  * Returns the deal record (existing or newly created).
  */
-export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status, performedById, reasonId = null, remarks = null) => {
+export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status, performedById, reasonId = null, remarks = null, req = null) => {
   if (!opportunity || !opportunity.id) throw new ValidationError('Invalid opportunity');
 
   // Idempotency: check existing deal for this opportunity
@@ -72,7 +76,7 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
   const dealSeq = (dealCount + 1).toString().padStart(4, '0');
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   const dealNumber = `DEAL-${companyCode}-${currentYear}-${dealSeq}-${randomSuffix}`;
-  
+
   const deal = await tx.deal.create({
     data: {
       companyId: opportunity.companyId,
@@ -116,15 +120,16 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
     },
   });
 
-  await tx.auditLog.create({
-    data: {
-      companyId: opportunity.companyId,
-      entityType: 'DEAL',
-      entityId: deal.id,
-      action: 'DEAL_CREATED',
-      newValue: { dealNumber: deal.dealNumber, finalAmount: deal.finalAmount },
-      performedById: performedById,
-    },
+  await buildTxAuditData({
+    req,
+    companyId: opportunity.companyId,
+    moduleName: 'OPPORTUNITY',
+    actionType: 'CREATE',
+    entityType: 'DEAL',
+    entityId: deal.id,
+    action: 'DEAL_CREATED',
+    newValue: { dealNumber: deal.dealNumber, finalAmount: deal.finalAmount },
+    performedById,
   });
 
   // For WON: create customer and revenue (idempotent)
@@ -170,15 +175,16 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
         },
       });
 
-      await tx.auditLog.create({
-        data: {
-          companyId: opportunity.companyId,
-          entityType: 'CUSTOMER',
-          entityId: customer.id,
-          action: 'CUSTOMER_CREATED',
-          newValue: { customerName: customer.customerName, dealId: deal.id },
-          performedById: performedById,
-        },
+      await buildTxAuditData({
+        req,
+        companyId: opportunity.companyId,
+        moduleName: 'OPPORTUNITY',
+        actionType: 'CREATE',
+        entityType: 'CUSTOMER',
+        entityId: customer.id,
+        action: 'CUSTOMER_CREATED',
+        newValue: { customerName: customer.customerName, dealId: deal.id },
+        performedById,
       });
     }
 
@@ -222,15 +228,16 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
           },
         });
 
-        await tx.auditLog.create({
-          data: {
-            companyId: opportunity.companyId,
-            entityType: 'REVENUE',
-            entityId: revenue.id,
-            action: 'REVENUE_CREATED',
-            newValue: { dealId: deal.id, amount: revenue.revenueAmount },
-            performedById: performedById,
-          },
+        await buildTxAuditData({
+          req,
+          companyId: opportunity.companyId,
+          moduleName: 'OPPORTUNITY',
+          actionType: 'CREATE',
+          entityType: 'REVENUE',
+          entityId: revenue.id,
+          action: 'REVENUE_CREATED',
+          newValue: { dealId: deal.id, amount: revenue.revenueAmount },
+          performedById,
         });
       }
     }
@@ -243,7 +250,7 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
  * Creates an Opportunity record atomically inside a Prisma Transaction
  * Writes to Opportunity, LeadActivity, and AuditLog tables
  */
-export const createOpportunityTx = async (companyId, branchId, data, ownerId, createdById) => {
+export const createOpportunityTx = async (companyId, branchId, data, ownerId, createdById, req = null) => {
   return prisma.$transaction(async (tx) => {
     // 0. Resolve target OpportunityStage and default probability
     let stageId = data.stageId ? Number(data.stageId) : null;
@@ -326,7 +333,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         },
       });
 
-          await tx.lead.update({
+      await tx.lead.update({
         where: { id: Number(data.leadId) },
         data: {
           qualificationStatus: 'CONVERTED',
@@ -350,15 +357,17 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
     });
 
     // 4. Central Audit Log
-    await tx.auditLog.create({
-      data: {
-        companyId,
-        entityType: 'OPPORTUNITY',
-        entityId: opportunity.id,
-        action: 'OPPORTUNITY_CREATED',
-        newValue: { opportunityName: data.opportunityName, expectedRevenue: data.expectedRevenue },
-        performedById: createdById,
-      },
+    await buildTxAuditData({
+      req,
+      companyId,
+      branchId,
+      moduleName: 'OPPORTUNITY',
+      actionType: 'CREATE',
+      entityType: 'OPPORTUNITY',
+      entityId: opportunity.id,
+      action: 'OPPORTUNITY_CREATED',
+      newValue: { opportunityName: data.opportunityName, expectedRevenue: data.expectedRevenue },
+      performedById: createdById,
     });
 
     return opportunity;
@@ -368,7 +377,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
 /**
  * Updates an Opportunity record with audit logging
  */
-export const updateOpportunityTx = async (id, companyId, data, updatedById) => {
+export const updateOpportunityTx = async (id, companyId, data, updatedById, req = null) => {
   return prisma.$transaction(async (tx) => {
     const oppId = Number(id);
     const oldVal = await tx.opportunity.findUnique({ where: { id: oppId } });
@@ -450,16 +459,18 @@ export const updateOpportunityTx = async (id, companyId, data, updatedById) => {
       },
     });
 
-    await tx.auditLog.create({
-      data: {
-        companyId: targetCompanyId,
-        entityType: 'OPPORTUNITY',
-        entityId: oppId,
-        action: 'OPPORTUNITY_UPDATED',
-        oldValue: JSON.stringify(oldVal),
-        newValue: JSON.stringify(opportunity),
-        performedById: updatedById,
-      },
+    await buildTxAuditData({
+      req,
+      companyId: targetCompanyId,
+      moduleName: 'OPPORTUNITY',
+      actionType: 'UPDATE',
+      entityType: 'OPPORTUNITY',
+      entityId: oppId,
+      action: 'OPPORTUNITY_UPDATED',
+      // Store only changed fields — not the full record — to prevent sensitive data leakage
+      oldValue: { stageId: oldVal?.stageId, status: oldVal?.status, probabilityPercentage: oldVal?.probabilityPercentage, expectedRevenue: oldVal?.expectedRevenue },
+      newValue: { stageId: opportunity?.stageId, status: opportunity?.status, probabilityPercentage: opportunity?.probabilityPercentage, expectedRevenue: opportunity?.expectedRevenue },
+      performedById: updatedById,
     });
 
     return opportunity;
@@ -469,7 +480,7 @@ export const updateOpportunityTx = async (id, companyId, data, updatedById) => {
 /**
  * Updates an Opportunity status (Won / Lost / Cancelled) with audit logging
  */
-export const closeOpportunityTx = async (id, companyId, status, updatedById, remarks = null, reasonId = null) => {
+export const closeOpportunityTx = async (id, companyId, status, updatedById, remarks = null, reasonId = null, req = null) => {
   return prisma.$transaction(async (tx) => {
     const oldVal = await tx.opportunity.findUnique({ where: { id } });
 
@@ -534,20 +545,22 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
       });
     }
 
-    await tx.auditLog.create({
-      data: {
-        companyId,
-        entityType: 'OPPORTUNITY',
-        entityId: id,
-        action: `OPPORTUNITY_CLOSED_${status}`,
-        oldValue: oldVal,
-        newValue: { status, stageId: targetStage ? targetStage.id : oldVal.stageId },
-        performedById: updatedById,
-      },
+    await buildTxAuditData({
+      req,
+      tx,
+      companyId,
+      moduleName: 'OPPORTUNITY',
+      actionType: 'UPDATE',
+      entityType: 'OPPORTUNITY',
+      entityId: id,
+      action: `OPPORTUNITY_CLOSED_${status}`,
+      oldValue: { status: oldVal?.status, stageId: oldVal?.stageId },
+      newValue: { status, stageId: targetStage ? targetStage.id : oldVal?.stageId },
+      performedById: updatedById,
     });
 
     // Create deal/customer/revenue idempotently as part of the same transaction
-    await createDealCustomerRevenueIfNeeded(tx, opportunity, status, updatedById, reasonId, remarks);
+    await createDealCustomerRevenueIfNeeded(tx, opportunity, status, updatedById, reasonId, remarks, req);
 
     return opportunity;
   }, { maxWait: 10000, timeout: 20000 });

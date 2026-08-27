@@ -1,6 +1,7 @@
 import prisma from '../../config/db.js';
 import * as proposalRepo from './proposal.repository.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../utils/AppError.js';
+import { recordAuditLog } from '../auditLog/auditLog.service.js';
 import { ROLE_RANKS } from '../../config/roleConstants.js';
 
 // Helper to check user authority scope
@@ -31,7 +32,7 @@ const validateScopeAndGetProposal = async (actor, id) => {
 };
 
 // Create Proposal
-export const createProposal = async (actor, payload) => {
+export const createProposal = async (actor, payload, req = null) => {
   const isSuperAdmin = actor.primaryRole === 'SUPER_ADMIN';
   const rank = actor.primaryRoleRank ?? 0;
 
@@ -143,15 +144,17 @@ export const createProposal = async (actor, payload) => {
       }
     });
 
-    await tx.auditLog.create({
-      data: {
-        companyId: opportunity.companyId,
-        entityType: 'PROPOSAL',
-        entityId: proposal.id,
-        action: 'PROPOSAL_CREATED',
-        newValue: { proposalNumber, finalAmount },
-        performedById: actor.id
-      }
+    await recordAuditLog({
+      req,
+      tx,
+      companyId: opportunity.companyId,
+      moduleName: 'PROPOSAL',
+      actionType: 'CREATE',
+      entityType: 'PROPOSAL',
+      entityId: proposal.id,
+      action: 'PROPOSAL_CREATED',
+      newValue: { proposalNumber, finalAmount },
+      performedById: actor.id
     });
 
     return proposal;

@@ -14,7 +14,7 @@ import { sendSuccess } from "../../utils/response.js"
 
 export const createUser = async (req, res, next) => {
   try {
-    const result = await createUserService(req.body, req.user)
+    const result = await createUserService(req.body, req.user, req)
     return sendSuccess(res, result, "User created successfully", 201)
   } catch (err) { next(err) }
 }
@@ -36,7 +36,7 @@ export const getUserById = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
   try {
-    const user = await updateUserService(req.params.id, req.body, req.user)
+    const user = await updateUserService(req.params.id, req.body, req.user, req)
     return sendSuccess(res, { user }, "User updated successfully")
   } catch (err) { next(err) }
 }
@@ -44,14 +44,14 @@ export const updateUser = async (req, res, next) => {
 export const toggleUserStatus = async (req, res, next) => {
   try {
     const { status } = req.body
-    const user = await toggleUserStatusService(req.params.id, status, req.user)
+    const user = await toggleUserStatusService(req.params.id, status, req.user, req)
     return sendSuccess(res, { user }, `User status set to ${status} successfully`)
   } catch (err) { next(err) }
 }
 
 export const resetUserPassword = async (req, res, next) => {
   try {
-    const result = await resetUserPasswordService(req.params.id, req.user)
+    const result = await resetUserPasswordService(req.params.id, req.user, req)
     return sendSuccess(res, result, "Password reset successfully. Please share the temporary password.")
   } catch (err) { next(err) }
 }
@@ -78,7 +78,7 @@ export const getEligibleReplacements = async (req, res, next) => {
 export const deleteUser = async (req, res, next) => {
   try {
     const { replacementUserId } = req.body || {}
-    const result = await deleteUserService(req.params.id, replacementUserId, req.user)
+    const result = await deleteUserService(req.params.id, replacementUserId, req.user, req)
     return sendSuccess(res, result, "User hard deleted successfully")
   } catch (err) { next(err) }
 }

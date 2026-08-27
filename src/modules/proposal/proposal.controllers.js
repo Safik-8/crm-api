@@ -3,7 +3,7 @@ import { sendSuccess } from '../../utils/response.js';
 
 export const createProposal = async (req, res, next) => {
   try {
-    const proposal = await proposalService.createProposal(req.user, req.body);
+    const proposal = await proposalService.createProposal(req.user, req.body, req);
     return sendSuccess(res, proposal, 'Proposal created successfully', 201);
   } catch (err) { next(err); }
 };

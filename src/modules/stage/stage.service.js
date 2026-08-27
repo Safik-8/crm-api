@@ -8,6 +8,7 @@ import {
   NotFoundError,
   ValidationError
 } from "../../utils/AppError.js"
+import { recordAuditLog } from "../auditLog/auditLog.service.js"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -202,7 +203,7 @@ export const deleteStageService = async (id, actor) => {
 
 // ─── B4: toggleStageStatusService (NEW) ──────────────────────────────────────
 
-export const toggleStageStatusService = async (id, data, actor) => {
+export const toggleStageStatusService = async (id, data, actor, req = null) => {
   const stageId = Number(id)
   if (!Number.isInteger(stageId) || stageId < 1) throw new BadRequestError("Invalid stage id")
 
@@ -240,15 +241,16 @@ export const toggleStageStatusService = async (id, data, actor) => {
   })
 
   // Audit log
-  await prisma.auditLog.create({
-    data: {
-      entityType:    "STAGE",
-      entityId:      stageId,
-      action:        data.status === "ACTIVE" ? "STAGE_ENABLED" : "STAGE_DISABLED",
-      oldValue:      JSON.stringify({ status: stage.status }),
-      newValue:      JSON.stringify({ status: data.status }),
-      performedById: actor.id
-    }
+  await recordAuditLog({
+    req,
+    moduleName: "STAGE",
+    actionType: "UPDATE",
+    entityType: "STAGE",
+    entityId: stageId,
+    action: data.status === "ACTIVE" ? "STAGE_ENABLED" : "STAGE_DISABLED",
+    oldValue: { status: stage.status },
+    newValue: { status: data.status },
+    performedById: actor.id
   })
 
   return updated

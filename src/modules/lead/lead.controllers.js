@@ -1,5 +1,5 @@
 // src/modules/lead/lead.controllers.js
- 
+
 import { sendSuccess } from "../../utils/response.js";
 import {
   getBranchUsersForLeadService,
@@ -50,7 +50,7 @@ export const getLeadFormData = async (req, res, next) => {
 
 export const createLead = async (req, res, next) => {
   try {
-    const lead = await createLeadService(req.body, req.user);
+    const lead = await createLeadService(req.body, req.user, undefined, false, false, req);
     return sendSuccess(res, { lead }, "Lead created successfully", 201);
   } catch (err) {
     next(err);
@@ -77,7 +77,7 @@ export const getLeadById = async (req, res, next) => {
 
 export const updateLead = async (req, res, next) => {
   try {
-    const lead = await updateLeadService(req.params.id, req.body, req.user);
+    const lead = await updateLeadService(req.params.id, req.body, req.user, req);
     return sendSuccess(res, { lead }, "Lead updated successfully");
   } catch (err) {
     next(err);
@@ -86,7 +86,7 @@ export const updateLead = async (req, res, next) => {
 
 export const deleteLead = async (req, res, next) => {
   try {
-    const lead = await deleteLeadService(req.params.id, req.user);
+    const lead = await deleteLeadService(req.params.id, req.user, req);
     return sendSuccess(res, { lead }, "Lead deleted successfully");
   } catch (err) {
     next(err);
@@ -95,7 +95,7 @@ export const deleteLead = async (req, res, next) => {
 
 export const deleteAllLeads = async (req, res, next) => {
   try {
-    const result = await deleteAllLeadsService(req.user);
+    const result = await deleteAllLeadsService(req.user, req);
     return sendSuccess(res, result, `Successfully deleted ${result.count} leads`);
   } catch (err) {
     next(err);
@@ -106,7 +106,7 @@ export const deleteAllLeads = async (req, res, next) => {
 
 export const updateLeadStage = async (req, res, next) => {
   try {
-    const lead = await updateLeadStageService(req.params.id, req.body, req.user);
+    const lead = await updateLeadStageService(req.params.id, req.body, req.user, req);
     return sendSuccess(res, { lead }, "Lead stage updated");
   } catch (err) {
     next(err);
@@ -149,7 +149,8 @@ export const importLeadsFromExcel = (req, res, next) => {
         !preview,
         req.file.originalname,
         req.body.companyId ? Number(req.body.companyId) : null,
-        req.body.branchId ? Number(req.body.branchId) : null
+        req.body.branchId ? Number(req.body.branchId) : null,
+        req
       );
       const msg = preview ? "Preview generated successfully" : "Import completed successfully";
       return sendSuccess(res, result, msg, 200);
@@ -170,7 +171,7 @@ export const getLeadImportLogs = async (req, res, next) => {
 
 export const restoreLead = async (req, res, next) => {
   try {
-    const lead = await restoreLeadService(req.params.id, req.user);
+    const lead = await restoreLeadService(req.params.id, req.user, req);
     return sendSuccess(res, { lead }, "Lead restored successfully");
   } catch (err) {
     next(err);
@@ -199,7 +200,7 @@ export const getLeadNotes = async (req, res, next) => {
 
 export const createLeadNote = async (req, res, next) => {
   try {
-    const note = await createLeadNoteService(req.params.id, req.body, req.user);
+    const note = await createLeadNoteService(req.params.id, req.body, req.user, req);
     return sendSuccess(res, { note }, "Note added successfully", 201);
   } catch (err) {
     next(err);
@@ -208,7 +209,7 @@ export const createLeadNote = async (req, res, next) => {
 
 export const updateLeadNote = async (req, res, next) => {
   try {
-    const note = await updateLeadNoteService(req.params.id, req.params.noteId, req.body, req.user);
+    const note = await updateLeadNoteService(req.params.id, req.params.noteId, req.body, req.user, req);
     return sendSuccess(res, { note }, "Note updated successfully");
   } catch (err) {
     next(err);
@@ -217,7 +218,7 @@ export const updateLeadNote = async (req, res, next) => {
 
 export const deleteLeadNote = async (req, res, next) => {
   try {
-    const note = await deleteLeadNoteService(req.params.id, req.params.noteId, req.user);
+    const note = await deleteLeadNoteService(req.params.id, req.params.noteId, req.user, req);
     return sendSuccess(res, { note }, "Note deleted successfully");
   } catch (err) {
     next(err);
@@ -235,7 +236,7 @@ export const getLeadTimeline = async (req, res, next) => {
 
 export const assignLeads = async (req, res, next) => {
   try {
-    const result = await assignLeadsService(req.body, req.user);
+    const result = await assignLeadsService(req.body, req.user, req);
     return sendSuccess(res, result, "Leads assigned successfully");
   } catch (err) {
     next(err);

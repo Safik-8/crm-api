@@ -74,16 +74,32 @@ export const bulkUpdateSequence = (items, tx = prisma) => {
   )
 }
 
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
+
 // Per-module createAuditLog — entityType hardcoded to "LEAD_STATUS"
-export const createAuditLog = (data, tx = prisma) =>
-  tx.auditLog.create({
-    data: {
-      companyId:     data.companyId ?? null,
-      entityType:    "LEAD_STATUS",
-      entityId:      data.entityId,
-      action:        data.action,
-      oldValue:      data.oldValue ?? null,
-      newValue:      data.newValue ?? null,
-      performedById: data.performedById,
-    },
-  })
+export const createAuditLog = async (data, tx = prisma, req = null) => {
+  const reqObj = data?.req || req;
+  const actionCode = data?.action || "RECORD_UPDATED";
+  let actionType = data?.actionType;
+
+  if (!actionType) {
+    const actUpper = String(actionCode).toUpperCase();
+    if (actUpper.includes("CREATE")) actionType = "CREATE";
+    else if (actUpper.includes("DELETE")) actionType = "DELETE";
+    else actionType = "UPDATE";
+  }
+
+  return recordAuditLog({
+    req: reqObj,
+    tx,
+    companyId: data?.companyId ?? null,
+    moduleName: "LEAD_STATUS",
+    entityType: data?.entityType || "LEAD_STATUS",
+    entityId: data?.entityId,
+    actionType,
+    action: actionCode,
+    oldValue: data?.oldValue ?? null,
+    newValue: data?.newValue ?? null,
+    performedById: data?.performedById ?? null,
+  });
+};

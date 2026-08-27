@@ -11,6 +11,7 @@ import {
 } from "./auth.services.js"
 import { sendSuccess } from "../../utils/response.js"
 import { parseUserAgent } from "../../utils/userAgentParser.js"
+import { recordAuditLog } from "../auditLog/auditLog.service.js"
 import dotenv from "dotenv"
 dotenv.config()
 
@@ -46,6 +47,20 @@ export const login = async (req, res, next) => {
         // Set tokens in httpOnly cookies
         res.cookie("accessToken", result.accessToken, ACCESS_COOKIE_OPTIONS)
         res.cookie("refreshToken", result.refreshToken, REFRESH_COOKIE_OPTIONS)
+
+        // Record Audit Log for successful login
+        recordAuditLog({
+            req,
+            moduleName: "AUTH",
+            actionType: "LOGIN",
+            action: "LOGIN_SUCCESS",
+            performedById: result.user?.id,
+            companyId: result.user?.companyId,
+            branchId: result.user?.branchId,
+            entityType: "USER",
+            entityId: result.user?.id,
+            newValue: { email: result.user?.email, name: result.user?.name }
+        });
 
         return sendSuccess(res, {
             user: result.user,

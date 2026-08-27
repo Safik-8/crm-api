@@ -145,7 +145,7 @@ const validateIseUsers = async (iseIds, branchId, companyId, excludeTeamId) => {
 /**
  * Creates a new team.
  */
-export const createTeamService = async (data, actor) => {
+export const createTeamService = async (data, actor, req = null) => {
   const { name, code, branchId, bdeId, status, iseIds = [] } = data;
 
   // 1. Resolve companyId based on actor
@@ -199,7 +199,7 @@ export const createTeamService = async (data, actor) => {
     status: status || "ACTIVE",
     iseIds,
     createdById: actor.id
-  }, actor.id);
+  }, actor.id, req);
 
   return team;
 };
@@ -207,7 +207,7 @@ export const createTeamService = async (data, actor) => {
 /**
  * Updates a team's editable fields (name, BDE owner, status).
  */
-export const updateTeamService = async (id, data, actor) => {
+export const updateTeamService = async (id, data, actor, req = null) => {
   const teamId = Number(id);
   const team = await prisma.team.findUnique({
     where: { id: teamId, isDeleted: false }
@@ -259,7 +259,7 @@ export const updateTeamService = async (id, data, actor) => {
 
   // 6. Execute name/status updates if any
   if (Object.keys(updates).length > 0) {
-    finalTeam = await updateTeamAndLog(teamId, team.companyId, updates, oldValue, actor.id);
+    finalTeam = await updateTeamAndLog(teamId, team.companyId, updates, oldValue, actor.id, req);
   }
 
   // 7. Handle BDE owner reassignment atomically if requested
@@ -270,7 +270,8 @@ export const updateTeamService = async (id, data, actor) => {
       team.companyId,
       Number(data.bdeId),
       team.bdeId,
-      actor.id
+      actor.id,
+      req
     );
   }
 
@@ -278,7 +279,7 @@ export const updateTeamService = async (id, data, actor) => {
   if (data.iseIds) {
     const iseIds = data.iseIds.map(Number);
     await validateIseUsers(iseIds, team.branchId, team.companyId, teamId);
-    await updateTeamMembersTransaction(teamId, team.companyId, iseIds, actor.id);
+    await updateTeamMembersTransaction(teamId, team.companyId, iseIds, actor.id, req);
   }
 
   return finalTeam;
@@ -287,7 +288,7 @@ export const updateTeamService = async (id, data, actor) => {
 /**
  * Toggles status (ACTIVE/INACTIVE) of a team.
  */
-export const toggleTeamStatusService = async (id, status, actor) => {
+export const toggleTeamStatusService = async (id, status, actor, req = null) => {
   const teamId = Number(id);
   const team = await prisma.team.findUnique({
     where: { id: teamId, isDeleted: false }
@@ -308,7 +309,8 @@ export const toggleTeamStatusService = async (id, status, actor) => {
     team.companyId,
     { status },
     { status: team.status },
-    actor.id
+    actor.id,
+    req
   );
 
   return updatedTeam;
@@ -317,7 +319,7 @@ export const toggleTeamStatusService = async (id, status, actor) => {
 /**
  * Soft deletes a team.
  */
-export const softDeleteTeamService = async (id, actor) => {
+export const softDeleteTeamService = async (id, actor, req = null) => {
   const teamId = Number(id);
   const team = await prisma.team.findUnique({
     where: { id: teamId, isDeleted: false }
@@ -333,9 +335,7 @@ export const softDeleteTeamService = async (id, actor) => {
     throw new ForbiddenError("You can only delete teams within your assigned branch");
   }
 
-  await softDeleteTeamAndLog(teamId, team.companyId, actor.id);
-
-  return { success: true, message: "Team soft deleted successfully" };
+  return await softDeleteTeamAndLog(teamId, team.companyId, actor.id, req);
 };
 
 /**
@@ -434,9 +434,9 @@ export const getTeamsListService = async (params, actor) => {
 /**
  * Service to remove a member (ISE) from a team.
  */
-export const removeTeamMemberService = async (id, userId, actor) => {
-  const teamId = Number(id);
-  const targetUserId = Number(userId);
+export const removeTeamMemberService = async (teamIdParam, userIdParam, actor, req = null) => {
+  const teamId = Number(teamIdParam);
+  const targetUserId = Number(userIdParam);
 
   const team = await prisma.team.findUnique({
     where: { id: teamId, isDeleted: false }
@@ -459,7 +459,8 @@ export const removeTeamMemberService = async (id, userId, actor) => {
       teamId,
       team.companyId,
       targetUserId,
-      actor.id
+      actor.id,
+      req
     );
     return updatedMembership;
   } catch (err) {
@@ -470,7 +471,7 @@ export const removeTeamMemberService = async (id, userId, actor) => {
 /**
  * Service to reassign/replace a team's BDE owner.
  */
-export const replaceTeamOwnerService = async (id, newBdeId, actor) => {
+export const replaceTeamOwnerService = async (id, newBdeId, actor, req = null) => {
   const teamId = Number(id);
   const targetBdeId = Number(newBdeId);
 
@@ -518,7 +519,8 @@ export const replaceTeamOwnerService = async (id, newBdeId, actor) => {
     team.companyId,
     targetBdeId,
     team.bdeId,
-    actor.id
+    actor.id,
+    req
   );
 
   return updatedTeam;

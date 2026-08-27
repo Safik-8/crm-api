@@ -35,7 +35,7 @@ const toType = (status) => ({ ...status, type: status.companyId ? "COMPANY" : "G
 
 // ── CREATE ────────────────────────────────────────────────────────────────────
 
-export const createLeadStatusService = async (data, actor) => {
+export const createLeadStatusService = async (data, actor, req = null) => {
   // Scope is derived from actor — never from client input
   const companyId = actor.companyId ?? null
 
@@ -86,7 +86,7 @@ export const createLeadStatusService = async (data, actor) => {
     )
 
     await createAuditLog(
-      { companyId, entityId: status.id, action: "CREATE",
+      { req, companyId, entityId: status.id, action: "CREATE",
         newValue: JSON.stringify({ name: status.name, code, displayColor: status.displayColor }),
         performedById: actor.id },
       tx
@@ -147,7 +147,7 @@ export const getLeadStatusesService = async (query, actor) => {
 
 // ── UPDATE ────────────────────────────────────────────────────────────────────
 
-export const updateLeadStatusService = async (id, data, actor) => {
+export const updateLeadStatusService = async (id, data, actor, req = null) => {
   const status = await findLeadStatusById(id)
   if (!status) throw new NotFoundError("Lead status")
 
@@ -186,7 +186,7 @@ export const updateLeadStatusService = async (id, data, actor) => {
     const updated = await updateLeadStatus(id, updatePayload, tx)
 
     await createAuditLog(
-      { companyId: status.companyId, entityId: status.id, action: "UPDATE",
+      { req, companyId: status.companyId, entityId: status.id, action: "UPDATE",
         oldValue: JSON.stringify({ name: status.name, displayColor: status.displayColor, isActive: status.isActive, isDefault: status.isDefault }),
         newValue: JSON.stringify(updatePayload), performedById: actor.id },
       tx
@@ -198,7 +198,7 @@ export const updateLeadStatusService = async (id, data, actor) => {
 
 // ── TOGGLE STATUS ─────────────────────────────────────────────────────────────
 
-export const toggleLeadStatusService = async (id, actor) => {
+export const toggleLeadStatusService = async (id, actor, req = null) => {
   const status = await findLeadStatusById(id)
   if (!status) throw new NotFoundError("Lead status")
 
@@ -212,7 +212,7 @@ export const toggleLeadStatusService = async (id, actor) => {
     const updated = await updateLeadStatus(id, { isActive: !status.isActive }, tx)
 
     await createAuditLog(
-      { companyId: status.companyId, entityId: status.id,
+      { req, companyId: status.companyId, entityId: status.id,
         action: "TOGGLE_STATUS",
         oldValue: JSON.stringify({ isActive: status.isActive }),
         newValue: JSON.stringify({ isActive: updated.isActive }),
@@ -226,7 +226,7 @@ export const toggleLeadStatusService = async (id, actor) => {
 
 // ── DELETE ────────────────────────────────────────────────────────────────────
 
-export const deleteLeadStatusService = async (id, actor) => {
+export const deleteLeadStatusService = async (id, actor, req = null) => {
   const status = await findLeadStatusById(id)
   if (!status) throw new NotFoundError("Lead status")
 
@@ -251,7 +251,7 @@ export const deleteLeadStatusService = async (id, actor) => {
 
   return prisma.$transaction(async (tx) => {
     await createAuditLog(
-      { companyId: status.companyId, entityId: status.id, action: "DELETE",
+      { req, companyId: status.companyId, entityId: status.id, action: "DELETE",
         oldValue: JSON.stringify({ name: status.name, code: status.code }),
         newValue: null, performedById: actor.id },
       tx

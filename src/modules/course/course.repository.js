@@ -157,24 +157,40 @@ export const countCourses = async (where, tx = prisma) => {
   return tx.course.count({ where });
 };
 
+import { recordAuditLog } from "../auditLog/auditLog.service.js";
+
 /**
- * Creates a record in the AuditLog table.
+ * Creates a record in the AuditLog table using central recordAuditLog service.
  *
  * @param {object} data - Audit log payload
  * @param {object} tx - Prisma client instance
+ * @param {object} [req=null]
  * @returns {Promise<object>} Created audit log record
  */
-export const createAuditLog = async (data, tx = prisma) => {
-  return tx.auditLog.create({
-    data: {
-      companyId: data.companyId,
-      entityType: "COURSE",
-      entityId: data.entityId,
-      action: data.action,
-      oldValue: data.oldValue || null,
-      newValue: data.newValue || null,
-      performedById: data.performedById
-    }
+export const createAuditLog = async (data, tx = prisma, req = null) => {
+  const reqObj = data?.req || req;
+  const actionCode = data?.action || "RECORD_UPDATED";
+  let actionType = data?.actionType;
+
+  if (!actionType) {
+    const actUpper = String(actionCode).toUpperCase();
+    if (actUpper.includes("CREATE")) actionType = "CREATE";
+    else if (actUpper.includes("DELETE")) actionType = "DELETE";
+    else actionType = "UPDATE";
+  }
+
+  return recordAuditLog({
+    req: reqObj,
+    tx,
+    companyId: data?.companyId ?? null,
+    moduleName: "COURSE",
+    entityType: data?.entityType || "COURSE",
+    entityId: data?.entityId,
+    actionType,
+    action: actionCode,
+    oldValue: data?.oldValue ?? null,
+    newValue: data?.newValue ?? null,
+    performedById: data?.performedById ?? null,
   });
 };
 

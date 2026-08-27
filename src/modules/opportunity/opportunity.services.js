@@ -2,12 +2,16 @@ import prisma from '../../config/db.js';
 import * as opportunityRepository from './opportunity.repository.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../utils/AppError.js';
 import { ROLE_RANKS } from '../../config/roleConstants.js';
+import { recordAuditLog } from '../auditLog/auditLog.service.js';
+
+// Delegate buildTxAuditData to central recordAuditLog service
+const buildTxAuditData = (data) => recordAuditLog(data);
 import { dispatchNotification } from '../notification/notification.dispatcher.js';
 
 /**
  * Creates a new Opportunity after applying HRBAC and qualification checks
  */
-export const createOpportunity = async (actor, payload) => {
+export const createOpportunity = async (actor, payload, req = null) => {
   const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN';
 
   // 1. Fetch Lead & verify tenant scope
@@ -99,7 +103,8 @@ export const createOpportunity = async (actor, payload) => {
     targetBranchId,
     payload,
     ownerId,
-    actor.id
+    actor.id,
+    req
   );
 
   dispatchNotification({
@@ -121,7 +126,7 @@ export const createOpportunity = async (actor, payload) => {
 /**
  * Updates an existing Opportunity with HRBAC rank guards
  */
-export const updateOpportunity = async (actor, id, payload) => {
+export const updateOpportunity = async (actor, id, payload, req = null) => {
   const opportunity = await opportunityRepository.findOpportunityById(id, actor.companyId);
   if (!opportunity) {
     throw new NotFoundError('Opportunity');
@@ -142,29 +147,13 @@ export const updateOpportunity = async (actor, id, payload) => {
     throw new ForbiddenError('You can only edit opportunities within your branch.');
   }
 
-  const updatedOpp = await opportunityRepository.updateOpportunityTx(id, actor.companyId, payload, actor.id);
-
-  if (payload.stageId && payload.stageId !== opportunity.stageId) {
-    dispatchNotification({
-      eventType: "OPPORTUNITY_STAGE_CHANGED",
-      companyId: actor.companyId,
-      branchId: opportunity.branchId,
-      senderId: actor.id,
-      recipientIds: [opportunity.ownerId, actor.id].filter(Boolean),
-      opportunityId: opportunity.id,
-      title: "Opportunity Stage Changed",
-      message: `Opportunity "${opportunity.opportunityName}" stage has been updated.`,
-      actionUrl: `/opportunities/${opportunity.id}`,
-    });
-  }
-
-  return updatedOpp;
+  return opportunityRepository.updateOpportunityTx(id, actor.companyId, payload, actor.id, req);
 };
 
 /**
  * Closes an Opportunity (WON, LOST, CANCELLED)
  */
-export const closeOpportunity = async (actor, id, payload) => {
+export const closeOpportunity = async (actor, id, payload, req = null) => {
   const opportunity = await opportunityRepository.findOpportunityById(id, actor.companyId);
   if (!opportunity) {
     throw new NotFoundError('Opportunity');
@@ -182,22 +171,7 @@ export const closeOpportunity = async (actor, id, payload) => {
     throw new ForbiddenError('You can only close opportunities within your branch.');
   }
 
-  const closedOpp = await opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id, payload.remarks, payload.reasonId);
-
-  const isWon = payload.outcome === "WON";
-  dispatchNotification({
-    eventType: isWon ? "OPPORTUNITY_WON" : "OPPORTUNITY_LOST",
-    companyId: actor.companyId,
-    branchId: opportunity.branchId,
-    senderId: actor.id,
-    recipientIds: [opportunity.ownerId, actor.id].filter(Boolean),
-    opportunityId: opportunity.id,
-    title: isWon ? "Opportunity Won 🎉" : "Opportunity Closed",
-    message: `Opportunity "${opportunity.opportunityName}" was closed as ${payload.outcome}${payload.remarks ? `: ${payload.remarks}` : ""}.`,
-    actionUrl: `/opportunities/${opportunity.id}`,
-  });
-
-  return closedOpp;
+  return opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id, payload.remarks, payload.reasonId, req);
 };
 
 /**
@@ -532,12 +506,12 @@ export const bulkUpdateOpportunityStagesService = async (actor, payload) => {
     }
   }
 
-  const isStartStage = (s) => 
-    s.stageType === 'QUALIFICATION' || 
-    s.code === 'QUALIFICATION' || 
+  const isStartStage = (s) =>
+    s.stageType === 'QUALIFICATION' ||
+    s.code === 'QUALIFICATION' ||
     s.name?.toLowerCase() === 'qualification' ||
-    s.stageType === 'PROSPECT' || 
-    s.code === 'PROSPECT' || 
+    s.stageType === 'PROSPECT' ||
+    s.code === 'PROSPECT' ||
     s.name?.toLowerCase() === 'prospect';
 
   const isTerminalStage = (s) => {
@@ -616,7 +590,7 @@ export const bulkUpdateOpportunityStagesService = async (actor, payload) => {
 /**
  * Move Opportunity Stage & Update status / probability
  */
-export const moveOpportunityStage = async (actor, id, payload) => {
+export const moveOpportunityStage = async (actor, id, payload, req = null) => {
   const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN';
   const opportunityWhere = { id: Number(id), isDeleted: false };
   if (!isSuperAdmin && actor.companyId) {
@@ -710,21 +684,23 @@ export const moveOpportunityStage = async (actor, id, payload) => {
     });
 
     // 4. Log Audit Trail
-    await tx.auditLog.create({
-      data: {
-        companyId,
-        entityType: 'OPPORTUNITY',
-        entityId: opportunity.id,
-        action: 'OPPORTUNITY_STAGE_CHANGED',
-        oldValue: JSON.stringify({ stageId: opportunity.stageId, status: opportunity.status }),
-        newValue: JSON.stringify({ stageId: newStage.id, status: targetStatus }),
-        performedById: actor.id,
-      },
+    await recordAuditLog({
+      req,
+      tx,
+      companyId,
+      moduleName: 'OPPORTUNITY',
+      actionType: 'UPDATE',
+      entityType: 'OPPORTUNITY',
+      entityId: opportunity.id,
+      action: 'OPPORTUNITY_STAGE_CHANGED',
+      oldValue: { stageId: opportunity.stageId, status: opportunity.status },
+      newValue: { stageId: newStage.id, status: targetStatus },
+      performedById: actor.id,
     });
 
     // If moved to a terminal stage, create deal/customer/revenue idempotently
     if (['WON', 'LOST', 'CANCELLED'].includes(targetStatus)) {
-      await opportunityRepository.createDealCustomerRevenueIfNeeded(tx, updatedOpp, targetStatus, actor.id, payload.reasonId);
+      await opportunityRepository.createDealCustomerRevenueIfNeeded(tx, updatedOpp, targetStatus, actor.id, payload.reasonId, null, req);
     }
 
     return updatedOpp;
