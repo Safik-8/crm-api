@@ -3,6 +3,7 @@
 import * as XLSX from "xlsx";
 import prisma from "../../config/db.js";
 import { autoAssignLead } from "./assignmentEngine.js";
+import { dispatchNotification } from "../notification/notification.dispatcher.js";
 import {
   BadRequestError,
   ForbiddenError,
@@ -961,7 +962,7 @@ export const updateLeadStageService = async (leadId, data, actor, req = null) =>
   }
 
   const now = new Date();
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // 1. Update the lead record
     const updated = await updateLead(id, {
       previousStageId:  lead.stageId,
@@ -1026,6 +1027,21 @@ export const updateLeadStageService = async (leadId, data, actor, req = null) =>
     maxWait: 15000,
     timeout: 30000
   });
+
+  // Dispatch real-time notification
+  dispatchNotification({
+    eventType: "LEAD_STATUS_CHANGED",
+    companyId: lead.companyId,
+    branchId: lead.branchId,
+    senderId: actor.id,
+    recipientIds: [lead.assignedToId, lead.createdById].filter(Boolean),
+    leadId: id,
+    title: "Lead Status Updated",
+    message: `Lead "${lead.name}" stage changed to "${targetStage.name}"${reason ? ` — Reason: ${reason}` : ""}.`,
+    actionUrl: `/leads?leadId=${id}`,
+  });
+
+  return result;
 };
 
 
@@ -2545,6 +2561,21 @@ export const assignLeadsService = async (data, actor, req = null) => {
 
         return updatedLead;
       });
+
+      // Dispatch notification to new & previous assignee
+      if (res.assignedToId || res.previousUserId) {
+        dispatchNotification({
+          eventType: res.previousUserId ? "LEAD_REASSIGNED" : "LEAD_ASSIGNED",
+          companyId: res.companyId,
+          branchId: res.branchId,
+          senderId: actor.id,
+          recipientIds: [res.assignedToId, res.previousUserId].filter(Boolean),
+          leadId,
+          title: res.previousUserId ? "Lead Reassigned" : "New Lead Assigned",
+          message: `Lead "${res.name}" has been ${res.previousUserId ? "reassigned" : "assigned"} to ${res.assignedTo?.name || "you"}.`,
+          actionUrl: `/leads?leadId=${leadId}`,
+        });
+      }
 
       results.push({ leadId, success: true, lead: res });
       successCount++;

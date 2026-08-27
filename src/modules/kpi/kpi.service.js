@@ -1,7 +1,7 @@
-// BackEnd/src/modules/kpi/kpi.service.js
-
 import prisma from "../../config/db.js";
 import { recordAuditLog } from "../auditLog/auditLog.service.js";
+import { dispatchNotification } from "../notification/notification.dispatcher.js";
+
 
 /**
  * Calculate live achievement value for a given KPI target based on existing CRM data.
@@ -724,6 +724,20 @@ export const createKpiTarget = async (user, data) => {
       createdById: user.id,
     },
   });
+
+  const recipientIds = [targetEmployeeId, user.id].filter(Boolean);
+  if (recipientIds.length > 0) {
+    dispatchNotification({
+      eventType: "TARGET_ACHIEVED",
+      companyId: targetCompanyId,
+      branchId: targetBranchId,
+      senderId: user.id,
+      recipientIds,
+      title: "New KPI Target Assigned",
+      message: `${kpiType} target of ${targetValue} assigned for ${duration.toLowerCase()} period.`,
+      actionUrl: `/kpi/${target.id}`,
+    });
+  }
 
   return target;
 };

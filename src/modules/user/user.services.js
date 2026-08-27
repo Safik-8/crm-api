@@ -23,6 +23,8 @@ import { hashPassword } from "../../utils/passwordUtils.js"
 import prisma from "../../config/db.js"
 import crypto from "crypto"
 import { parsePagination, parseSorting, buildSearchFilter } from "../../utils/queryHelpers.js"
+import { dispatchNotification } from "../notification/notification.dispatcher.js"
+
 
 // Helper to assert company-level multitenancy
 const assertCompanyScope = (actor, targetCompanyId) => {
@@ -195,6 +197,18 @@ export const createUserService = async (data, actor, req = null) => {
     },
     performedById: actor.id
   })
+
+  // Dispatch real-time notification
+  dispatchNotification({
+    eventType: "USER_CREATED",
+    companyId: Number(companyId),
+    branchId: Number(branchId),
+    senderId: actor.id,
+    recipientIds: [user.id, actor.id].filter(Boolean),
+    title: "New User Account Created",
+    message: `User "${user.name}" (${user.email}) has been registered in the system.`,
+    actionUrl: `/users`,
+  });
 
   // Return the created user along with the temporary password so the admin can copy it
   return {

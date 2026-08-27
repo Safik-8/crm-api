@@ -17,6 +17,8 @@ import {
 } from "./auth.repository.js"
 import { loginSchema, refreshSchema, forgotPasswordSchema, resetPasswordSchema } from "./auth.validation.js"
 import bcrypt from "bcryptjs"
+import { dispatchNotification } from "../notification/notification.dispatcher.js"
+
 import {
   generateAccessToken,
   generateRefreshToken
@@ -411,6 +413,16 @@ export const resetPasswordService = async (email, otp, newPassword) => {
   // Mark OTP as verified
   await markPasswordResetVerified(resetRecord.id)
 
+  dispatchNotification({
+    eventType: "PASSWORD_CHANGED",
+    companyId: user.companyId,
+    branchId: user.branchId,
+    recipientIds: [user.id],
+    title: "Password Reset Successfully",
+    message: "Your account password was recently reset.",
+    actionUrl: "/settings",
+  });
+
   return { success: true, message: "Password has been reset successfully" }
 }
 
@@ -461,5 +473,16 @@ export const changePasswordService = async (userId, currentPassword, newPassword
   // Update password and clear force flag
   await updateUserPassword(userId, passwordHash, false)
 
+  dispatchNotification({
+    eventType: "PASSWORD_CHANGED",
+    companyId: user.companyId,
+    branchId: user.branchId,
+    recipientIds: [user.id],
+    title: "Password Changed",
+    message: "Your account password has been changed successfully.",
+    actionUrl: "/settings",
+  });
+
   return { success: true, message: "Password updated successfully" }
 }
+

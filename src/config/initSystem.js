@@ -604,6 +604,40 @@ export const initializeSystem = async () => {
         for (const company of allCompanies) {
             await ensureCompanyCriteriaSeeded(company.id)
             console.log(`✅ Qualification criteria verified for company: ${company.name} (ID: ${company.id})`)
+
+            // ── STEP 7: SEED NOTIFICATION EVENT CONFIGS ──
+            const defaultEvents = [
+                { eventType: "LEAD_ASSIGNED", moduleName: "LEAD" },
+                { eventType: "LEAD_REASSIGNED", moduleName: "LEAD" },
+                { eventType: "LEAD_STATUS_CHANGED", moduleName: "LEAD" },
+                { eventType: "FOLLOWUP_REMINDER", moduleName: "FOLLOWUP" },
+                { eventType: "FOLLOWUP_MISSED", moduleName: "FOLLOWUP" },
+                { eventType: "FOLLOWUP_COMPLETED", moduleName: "FOLLOWUP" },
+                { eventType: "OPPORTUNITY_CREATED", moduleName: "OPPORTUNITY" },
+                { eventType: "OPPORTUNITY_STAGE_CHANGED", moduleName: "OPPORTUNITY" },
+                { eventType: "OPPORTUNITY_WON", moduleName: "OPPORTUNITY" },
+                { eventType: "OPPORTUNITY_LOST", moduleName: "OPPORTUNITY" },
+                { eventType: "TARGET_ACHIEVED", moduleName: "KPI" },
+                { eventType: "REVENUE_MILESTONE", moduleName: "REVENUE" },
+                { eventType: "KPI_BELOW_TARGET", moduleName: "KPI" },
+                { eventType: "USER_CREATED", moduleName: "SYSTEM" },
+                { eventType: "PASSWORD_CHANGED", moduleName: "SYSTEM" },
+                { eventType: "MAINTENANCE_ANNOUNCEMENT", moduleName: "SYSTEM" },
+                { eventType: "BACKUP_COMPLETED", moduleName: "SYSTEM" },
+            ]
+            for (const evt of defaultEvents) {
+                await prisma.notificationEventConfig.upsert({
+                    where: { companyId_eventType: { companyId: company.id, eventType: evt.eventType } },
+                    update: {},
+                    create: {
+                        companyId: company.id,
+                        eventType: evt.eventType,
+                        moduleName: evt.moduleName,
+                        isEnabled: true,
+                        channels: { inApp: true, email: true, push: false },
+                    }
+                }).catch(() => {})
+            }
         }
 
     } catch (error) {

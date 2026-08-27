@@ -1974,4 +1974,5 @@ model AnalyticsSnapshot {
   @@index([companyId])
   @@index([companyId, snapshotType])
   @@index([snapshotDate])
+  @@map("analytics_snapshots")
 }

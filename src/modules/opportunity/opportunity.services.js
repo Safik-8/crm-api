@@ -6,6 +6,7 @@ import { recordAuditLog } from '../auditLog/auditLog.service.js';
 
 // Delegate buildTxAuditData to central recordAuditLog service
 const buildTxAuditData = (data) => recordAuditLog(data);
+import { dispatchNotification } from '../notification/notification.dispatcher.js';
 
 /**
  * Creates a new Opportunity after applying HRBAC and qualification checks
@@ -97,7 +98,7 @@ export const createOpportunity = async (actor, payload, req = null) => {
   const targetCompanyId = actor.companyId || lead.companyId || 1;
   const targetBranchId = actor.branchId || lead.branchId;
 
-  return opportunityRepository.createOpportunityTx(
+  const createdOpp = await opportunityRepository.createOpportunityTx(
     targetCompanyId,
     targetBranchId,
     payload,
@@ -105,6 +106,21 @@ export const createOpportunity = async (actor, payload, req = null) => {
     actor.id,
     req
   );
+
+  dispatchNotification({
+    eventType: "OPPORTUNITY_CREATED",
+    companyId: targetCompanyId,
+    branchId: targetBranchId,
+    senderId: actor.id,
+    recipientIds: [ownerId, actor.id].filter(Boolean),
+    opportunityId: createdOpp.id,
+    leadId: payload.leadId,
+    title: "New Opportunity Created",
+    message: `Opportunity "${createdOpp.opportunityName}" has been created.`,
+    actionUrl: `/opportunities/${createdOpp.id}`,
+  });
+
+  return createdOpp;
 };
 
 /**

@@ -1,5 +1,6 @@
 import prisma from "../../config/db.js";
 import { recordAuditLog } from "../auditLog/auditLog.service.js";
+import { dispatchNotification } from "../notification/notification.dispatcher.js";
 
 /**
  * Automatically assigns a lead to an eligible user or team in the lead's branch.
@@ -378,6 +379,20 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
       newValue: { assignedToId, teamId },
       performedById: lead.createdById
     });
+
+    // Real-time notification to auto-assigned sales rep
+    if (assignedToId) {
+      dispatchNotification({
+        eventType: "LEAD_ASSIGNED",
+        companyId: lead.companyId,
+        branchId: lead.branchId,
+        recipientIds: [assignedToId],
+        leadId,
+        title: "New Lead Assigned",
+        message: `Lead "${lead.name}" has been auto-assigned to you.`,
+        actionUrl: `/leads?leadId=${leadId}`,
+      });
+    }
   } else {
     // All candidates are full
     await handleAllFullOrNoCandidates(lead, tx);
@@ -412,17 +427,18 @@ const handleAllFullOrNoCandidates = async (lead, tx = prisma) => {
       }
     });
 
-    for (const manager of managers) {
-      await tx.notification.create({
-        data: {
-          userId: manager.id,
-          companyId: lead.companyId,
-          branchId: lead.branchId,
-          notificationType: "ASSIGNMENT_ALERT",
-          message: `Lead "${lead.name}" remains unassigned because all eligible candidates in the branch have hit their daily limit.`,
-          status: "UNREAD"
-        }
+    if (managers.length > 0) {
+      dispatchNotification({
+        eventType: "LEAD_ASSIGNED",
+        companyId: lead.companyId,
+        branchId: lead.branchId,
+        recipientIds: managers.map(m => m.id),
+        leadId: lead.id,
+        title: "Unassigned Lead Alert",
+        message: `Lead "${lead.name}" remains unassigned because all eligible candidates in the branch have hit their daily limit.`,
+        actionUrl: `/leads?leadId=${lead.id}`,
       });
     }
   }
 };
+
