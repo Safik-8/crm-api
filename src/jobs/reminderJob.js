@@ -6,6 +6,7 @@ import {
   createNotificationDb,
 } from "../modules/notification/notification.repository.js";
 import { buildNotificationRecipients } from "../modules/followup/followup.repository.js";
+import { dispatchNotification } from "../modules/notification/notification.dispatcher.js";
 
 const buildReminderMessage = (type, followup) => {
   const dt      = new Date(followup.scheduledAt);
@@ -27,16 +28,15 @@ const buildReminderMessage = (type, followup) => {
  */
 const createRecipientNotif = async (userId, followup, notificationType, message, expiresAt = null) => {
   try {
-    await createNotificationDb({
-      userId,
-      leadId:           followup.leadId,
-      companyId:        followup.companyId,
-      branchId:         followup.branchId ?? null,
-      followupId:       followup.id,
-      notificationType,
+    await dispatchNotification({
+      eventType: notificationType === "REMINDER" ? "FOLLOWUP_REMINDER" : "FOLLOWUP_MISSED",
+      companyId: followup.companyId,
+      branchId: followup.branchId ?? null,
+      recipientIds: [userId],
+      leadId: followup.leadId,
+      followupId: followup.id,
       message,
-      status:           "UNREAD",
-      expiresAt,
+      actionUrl: `/leads/${followup.leadId}`,
     });
   } catch (err) {
     console.error(`[ReminderJob] Failed to create ${notificationType} for user ${userId} followup ${followup.id}:`, err.message);

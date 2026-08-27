@@ -34,8 +34,8 @@ export const updateNotificationDb = (id, data) =>
 
 export const markAllReadDb = (userId) =>
   prisma.notification.updateMany({
-    where: { userId, status: "UNREAD" },
-    data:  { status: "READ", readAt: new Date() },
+    where: { userId, isRead: false },
+    data:  { status: "READ", isRead: true, readAt: new Date() },
   });
 
 export const deleteNotificationDb = (id) =>
@@ -43,6 +43,16 @@ export const deleteNotificationDb = (id) =>
 
 export const deleteAllNotificationsDb = (userId) =>
   prisma.notification.deleteMany({ where: { userId } });
+
+// ── NOTIFICATION CONFIGS ──────────────────────────────────────────────────────
+export const findNotificationConfigs = (companyId) =>
+  prisma.notificationEventConfig.findMany({
+    where: companyId ? { companyId } : {},
+    orderBy: { moduleName: "asc" },
+  });
+
+export const updateNotificationConfigDb = (id, data) =>
+  prisma.notificationEventConfig.update({ where: { id }, data });
 
 // ── SCANNER HELPERS ───────────────────────────────────────────────────────────
 
