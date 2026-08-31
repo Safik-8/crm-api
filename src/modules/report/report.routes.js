@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/Authenticate.js';
 import { hasPermission } from '../../middleware/hasPermission.js';
+import { exportLimiter } from '../../middleware/rateLimiters.js';
 import {
   getReportsList,
   generateReport,
@@ -15,7 +16,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/list', hasPermission('REPORT', 'canView'), getReportsList);
-router.post('/generate', hasPermission('REPORT', 'canCreate'), generateReport);
+router.post('/generate', exportLimiter, hasPermission('REPORT', 'canCreate'), generateReport);
 router.post('/save', hasPermission('REPORT', 'canEdit'), saveConfig);
 router.put('/save/:id', hasPermission('REPORT', 'canEdit'), updateConfig);
 router.delete('/save/:id', hasPermission('REPORT', 'canDelete'), deleteConfig);

@@ -3,6 +3,15 @@
 import { z } from "zod"
 import { ValidationError } from "../../utils/AppError.js"
 
+// Reusable password validation schema enforcing 5.2 security requirements
+export const passwordSchema = z.string({ required_error: "Password is required" })
+  .nonempty("Password is required")
+  .min(8, "Password must be at least 8 characters")
+  .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+  .regex(/[a-z]/, "Password must contain at least one lowercase letter")
+  .regex(/[0-9]/, "Password must contain at least one number")
+  .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character")
+
 // Schema to validate user login input
 export const loginSchema = z.object({
   email: z.string({ required_error: "Email is required" })
@@ -37,9 +46,7 @@ export const resetPasswordSchema = z.object({
     .trim()
     .nonempty("OTP is required")
     .length(6, "OTP must be exactly 6 characters"),
-  password: z.string({ required_error: "New password is required" })
-    .nonempty("New password is required")
-    .min(6, "Password must be at least 6 characters")
+  password: passwordSchema
 })
 
 // Schema to validate OTP verification input
@@ -58,9 +65,7 @@ export const verifyOtpSchema = z.object({
 export const changePasswordSchema = z.object({
   currentPassword: z.string({ required_error: "Current password is required" })
     .nonempty("Current password is required"),
-  newPassword: z.string({ required_error: "New password is required" })
-    .nonempty("New password is required")
-    .min(6, "New password must be at least 6 characters")
+  newPassword: passwordSchema
 })
 
 /**
