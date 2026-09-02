@@ -2,6 +2,7 @@
 
 import { z } from "zod"
 import { ValidationError } from "../../utils/AppError.js"
+import { passwordSchema } from "../auth/auth.validation.js"
 
 // Validation schema for creating a new branch
 export const createBranchSchema = z.object({
@@ -42,9 +43,7 @@ export const assignUserSchema = z.object({
   email: z.string({
     required_error: "Email address is required"
   }).trim().email("Enter a valid email address").toLowerCase(),
-  password: z.string({
-    required_error: "Password is required"
-  }).min(6, "Password must be at least 6 characters"),
+  password: passwordSchema,
   primaryRole: z.string({
     required_error: "Primary Role is required"
   }).trim().min(1, "Primary Role is required"),

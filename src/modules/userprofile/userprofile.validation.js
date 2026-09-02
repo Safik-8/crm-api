@@ -2,6 +2,7 @@
 
 import { z } from "zod"
 import { ValidationError } from "../../utils/AppError.js"
+import { passwordSchema } from "../auth/auth.validation.js"
 
 export const updateUserProfileSchema = z.object({
   firstName: z.string().trim().max(100, "First name must be under 100 characters").optional().nullable(),
@@ -21,8 +22,7 @@ export const updateUserProfileSchema = z.object({
 export const changePasswordSchema = z.object({
   currentPassword: z.string({ required_error: "Current password is required" })
     .min(1, "Current password is required"),
-  newPassword: z.string({ required_error: "New password is required" })
-    .min(6, "New password must be at least 6 characters long"),
+  newPassword: passwordSchema,
   confirmPassword: z.string({ required_error: "Confirm password is required" })
     .min(1, "Confirm password is required")
 }).refine((data) => data.newPassword === data.confirmPassword, {

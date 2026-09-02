@@ -2,6 +2,7 @@
 
 import { z } from "zod"
 import { ValidationError } from "../../utils/AppError.js"
+import { passwordSchema } from "../auth/auth.validation.js"
 
 const optionalUrlSchema = z
   .string()
@@ -45,9 +46,7 @@ export const createCompanySchema = z.object({
     .trim()
     .nonempty("Admin email is required")
     .email("Invalid admin email format"),
-  adminPassword: z.string({ required_error: "Admin password is required" })
-    .nonempty("Admin password is required")
-    .min(6, "Admin password must be at least 6 characters"),
+  adminPassword: passwordSchema,
   adminSecondaryRoles: z.array(z.string().trim()).optional().default([])
 })
 

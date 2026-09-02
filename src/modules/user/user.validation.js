@@ -2,6 +2,7 @@
 
 import { z } from "zod"
 import { ValidationError } from "../../utils/AppError.js"
+import { passwordSchema } from "../auth/auth.validation.js"
 
 // Schema for onboarding a new user
 export const createUserSchema = z.object({
@@ -14,6 +15,7 @@ export const createUserSchema = z.object({
   email: z.string({
     required_error: "Email is required"
   }).trim().email("Enter a valid email address").toLowerCase(),
+  password: passwordSchema.optional(),
   mobileNumber: z.string({
     required_error: "Mobile number is required"
   }).trim().regex(/^\d{10}$/, "Mobile number must be exactly 10 digits"),
