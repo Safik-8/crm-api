@@ -19,6 +19,7 @@ import {
 } from "../../utils/AppError.js"
 import prisma from "../../config/db.js"
 import { MODULES } from "../../config/roleConstants.js"
+import { recordAuditLog } from "../auditLog/auditLog.service.js"
 
 // Core system role names that cannot be renamed, re-ranked, or deleted
 const SYSTEM_ROLE_NAMES = ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER", "BDE", "ISE"]
@@ -274,7 +275,20 @@ export const createRoleService = async (data, actor) => {
       await upsertRolePermission(role.id, moduleName, perm, tx)
     }
 
-    return findRoleById(role.id, tx)
+    const createdRole = await findRoleById(role.id, tx)
+
+    // Record audit log
+    await recordAuditLog({
+      action: "ROLE_CREATED",
+      entityType: "ROLE",
+      entityId: role.id,
+      performedById: actor.id,
+      companyId: role.companyId || actor.companyId,
+      details: { roleName: role.name, rank: role.rank },
+      tx
+    })
+
+    return createdRole
   }, {
     maxWait: 15000,
     timeout: 30000
@@ -361,7 +375,20 @@ export const updateRoleService = async (id, data, actor) => {
       }
     }
 
-    return findRoleById(role.id, tx)
+    const resultRole = await findRoleById(role.id, tx)
+
+    // Record audit log
+    await recordAuditLog({
+      action: "ROLE_UPDATED",
+      entityType: "ROLE",
+      entityId: role.id,
+      performedById: actor.id,
+      companyId: role.companyId || actor.companyId,
+      details: { roleName: role.name, rank: role.rank },
+      tx
+    })
+
+    return resultRole
   }, {
     maxWait: 15000,
     timeout: 30000
@@ -450,6 +477,16 @@ export const deleteRoleService = async (id, actor, reassignRoleId) => {
     await deleteRolePermissions(role.id, tx)
     // 2. Delete the role
     await deleteRole(role.id, tx)
+    // 3. Audit log
+    await recordAuditLog({
+      action: "ROLE_DELETED",
+      entityType: "ROLE",
+      entityId: role.id,
+      performedById: actor.id,
+      companyId: role.companyId || actor.companyId,
+      details: { roleName: role.name },
+      tx
+    })
     return { success: true, message: "Role successfully deleted" }
   }, {
     maxWait: 15000,
@@ -485,6 +522,16 @@ export const toggleRoleStatusService = async (id, actor) => {
 
   const nextStatus = role.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"
   const updated = await updateRole(role.id, { status: nextStatus })
+
+  await recordAuditLog({
+    action: "ROLE_STATUS_TOGGLED",
+    entityType: "ROLE",
+    entityId: role.id,
+    performedById: actor.id,
+    companyId: role.companyId || actor.companyId,
+    details: { roleName: role.name, newStatus: nextStatus }
+  })
+
   return updated
 }
 

@@ -687,7 +687,6 @@ export const seedCompanySystemRoles = async (companyId, tx = prisma) => {
                     name: masterRole.name,
                     description: masterRole.description,
                     rank: masterRole.rank,
-                    dataScope: masterRole.dataScope,
                     isSystem: true, // Display as SYSTEM role in UI
                     status: "ACTIVE",
                     companyId: companyId
