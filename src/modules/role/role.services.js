@@ -202,7 +202,7 @@ export const calculateCustomRoleRank = async (companyId, hierarchyBracket = 'COM
 /**
  * Creates a new custom role with its associated permissions.
  */
-export const createRoleService = async (data, actor) => {
+export const createRoleService = async (data, actor, req = null) => {
   assertRoleManagementAuthority(actor)
 
   const { name, description, hierarchyBracket = "COMPANY_ADMIN_TO_BRANCH_MANAGER", permissions = [] } = data
@@ -279,6 +279,8 @@ export const createRoleService = async (data, actor) => {
 
     // Record audit log
     await recordAuditLog({
+      req,
+      moduleName: "ROLE_PERMISSION",
       action: "ROLE_CREATED",
       entityType: "ROLE",
       entityId: role.id,
@@ -298,7 +300,7 @@ export const createRoleService = async (data, actor) => {
 /**
  * Updates a role and its permissions.
  */
-export const updateRoleService = async (id, data, actor) => {
+export const updateRoleService = async (id, data, actor, req = null) => {
   assertRoleManagementAuthority(actor)
 
   const role = await findRoleById(id)
@@ -379,6 +381,8 @@ export const updateRoleService = async (id, data, actor) => {
 
     // Record audit log
     await recordAuditLog({
+      req,
+      moduleName: "ROLE_PERMISSION",
       action: "ROLE_UPDATED",
       entityType: "ROLE",
       entityId: role.id,
@@ -398,7 +402,7 @@ export const updateRoleService = async (id, data, actor) => {
 /**
  * Deletes a custom role
  */
-export const deleteRoleService = async (id, actor, reassignRoleId) => {
+export const deleteRoleService = async (id, actor, reassignRoleId, req = null) => {
   assertRoleManagementAuthority(actor)
 
   const role = await findRoleById(id)
@@ -479,6 +483,8 @@ export const deleteRoleService = async (id, actor, reassignRoleId) => {
     await deleteRole(role.id, tx)
     // 3. Audit log
     await recordAuditLog({
+      req,
+      moduleName: "ROLE_PERMISSION",
       action: "ROLE_DELETED",
       entityType: "ROLE",
       entityId: role.id,
@@ -497,7 +503,7 @@ export const deleteRoleService = async (id, actor, reassignRoleId) => {
 /**
  * Toggles a custom role's status
  */
-export const toggleRoleStatusService = async (id, actor) => {
+export const toggleRoleStatusService = async (id, actor, req = null) => {
   assertRoleManagementAuthority(actor)
 
   const role = await findRoleById(id)
@@ -524,6 +530,8 @@ export const toggleRoleStatusService = async (id, actor) => {
   const updated = await updateRole(role.id, { status: nextStatus })
 
   await recordAuditLog({
+    req,
+    moduleName: "ROLE_PERMISSION",
     action: "ROLE_STATUS_TOGGLED",
     entityType: "ROLE",
     entityId: role.id,

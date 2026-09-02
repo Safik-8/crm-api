@@ -32,7 +32,7 @@ export const getRoleById = async (req, res, next) => {
 
 export const createRole = async (req, res, next) => {
   try {
-    const role = await createRoleService(req.body, req.user)
+    const role = await createRoleService(req.body, req.user, req)
     return sendSuccess(res, { role }, "Role created successfully", 201)
   } catch (err) {
     next(err)
@@ -42,7 +42,7 @@ export const createRole = async (req, res, next) => {
 export const updateRole = async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10)
-    const role = await updateRoleService(id, req.body, req.user)
+    const role = await updateRoleService(id, req.body, req.user, req)
     return sendSuccess(res, { role }, "Role updated successfully")
   } catch (err) {
     next(err)
@@ -53,8 +53,8 @@ export const deleteRole = async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10)
     const reassignRoleId = req.query.reassignRoleId ? parseInt(req.query.reassignRoleId, 10) : (req.body.reassignRoleId ? parseInt(req.body.reassignRoleId, 10) : undefined)
-    const result = await deleteRoleService(id, req.user, reassignRoleId)
-    return sendSuccess(res, result, result.message || "Role deleted successfully")
+    const result = await deleteRoleService(id, req.user, reassignRoleId, req)
+    return sendSuccess(res, result, "Role deleted successfully")
   } catch (err) {
     next(err)
   }
@@ -63,8 +63,8 @@ export const deleteRole = async (req, res, next) => {
 export const toggleRoleStatus = async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10)
-    const role = await toggleRoleStatusService(id, req.user)
-    return sendSuccess(res, { role }, "Role status toggled successfully")
+    const role = await toggleRoleStatusService(id, req.user, req)
+    return sendSuccess(res, { role }, "Role status updated successfully")
   } catch (err) {
     next(err)
   }
