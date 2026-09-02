@@ -204,13 +204,7 @@ export const calculateCustomRoleRank = async (companyId, hierarchyBracket = 'COM
 export const createRoleService = async (data, actor) => {
   assertRoleManagementAuthority(actor)
 
-  const { name, description, dataScope = "BRANCH", hierarchyBracket = "COMPANY_ADMIN_TO_BRANCH_MANAGER", permissions = [] } = data
-
-  // Guardrail: Cannot grant COMPANY dataScope if actor is branch-restricted
-  const isActorCompanyWide = actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN" || actor.primaryRoleRank >= 80 || actor.dataScope === "COMPANY";
-  if (dataScope === "COMPANY" && !isActorCompanyWide) {
-    throw new ForbiddenError("Cannot grant Company-wide data scope because your own scope is branch-restricted")
-  }
+  const { name, description, hierarchyBracket = "COMPANY_ADMIN_TO_BRANCH_MANAGER", permissions = [] } = data
 
   // 1. Company scope: Custom roles are scoped to the actor's company
   const companyId = actor.primaryRole === "SUPER_ADMIN" ? (data.companyId !== undefined ? data.companyId : null) : actor.companyId
@@ -238,7 +232,6 @@ export const createRoleService = async (data, actor) => {
       name: formattedName,
       description: description?.trim() || null,
       rank,
-      dataScope,
       companyId,
       isSystem: false,
       status: "ACTIVE",
@@ -324,14 +317,6 @@ export const updateRoleService = async (id, data, actor) => {
     }
   }
 
-  // Guardrail for dataScope update
-  if (data.dataScope !== undefined && role.companyId !== null) {
-    const isActorCompanyWide = actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN" || actor.primaryRoleRank >= 80 || actor.dataScope === "COMPANY";
-    if (data.dataScope === "COMPANY" && !isActorCompanyWide) {
-      throw new ForbiddenError("Cannot grant Company-wide data scope because your own scope is branch-restricted")
-    }
-  }
-
   // Name uniqueness check if name is changing
   if (data.name && data.name.trim() !== role.name && !isCoreSystemRole) {
     const formattedName = data.name.trim()
@@ -347,7 +332,6 @@ export const updateRoleService = async (id, data, actor) => {
     if (data.name && !isCoreSystemRole) updatedRoleData.name = data.name.trim()
     if (data.description !== undefined) updatedRoleData.description = data.description?.trim() || null
     if (data.rank !== undefined && !isCoreSystemRole) updatedRoleData.rank = Number(data.rank)
-    if (data.dataScope !== undefined && role.companyId !== null) updatedRoleData.dataScope = data.dataScope
     if (data.status && role.companyId !== null) updatedRoleData.status = data.status
 
     let updatedRole = role
