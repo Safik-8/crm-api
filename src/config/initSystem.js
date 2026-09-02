@@ -98,7 +98,7 @@ const ROLE_PERMISSIONS = {
     },
 
     BRANCH_MANAGER: {
-        SYSTEM_SETTINGS: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        SYSTEM_SETTINGS: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         COMPANY: { canView: false, canCreate: false, canEdit: false, canDelete: false },
         BRANCH: { canView: true, canCreate: false, canEdit: true, canDelete: false },
         ROLE_PERMISSION: { canView: false, canCreate: false, canEdit: false, canDelete: false },

@@ -3,6 +3,24 @@
 import { z } from "zod"
 import { ValidationError } from "../../utils/AppError.js"
 
+const optionalUrlSchema = z
+  .string()
+  .trim()
+  .refine(
+    (val) => {
+      if (!val || val === "") return true
+      try {
+        const parsed = new URL(val)
+        return parsed.protocol === "http:" || parsed.protocol === "https:"
+      } catch {
+        return false
+      }
+    },
+    { message: "Must be a valid URL starting with http:// or https:// (e.g. https://example.com)" }
+  )
+  .nullable()
+  .optional()
+
 // Schema to validate company onboarding/creation input (includes Company Details + Company Admin fields)
 export const createCompanySchema = z.object({
   // Company Details
@@ -13,9 +31,9 @@ export const createCompanySchema = z.object({
     .trim()
     .nonempty("Company code is required")
     .regex(/^[A-Za-z0-9_-]+$/, "Company code must be alphanumeric and can only contain dashes or underscores"),
-  logo: z.string().trim().optional(),
+  logo: optionalUrlSchema,
   industry: z.string().trim().optional(),
-  website: z.string().trim().optional(),
+  website: optionalUrlSchema,
   address: z.string().trim().optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
 
@@ -36,9 +54,9 @@ export const createCompanySchema = z.object({
 // Schema to validate company updates (locks code from editing)
 export const updateCompanySchema = z.object({
   name: z.string().trim().nonempty("Company name cannot be empty").optional(),
-  logo: z.string().trim().optional(),
+  logo: optionalUrlSchema,
   industry: z.string().trim().optional(),
-  website: z.string().trim().optional(),
+  website: optionalUrlSchema,
   address: z.string().trim().optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional()
 })

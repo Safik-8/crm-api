@@ -116,16 +116,35 @@ export const dispatchNotification = async (params) => {
       data: notificationsToCreate,
     });
 
-    // Real-time socket emit to each recipient's user room
-    validRecipients.forEach((userId) => {
-      emitToUser(userId, "notification:new", {
-        title: notifTitle,
-        message,
-        notificationType: eventType,
-        moduleName,
-        priority: finalPriority,
-        actionUrl,
-        createdAt: new Date().toISOString(),
+    import("./notification.repository.js").then(async ({ countUnread }) => {
+      for (const userId of validRecipients) {
+        emitToUser(userId, "notification:new", {
+          title: notifTitle,
+          message,
+          notificationType: eventType,
+          moduleName,
+          priority: finalPriority,
+          actionUrl,
+          senderId: senderId ?? null,
+          createdAt: new Date().toISOString(),
+        });
+        try {
+          const unread = await countUnread({ userId });
+          emitToUser(userId, "notification:count", { unreadCount: unread });
+        } catch (_) {}
+      }
+    }).catch(() => {
+      validRecipients.forEach((userId) => {
+        emitToUser(userId, "notification:new", {
+          title: notifTitle,
+          message,
+          notificationType: eventType,
+          moduleName,
+          priority: finalPriority,
+          actionUrl,
+          senderId: senderId ?? null,
+          createdAt: new Date().toISOString(),
+        });
       });
     });
   } catch (err) {

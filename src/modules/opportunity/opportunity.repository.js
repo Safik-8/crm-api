@@ -252,14 +252,32 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
  */
 export const createOpportunityTx = async (companyId, branchId, data, ownerId, createdById, req = null) => {
   return prisma.$transaction(async (tx) => {
-    // 0. Resolve target OpportunityStage and default probability
+    // 0. Resolve target OpportunityStage and default probability from payload or SystemSettings
     let stageId = data.stageId ? Number(data.stageId) : null;
     let targetStage = null;
+    let sysSettings = null;
+
+    if (companyId) {
+      try {
+        sysSettings = await tx.systemSettings.findUnique({
+          where: { companyId: Number(companyId) },
+          select: { defaultOpportunityStageId: true, defaultOpportunityWinProb: true }
+        });
+      } catch (_) {}
+    }
+
     if (stageId) {
       targetStage = await tx.opportunityStage.findFirst({
         where: { id: stageId, companyId },
       });
     }
+
+    if (!targetStage && sysSettings?.defaultOpportunityStageId) {
+      targetStage = await tx.opportunityStage.findFirst({
+        where: { id: sysSettings.defaultOpportunityStageId, companyId, status: 'ACTIVE' },
+      });
+    }
+
     if (!targetStage) {
       targetStage = await tx.opportunityStage.findFirst({
         where: { companyId, status: 'ACTIVE' },
@@ -277,7 +295,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
 
     let probability = data.probabilityPercentage;
     if (probability === undefined || probability === null || probability === '') {
-      probability = targetStage?.defaultProbabilityPct || 10;
+      probability = sysSettings?.defaultOpportunityWinProb || targetStage?.defaultProbabilityPct || 50;
     }
 
     // 2. Create Opportunity

@@ -112,7 +112,7 @@ export const createOpportunity = async (actor, payload, req = null) => {
     companyId: targetCompanyId,
     branchId: targetBranchId,
     senderId: actor.id,
-    recipientIds: [ownerId, actor.id].filter(Boolean),
+    recipientIds: [ownerId && ownerId !== actor.id ? ownerId : null].filter(Boolean),
     opportunityId: createdOpp.id,
     leadId: payload.leadId,
     title: "New Opportunity Created",

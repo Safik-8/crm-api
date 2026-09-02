@@ -16,6 +16,7 @@ import {
 } from "../../utils/AppError.js"
 import { hashPassword } from "../../utils/passwordUtils.js"
 import prisma from "../../config/db.js"
+import { settingsCache } from "../../services/settingsCache.service.js"
 
 /**
  * Onboards a new company and creates its default Company Admin user atomically within a transaction.
@@ -297,7 +298,7 @@ export const updateCompanyService = async (id, data, actor) => {
   }
 
   const { name, logo, industry, website, address, status } = data
-  return updateCompany(companyId, {
+  const updatedCompany = await updateCompany(companyId, {
     ...(name && { name: name.trim() }),
     ...(logo !== undefined && { logo: logo?.trim() || null }),
     ...(industry !== undefined && { industry: industry?.trim() || null }),
@@ -305,4 +306,33 @@ export const updateCompanyService = async (id, data, actor) => {
     ...(address !== undefined && { address: address?.trim() || null }),
     ...(status && { status })
   })
+
+  // Synchronize company_settings table and invalidate cache
+  try {
+    const settingsUpdates = {}
+    if (name) {
+      settingsUpdates.companyName = name.trim()
+      settingsUpdates.registeredBusinessName = name.trim()
+    }
+    if (logo !== undefined) settingsUpdates.companyLogo = logo?.trim() || null
+    if (website !== undefined) settingsUpdates.website = website?.trim() || null
+    if (address !== undefined) settingsUpdates.businessAddress = address?.trim() || null
+    if (industry !== undefined) settingsUpdates.industryType = industry?.trim() || null
+
+    if (Object.keys(settingsUpdates).length > 0) {
+      await prisma.companySettings.upsert({
+        where: { companyId },
+        create: {
+          companyId,
+          ...settingsUpdates,
+        },
+        update: settingsUpdates,
+      })
+      settingsCache.invalidate(companyId)
+    }
+  } catch (err) {
+    console.error("[CompanyService] Failed to sync company_settings:", err)
+  }
+
+  return updatedCompany
 }

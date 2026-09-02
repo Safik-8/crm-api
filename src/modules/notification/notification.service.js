@@ -1,4 +1,5 @@
 import { BadRequestError, ForbiddenError, NotFoundError } from "../../utils/AppError.js";
+import { emitToUser } from "../../sockets/socket.emitter.js";
 import {
   findNotifications, countNotifications, countUnread,
   findNotificationById, updateNotificationDb, markAllReadDb,
@@ -158,11 +159,19 @@ export const markNotificationReadService = async (id, actor) => {
     throw new ForbiddenError("You can only update your own notifications");
   }
 
-  return updateNotificationDb(notifId, { status: "READ", isRead: true, readAt: new Date() });
+  const updated = await updateNotificationDb(notifId, { status: "READ", isRead: true, readAt: new Date() });
+  try {
+    const unread = await countUnread({ userId: actor.id, ...(actor.companyId ? { companyId: actor.companyId } : {}) });
+    emitToUser(actor.id, "notification:count", { unreadCount: unread });
+  } catch (_) {}
+  return updated;
 };
 
 export const markAllReadService = async (actor) => {
   await markAllReadDb(actor.id);
+  try {
+    emitToUser(actor.id, "notification:count", { unreadCount: 0 });
+  } catch (_) {}
   return { success: true, message: "All notifications marked as read" };
 };
 
@@ -179,11 +188,18 @@ export const deleteNotificationService = async (id, actor) => {
   }
 
   await deleteNotificationDb(notifId);
+  try {
+    const unread = await countUnread({ userId: actor.id, ...(actor.companyId ? { companyId: actor.companyId } : {}) });
+    emitToUser(actor.id, "notification:count", { unreadCount: unread });
+  } catch (_) {}
   return { success: true, message: "Notification deleted" };
 };
 
 export const deleteAllNotificationsService = async (actor) => {
   await deleteAllNotificationsDb(actor.id);
+  try {
+    emitToUser(actor.id, "notification:count", { unreadCount: 0 });
+  } catch (_) {}
   return { success: true, message: "All personal notifications deleted successfully" };
 };
 

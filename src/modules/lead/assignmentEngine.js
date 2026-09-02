@@ -18,14 +18,25 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
   }
 
   const branch = lead.branch;
-  if (!branch || !branch.autoAssignmentEnabled) {
+  let sysSettings = null;
+  if (lead.companyId) {
+    try {
+      sysSettings = await tx.systemSettings.findUnique({
+        where: { companyId: Number(lead.companyId) },
+        select: { autoAssignmentEnabled: true, defaultAssignmentAlgorithm: true }
+      });
+    } catch (_) {}
+  }
+
+  const isAutoAssignmentActive = branch?.autoAssignmentEnabled ?? sysSettings?.autoAssignmentEnabled ?? false;
+  if (!isAutoAssignmentActive) {
     return;
   }
 
   // 1. Resolve limits and configuration
-  const maxLimit = branch.maxDailyLeadsPerUser ?? 50;
-  const algorithm = branch.assignmentAlgorithm ?? "ROUND_ROBIN";
-  const resolutionLevel = branch.assignmentResolutionLevel ?? "PERSON";
+  const maxLimit = branch?.maxDailyLeadsPerUser ?? 50;
+  const algorithm = branch?.assignmentAlgorithm || sysSettings?.defaultAssignmentAlgorithm || "ROUND_ROBIN";
+  const resolutionLevel = branch?.assignmentResolutionLevel ?? "PERSON";
 
   // Date boundaries for today (local server timezone, consistent with spec)
   const startOfToday = new Date();

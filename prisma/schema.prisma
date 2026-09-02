@@ -431,6 +431,7 @@ model Pipeline {
   stages         PipelineStage[]
   leads          Lead[]
   leadImportLogs LeadImportLog[]
+  companySettings CompanySettings[] @relation("CompanyDefaultPipeline")
 
   @@index([branchId])
   @@index([companyId])
@@ -607,6 +608,7 @@ model LeadStatus {
 
   company Company? @relation(fields: [companyId], references: [id])
   leads   Lead[]
+  companySettings CompanySettings[] @relation("CompanyDefaultLeadStatus")
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -1088,18 +1090,28 @@ model CompanySettings {
   timeFormat     String  @default("24H") @map("time_format")
   language       String  @default("en")
 
-  // 2. CRM Settings
-  defaultLeadStatusId         Int?    @map("default_lead_status_id")
-  autoAssignmentEnabled       Boolean @default(false) @map("auto_assignment_enabled")
-  defaultAssignmentAlgorithm  String  @default("ROUND_ROBIN") @map("default_assignment_algorithm")
-  opportunityDefaults         Json?   @map("opportunity_defaults")
-  pipelineDefaults            Json?   @map("pipeline_defaults")
-  defaultFollowupTime         String  @default("09:00") @map("default_followup_time")
-  leadNumberFormat            String  @default("LD-{YYYY}-{0000}") @map("lead_number_format")
-  opportunityNumberFormat     String  @default("OPP-{YYYY}-{0000}") @map("opportunity_number_format")
-  dealNumberFormat            String  @default("DEAL-{YYYY}-{0000}") @map("deal_number_format")
+  // 2. Company Details (Task 3.4)
+  registeredBusinessName String? @map("registered_business_name")
+  gstTaxNumber           String? @map("gst_tax_number")
+  businessAddress        String? @map("business_address")
+  industryType           String? @map("industry_type")
+  businessHours          Json?   @map("business_hours")
 
-  // 3. Notification Settings
+  // 3. CRM Settings
+  defaultLeadStatusId         Int?              @map("default_lead_status_id")
+  autoAssignmentEnabled       Boolean           @default(false) @map("auto_assignment_enabled")
+  defaultAssignmentAlgorithm  String            @default("ROUND_ROBIN") @map("default_assignment_algorithm")
+  defaultPipelineId           Int?              @map("default_pipeline_id")
+  defaultOpportunityStageId   Int?              @map("default_opportunity_stage_id")
+  defaultOpportunityWinProb   Int               @default(50) @map("default_opportunity_win_prob")
+  opportunityDefaults         Json?             @map("opportunity_defaults")
+  pipelineDefaults            Json?             @map("pipeline_defaults")
+  defaultFollowupTime         String            @default("09:00") @map("default_followup_time")
+  leadNumberFormat            String            @default("LD-{YYYY}-{0000}") @map("lead_number_format")
+  opportunityNumberFormat     String            @default("OPP-{YYYY}-{0000}") @map("opportunity_number_format")
+  dealNumberFormat            String            @default("DEAL-{YYYY}-{0000}") @map("deal_number_format")
+
+  // 4. Notification Settings
   reminderTimingMinutes    Int     @default(15) @map("reminder_timing_minutes")
   enableEmailNotifications Boolean @default(true) @map("enable_email_notifications")
   enableInAppNotifications Boolean @default(true) @map("enable_in_app_notifications")
@@ -1107,7 +1119,7 @@ model CompanySettings {
   dailySummaryEnabled      Boolean @default(true) @map("daily_summary_enabled")
   dailySummaryTime         String  @default("08:00") @map("daily_summary_time")
 
-  // 4. Security Settings
+  // 5. Security Settings
   sessionTimeoutMinutes       Int     @default(60) @map("session_timeout_minutes")
   maxLoginAttempts            Int     @default(5) @map("max_login_attempts")
   lockoutDurationMinutes      Int     @default(15) @map("lockout_duration_minutes")
@@ -1118,28 +1130,36 @@ model CompanySettings {
   requireNumber               Boolean @default(true) @map("require_number")
   requireSpecialChar          Boolean @default(true) @map("require_special_char")
   preventPasswordReuseCount   Int     @default(5) @map("prevent_password_reuse_count")
+  requireMfa                  Boolean @default(false) @map("require_mfa")
+  ipWhitelisting              Json?   @map("ip_whitelisting")
 
-  // 5. Email Settings (SMTP)
-  smtpHost              String? @map("smtp_host")
-  smtpPort              Int?    @map("smtp_port")
-  smtpUser              String? @map("smtp_user")
-  smtpPasswordEncrypted String? @map("smtp_password_encrypted")
-  smtpSenderName        String? @map("smtp_sender_name")
-  smtpSenderEmail       String? @map("smtp_sender_email")
-  smtpEncryption        String  @default("TLS") @map("smtp_encryption")
+  // 6. Email Settings (SMTP)
+  smtpHost               String? @map("smtp_host")
+  smtpPort               Int?    @map("smtp_port")
+  smtpUser               String? @map("smtp_user")
+  smtpPasswordEncrypted  String? @map("smtp_password_encrypted")
+  smtpSenderName         String? @map("smtp_sender_name")
+  smtpSenderEmail        String? @map("smtp_sender_email")
+  smtpEncryption         String  @default("TLS") @map("smtp_encryption")
+  emailSignatureTemplate String? @db.Text @map("email_signature_template")
 
-  // 6. Branding Settings
-  primaryColor   String  @default("#4f46e5") @map("primary_color")
-  secondaryColor String  @default("#06b6d4") @map("secondary_color")
-  accentColor    String  @default("#f59e0b") @map("accent_color")
-  themeMode      String  @default("DARK") @map("theme_mode")
-  customDomain   String? @map("custom_domain")
-  faviconUrl     String? @map("favicon_url")
+  // 7. Branding Settings
+  primaryColor          String  @default("#4f46e5") @map("primary_color")
+  secondaryColor        String  @default("#06b6d4") @map("secondary_color")
+  accentColor           String  @default("#f59e0b") @map("accent_color")
+  themeMode             String  @default("DARK") @map("theme_mode")
+  loginBackgroundUrl    String? @map("login_background_url")
+  customDomain          String? @map("custom_domain")
+  faviconUrl            String? @map("favicon_url")
+  emailTemplateBranding Json?   @map("email_template_branding")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  company Company @relation(fields: [companyId], references: [id])
+  company                 Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  defaultLeadStatus       LeadStatus?       @relation("CompanyDefaultLeadStatus", fields: [defaultLeadStatusId], references: [id], onDelete: SetNull)
+  defaultPipeline         Pipeline?         @relation("CompanyDefaultPipeline", fields: [defaultPipelineId], references: [id], onDelete: SetNull)
+  defaultOpportunityStage OpportunityStage? @relation("CompanyDefaultOpportunityStage", fields: [defaultOpportunityStageId], references: [id], onDelete: SetNull)
 
   @@map("company_settings")
 }
@@ -1414,6 +1434,7 @@ model OpportunityStage {
   opportunities          Opportunity[]
   previousStageHistories OpportunityStageHistory[] @relation("PreviousOpportunityStage")
   newStageHistories      OpportunityStageHistory[] @relation("NewOpportunityStage")
+  companySettings        CompanySettings[]         @relation("CompanyDefaultOpportunityStage")
 
   @@unique([companyId, code])
   @@index([companyId])

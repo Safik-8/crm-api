@@ -235,8 +235,24 @@ export const updateLeadNote = async (noteId, data, tx = prisma) => {
  */
 export const findDefaultLeadStatus = async (companyId, tx = prisma) => {
   if (companyId) {
+    // 1. Check SystemSettings configured defaultLeadStatusId
+    try {
+      const sysSettings = await tx.systemSettings.findUnique({
+        where: { companyId: Number(companyId) },
+        select: { defaultLeadStatusId: true }
+      });
+      if (sysSettings?.defaultLeadStatusId) {
+        const configuredStatus = await tx.leadStatus.findFirst({
+          where: { id: sysSettings.defaultLeadStatusId, isActive: true },
+          select: { id: true }
+        });
+        if (configuredStatus) return configuredStatus.id;
+      }
+    } catch (_) {}
+
+    // 2. Check company isDefault status
     const companyDefault = await tx.leadStatus.findFirst({
-      where: { companyId, isDefault: true, isActive: true },
+      where: { companyId: Number(companyId), isDefault: true, isActive: true },
       select: { id: true }
     });
     if (companyDefault) return companyDefault.id;
