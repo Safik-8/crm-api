@@ -12,7 +12,7 @@ import { dispatchNotification } from '../notification/notification.dispatcher.js
  * Creates a new Opportunity after applying HRBAC and qualification checks
  */
 export const createOpportunity = async (actor, payload, req = null) => {
-  const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN';
+  const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN';
 
   // 1. Fetch Lead & verify tenant scope
   const leadWhere = {
@@ -202,7 +202,7 @@ export const getOpportunitiesList = async (actor, queryParams) => {
   const limit = parseInt(queryParams.limit) || 10;
   const skip = (page - 1) * limit;
 
-  const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN';
+  const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN';
 
   // Build HRBAC Scoped Where Object
   const where = {
@@ -591,7 +591,7 @@ export const bulkUpdateOpportunityStagesService = async (actor, payload) => {
  * Move Opportunity Stage & Update status / probability
  */
 export const moveOpportunityStage = async (actor, id, payload, req = null) => {
-  const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN';
+  const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN';
   const opportunityWhere = { id: Number(id), isDeleted: false };
   if (!isSuperAdmin && actor.companyId) {
     opportunityWhere.companyId = actor.companyId;
