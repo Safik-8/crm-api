@@ -602,8 +602,9 @@ export const initializeSystem = async () => {
             select: { id: true, name: true }
         })
         for (const company of allCompanies) {
+            await seedCompanySystemRoles(company.id)
             await ensureCompanyCriteriaSeeded(company.id)
-            console.log(`✅ Qualification criteria verified for company: ${company.name} (ID: ${company.id})`)
+            console.log(`✅ Qualification criteria & company roles verified for company: ${company.name} (ID: ${company.id})`)
 
             // ── STEP 7: SEED NOTIFICATION EVENT CONFIGS ──
             const defaultEvents = [
@@ -643,5 +644,94 @@ export const initializeSystem = async () => {
     } catch (error) {
         console.error("System initialization failed:", error)
         throw error
+    }
+}
+
+/**
+ * Ensures company-scoped system roles (COMPANY_ADMIN, BRANCH_MANAGER, BDE, ISE) and their permissions exist for a company.
+ * Clones from global master templates (companyId: null) if not present.
+ * Also remaps any userRole pointing to global master roles to point to company-scoped roles instead.
+ */
+export const seedCompanySystemRoles = async (companyId, tx = prisma) => {
+    const systemRoleNames = [
+        ROLE_NAMES.COMPANY_ADMIN,
+        ROLE_NAMES.BRANCH_MANAGER,
+        ROLE_NAMES.BDE,
+        ROLE_NAMES.ISE,
+    ]
+
+    // Fetch master template roles (companyId: null) with permissions
+    const masterRoles = await tx.role.findMany({
+        where: { companyId: null, name: { in: systemRoleNames } },
+        include: { rolePermissions: true }
+    })
+    const masterRoleByName = new Map(masterRoles.map(r => [r.name, r]))
+
+    // Fetch existing company-scoped roles
+    const existingCompanyRoles = await tx.role.findMany({
+        where: { companyId, name: { in: systemRoleNames } },
+        include: { rolePermissions: true }
+    })
+    const companyRoleByName = new Map(existingCompanyRoles.map(r => [r.name, r]))
+
+    for (const roleName of systemRoleNames) {
+        const masterRole = masterRoleByName.get(roleName)
+        if (!masterRole) continue
+
+        let companyRole = companyRoleByName.get(roleName)
+
+        // If company-scoped role doesn't exist, create it and clone permissions
+        if (!companyRole) {
+            companyRole = await tx.role.create({
+                data: {
+                    name: masterRole.name,
+                    description: masterRole.description,
+                    rank: masterRole.rank,
+                    dataScope: masterRole.dataScope,
+                    isSystem: true, // Display as SYSTEM role in UI
+                    status: "ACTIVE",
+                    companyId: companyId
+                },
+                include: { rolePermissions: true }
+            })
+
+            // Clone permissions from master template
+            const permsToCreate = masterRole.rolePermissions.map(p => ({
+                roleId: companyRole.id,
+                module: p.module,
+                canView: p.canView,
+                canCreate: p.canCreate,
+                canEdit: p.canEdit,
+                canDelete: p.canDelete,
+                canArchive: p.canArchive,
+                canExport: p.canExport ?? false,
+                canAssign: p.canAssign ?? false,
+                canApprove: p.canApprove ?? false,
+            }))
+
+            if (permsToCreate.length > 0) {
+                await tx.permission.createMany({
+                    data: permsToCreate,
+                    skipDuplicates: true
+                })
+            }
+        } else if (!companyRole.isSystem) {
+            // Ensure existing cloned core roles are marked as isSystem: true for UI consistency
+            await tx.role.update({
+                where: { id: companyRole.id },
+                data: { isSystem: true }
+            })
+        }
+
+        // Remap any userRole for users in this company pointing to the master template role ID
+        await tx.userRole.updateMany({
+            where: {
+                companyId: companyId,
+                roleId: masterRole.id
+            },
+            data: {
+                roleId: companyRole.id
+            }
+        })
     }
 }
