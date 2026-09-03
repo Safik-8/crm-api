@@ -401,6 +401,8 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
         leadId,
         title: "New Lead Assigned",
         message: `Lead "${lead.name}" has been auto-assigned to you.`,
+        // Deep-link: opens the Lead drawer (overview/comments is the right
+        // starting point for a freshly assigned lead).
         actionUrl: `/leads?leadId=${leadId}`,
       });
     }
@@ -447,6 +449,7 @@ const handleAllFullOrNoCandidates = async (lead, tx = prisma) => {
         leadId: lead.id,
         title: "Unassigned Lead Alert",
         message: `Lead "${lead.name}" remains unassigned because all eligible candidates in the branch have hit their daily limit.`,
+        // Deep-link: manager can open the lead and manually assign from there.
         actionUrl: `/leads?leadId=${lead.id}`,
       });
     }

@@ -85,7 +85,7 @@ export const getSubordinateIds = async (managerId, companyId) => {
  */
 const actorScope = (actor) => {
   const scope = {};
-  if ((actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN') {
+  if ((actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN') {
     return scope;
   }
   if (actor.companyId) scope.companyId = actor.companyId;
@@ -101,7 +101,7 @@ const actorScope = (actor) => {
  */
 const assertLeadScope = async (actor, lead) => {
   // SUPER_ADMIN (rank >= 100) bypasses tenant guards
-  if ((actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.role === 'SUPER_ADMIN') {
+  if ((actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN') {
     return;
   }
 
@@ -1038,7 +1038,9 @@ export const updateLeadStageService = async (leadId, data, actor, req = null) =>
     leadId: id,
     title: "Lead Status Updated",
     message: `Lead "${lead.name}" stage changed to "${targetStage.name}"${reason ? ` — Reason: ${reason}` : ""}.`,
-    actionUrl: `/leads?leadId=${id}`,
+    // Deep-link: opens the Lead drawer on the Timeline Log tab where the stage
+    // change entry will be visible.
+    actionUrl: `/leads?leadId=${id}&tab=timeline`,
   });
 
   return result;
@@ -2573,6 +2575,7 @@ export const assignLeadsService = async (data, actor, req = null) => {
           leadId,
           title: res.previousUserId ? "Lead Reassigned" : "New Lead Assigned",
           message: `Lead "${res.name}" has been ${res.previousUserId ? "reassigned" : "assigned"} to ${res.assignedTo?.name || "you"}.`,
+          // Deep-link: opens the Lead drawer directly (no specific tab — overview is most useful for new assignments).
           actionUrl: `/leads?leadId=${leadId}`,
         });
       }

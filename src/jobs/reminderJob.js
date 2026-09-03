@@ -36,7 +36,9 @@ const createRecipientNotif = async (userId, followup, notificationType, message,
       leadId: followup.leadId,
       followupId: followup.id,
       message,
-      actionUrl: `/leads/${followup.leadId}`,
+      // Deep-link: opens Leads page with the specific lead's Follow-ups tab active.
+      // Pattern: /leads?leadId=<id>&tab=followups
+      actionUrl: followup.leadId ? `/leads?leadId=${followup.leadId}&tab=followups` : `/leads`,
     });
   } catch (err) {
     console.error(`[ReminderJob] Failed to create ${notificationType} for user ${userId} followup ${followup.id}:`, err.message);

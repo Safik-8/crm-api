@@ -150,7 +150,9 @@ const fanOutFollowupNotification = async (followup, message, eventSubType, creat
       followupId: followup.id,
       title: titleMap[eventSubType] || 'Follow-up Notification',
       message: `${prefix} ${message}`,
-      actionUrl: followup.leadId ? `/leads?leadId=${followup.leadId}` : '/followups',
+      // Deep-link: opens the Lead drawer directly on the Follow-ups tab.
+      // Falls back to /followups list if this follow-up has no associated lead.
+      actionUrl: followup.leadId ? `/leads?leadId=${followup.leadId}&tab=followups` : '/followups',
     });
   } catch (err) {
     console.error("[FollowupService] fanOutFollowupNotification failed:", err.message);
