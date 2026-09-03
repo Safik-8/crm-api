@@ -84,11 +84,21 @@ export const createUserService = async (data, actor, req = null) => {
   }
 
   // 3. Resolve and validate target role and rank
-  const role = await prisma.role.findUnique({
+  let role = await prisma.role.findUnique({
     where: { id: Number(roleId) }
   })
   if (!role) throw new NotFoundError("Role")
   if (role.status !== "ACTIVE") throw new ValidationError("Role is inactive")
+
+  // Auto-map global template role to company-scoped role if present
+  if (role.companyId === null && companyId) {
+    const companyRole = await prisma.role.findFirst({
+      where: { companyId: Number(companyId), name: role.name }
+    })
+    if (companyRole) {
+      role = companyRole
+    }
+  }
 
   // Target role must belong to same company (or be global role)
   if (role.companyId !== null && role.companyId !== Number(companyId)) {

@@ -19,6 +19,10 @@ import {
 } from "../../utils/AppError.js"
 import prisma from "../../config/db.js"
 import { MODULES } from "../../config/roleConstants.js"
+import { recordAuditLog } from "../auditLog/auditLog.service.js"
+
+// Core system role names that cannot be renamed, re-ranked, or deleted
+const SYSTEM_ROLE_NAMES = ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER", "BDE", "ISE"]
 
 /**
  * Asserts that the actor is authorized to create/edit custom roles
@@ -89,8 +93,17 @@ export const getRolesService = async (query, actor) => {
     countRoles(where)
   ])
 
-  // Filter the role user counts if a company scope is active
+  // Filter out global template roles if a company-scoped role with the same name exists for the company
+  let filteredRoles = roles
   if (companyIdFilter !== null) {
+    const companyScopedNames = new Set(
+      roles.filter(r => r.companyId === companyIdFilter).map(r => r.name)
+    )
+    filteredRoles = roles.filter(r => {
+      if (r.companyId === companyIdFilter) return true
+      return !companyScopedNames.has(r.name)
+    })
+
     const counts = await prisma.userRole.groupBy({
       by: ["roleId"],
       where: {
@@ -106,7 +119,7 @@ export const getRolesService = async (query, actor) => {
       countMap[c.roleId] = c._count.id
     })
 
-    roles.forEach(role => {
+    filteredRoles.forEach(role => {
       role._count = {
         userRoles: countMap[role.id] || 0
       }
@@ -114,12 +127,12 @@ export const getRolesService = async (query, actor) => {
   }
 
   return {
-    roles,
+    roles: filteredRoles,
     pagination: {
-      total,
+      total: filteredRoles.length,
       page: parseInt(page, 10),
       limit: take,
-      totalPages: Math.ceil(total / take)
+      totalPages: Math.ceil(filteredRoles.length / take)
     }
   }
 }
@@ -142,21 +155,70 @@ export const getRoleByIdService = async (id, actor) => {
 }
 
 /**
+ * Helper to compute next available sequential rank in selected hierarchy bracket for a company.
+ * Brackets:
+ * - COMPANY_ADMIN_TO_BRANCH_MANAGER: max 79, min 61 (Between Company Admin [80] & Branch Manager [60])
+ * - BRANCH_MANAGER_TO_BDE: max 59, min 41 (Between Branch Manager [60] & BDE [40])
+ * - BDE_TO_ISE: max 39, min 21 (Between BDE [40] & ISE [20])
+ * - BELOW_ISE: max 19, min 1 (Below ISE [20])
+ */
+export const calculateCustomRoleRank = async (companyId, hierarchyBracket = 'COMPANY_ADMIN_TO_BRANCH_MANAGER') => {
+  let maxRank = 79
+  let minRank = 61
+
+  if (hierarchyBracket === 'BRANCH_MANAGER_TO_BDE') {
+    maxRank = 59
+    minRank = 41
+  } else if (hierarchyBracket === 'BDE_TO_ISE') {
+    maxRank = 39
+    minRank = 21
+  } else if (hierarchyBracket === 'BELOW_ISE') {
+    maxRank = 19
+    minRank = 1
+  }
+
+  const existingRoles = await prisma.role.findMany({
+    where: {
+      companyId: companyId,
+      isSystem: false,
+      rank: { gte: minRank, lte: maxRank }
+    },
+    select: { rank: true },
+    orderBy: { rank: 'asc' }
+  })
+
+  if (existingRoles.length === 0) {
+    return maxRank
+  }
+
+  const lowestRankInUse = existingRoles[0].rank
+  if (lowestRankInUse > minRank) {
+    return lowestRankInUse - 1
+  }
+
+  return minRank
+}
+
+/**
  * Creates a new custom role with its associated permissions.
  */
-export const createRoleService = async (data, actor) => {
+export const createRoleService = async (data, actor, req = null) => {
   assertRoleManagementAuthority(actor)
 
-  const { name, description, permissions = [] } = data
+  const { name, description, hierarchyBracket = "COMPANY_ADMIN_TO_BRANCH_MANAGER", permissions = [] } = data
 
   // 1. Company scope: Custom roles are scoped to the actor's company
-  // If SUPER_ADMIN creates it, we read companyId from input payload (or default to null)
   const companyId = actor.primaryRole === "SUPER_ADMIN" ? (data.companyId !== undefined ? data.companyId : null) : actor.companyId
 
-  // 2. Rank calculation: automatically calculate based on scope:
-  // - If company-scoped: rank is 79 (below Company Admin rank of 80)
-  // - If global system-scoped: rank is 99 (below Super Admin rank of 100)
-  const rank = companyId !== null ? 79 : 99
+  // 2. Dynamic Rank Calculation
+  const rank = data.rank !== undefined
+    ? Number(data.rank)
+    : await calculateCustomRoleRank(companyId, hierarchyBracket)
+
+  // Rank Guardrail: Cannot create a role with rank >= actor rank
+  if (actor.primaryRole !== "SUPER_ADMIN" && rank >= actor.primaryRoleRank) {
+    throw new ForbiddenError(`Cannot create a role with authority rank (${rank}) equal to or higher than your own (${actor.primaryRoleRank})`)
+  }
 
   // 3. Name uniqueness in company scope
   const formattedName = name.trim()
@@ -178,7 +240,6 @@ export const createRoleService = async (data, actor) => {
     }, tx)
 
     // Setup permission records for the new role
-    // Default all MODULES to false, and override with requested permissions
     const permissionMap = new Map()
     MODULES.forEach(mod => {
       permissionMap.set(mod, {
@@ -192,12 +253,19 @@ export const createRoleService = async (data, actor) => {
 
     permissions.forEach(p => {
       if (MODULES.includes(p.module)) {
+        const canCreate = Boolean(p.canCreate);
+        const canEdit = Boolean(p.canEdit);
+        const canDelete = Boolean(p.canDelete);
+        const canArchive = Boolean(p.canArchive);
+        // Automatic view dependency: any action enables view
+        const canView = Boolean(p.canView) || canCreate || canEdit || canDelete || canArchive;
+
         permissionMap.set(p.module, {
-          canView: p.canView ?? false,
-          canCreate: p.canCreate ?? false,
-          canEdit: p.canEdit ?? false,
-          canDelete: p.canDelete ?? false,
-          canArchive: p.canArchive ?? false
+          canView,
+          canCreate: canView ? canCreate : false,
+          canEdit: canView ? canEdit : false,
+          canDelete: canView ? canDelete : false,
+          canArchive: canView ? canArchive : false
         })
       }
     })
@@ -207,7 +275,22 @@ export const createRoleService = async (data, actor) => {
       await upsertRolePermission(role.id, moduleName, perm, tx)
     }
 
-    return findRoleById(role.id, tx)
+    const createdRole = await findRoleById(role.id, tx)
+
+    // Record audit log
+    await recordAuditLog({
+      req,
+      moduleName: "ROLE_PERMISSION",
+      action: "ROLE_CREATED",
+      entityType: "ROLE",
+      entityId: role.id,
+      performedById: actor.id,
+      companyId: role.companyId || actor.companyId,
+      details: { roleName: role.name, rank: role.rank },
+      tx
+    })
+
+    return createdRole
   }, {
     maxWait: 15000,
     timeout: 30000
@@ -215,9 +298,9 @@ export const createRoleService = async (data, actor) => {
 }
 
 /**
- * Updates a custom role and its permissions.
+ * Updates a role and its permissions.
  */
-export const updateRoleService = async (id, data, actor) => {
+export const updateRoleService = async (id, data, actor, req = null) => {
   assertRoleManagementAuthority(actor)
 
   const role = await findRoleById(id)
@@ -225,38 +308,33 @@ export const updateRoleService = async (id, data, actor) => {
     throw new NotFoundError("Role not found")
   }
 
-  // Scope check
+  // Scope check: cannot modify roles belonging to another company
   if (actor.primaryRole !== "SUPER_ADMIN" && role.companyId !== actor.companyId) {
     throw new ForbiddenError("You cannot modify roles belonging to another company")
   }
 
-  // Rank guard: cannot modify a role with rank >= own rank
-  if (role.rank >= actor.primaryRoleRank) {
-    throw new ForbiddenError("Cannot modify a role with equal or higher rank than your own")
+  // Rank guard: cannot modify a role with rank > own rank
+  if (role.rank > actor.primaryRoleRank) {
+    throw new ForbiddenError("Cannot modify a role with higher rank than your own")
   }
 
-  // System role locks
-  if (role.isSystem) {
-    // System role cannot change name, rank, isSystem, or companyId. Only description or permissions could be changed in some systems,
-    // but the handoff guide specifies: "block changing name, rank, status"
-    if (data.name && data.name !== role.name) {
+  const isCoreSystemRole = role.isSystem || SYSTEM_ROLE_NAMES.includes(role.name)
+
+  // Core system role locks: block name and rank changes for core roles
+  if (isCoreSystemRole) {
+    if (data.name && data.name.trim() !== role.name) {
       throw new ForbiddenError("Cannot change name of system roles")
     }
-    if (data.rank !== undefined && data.rank !== role.rank) {
+    if (data.rank !== undefined && Number(data.rank) !== role.rank) {
       throw new ForbiddenError("Cannot change rank of system roles")
     }
-    if (data.status && data.status !== role.status) {
-      throw new ForbiddenError("Cannot change status of system roles")
+    if (data.status && data.status !== role.status && role.isSystem) {
+      throw new ForbiddenError("Cannot change status of master system roles")
     }
-  }
-
-  // If rank is being updated, verify it doesn't exceed actor's rank
-  if (data.rank !== undefined && data.rank >= actor.primaryRoleRank) {
-    throw new ForbiddenError("Cannot assign a rank equal or higher than your own")
   }
 
   // Name uniqueness check if name is changing
-  if (data.name && data.name.trim() !== role.name) {
+  if (data.name && data.name.trim() !== role.name && !isCoreSystemRole) {
     const formattedName = data.name.trim()
     const existingRole = await findRoleByNameAndCompany(formattedName, role.companyId)
     if (existingRole && existingRole.id !== role.id) {
@@ -267,10 +345,10 @@ export const updateRoleService = async (id, data, actor) => {
   return prisma.$transaction(async (tx) => {
     // Update role parameters
     const updatedRoleData = {}
-    if (data.name && !role.isSystem) updatedRoleData.name = data.name.trim()
+    if (data.name && !isCoreSystemRole) updatedRoleData.name = data.name.trim()
     if (data.description !== undefined) updatedRoleData.description = data.description?.trim() || null
-    if (data.rank !== undefined && !role.isSystem) updatedRoleData.rank = data.rank
-    if (data.status && !role.isSystem) updatedRoleData.status = data.status
+    if (data.rank !== undefined && !isCoreSystemRole) updatedRoleData.rank = Number(data.rank)
+    if (data.status && role.companyId !== null) updatedRoleData.status = data.status
 
     let updatedRole = role
     if (Object.keys(updatedRoleData).length > 0) {
@@ -281,12 +359,40 @@ export const updateRoleService = async (id, data, actor) => {
     if (data.permissions) {
       for (const p of data.permissions) {
         if (MODULES.includes(p.module)) {
-          await upsertRolePermission(role.id, p.module, p, tx)
+          const canCreate = Boolean(p.canCreate);
+          const canEdit = Boolean(p.canEdit);
+          const canDelete = Boolean(p.canDelete);
+          const canArchive = Boolean(p.canArchive);
+          const canView = Boolean(p.canView) || canCreate || canEdit || canDelete || canArchive;
+
+          const permPayload = {
+            canView,
+            canCreate: canView ? canCreate : false,
+            canEdit: canView ? canEdit : false,
+            canDelete: canView ? canDelete : false,
+            canArchive: canView ? canArchive : false
+          };
+          await upsertRolePermission(role.id, p.module, permPayload, tx)
         }
       }
     }
 
-    return findRoleById(role.id, tx)
+    const resultRole = await findRoleById(role.id, tx)
+
+    // Record audit log
+    await recordAuditLog({
+      req,
+      moduleName: "ROLE_PERMISSION",
+      action: "ROLE_UPDATED",
+      entityType: "ROLE",
+      entityId: role.id,
+      performedById: actor.id,
+      companyId: role.companyId || actor.companyId,
+      details: { roleName: role.name, rank: role.rank },
+      tx
+    })
+
+    return resultRole
   }, {
     maxWait: 15000,
     timeout: 30000
@@ -296,7 +402,7 @@ export const updateRoleService = async (id, data, actor) => {
 /**
  * Deletes a custom role
  */
-export const deleteRoleService = async (id, actor, reassignRoleId) => {
+export const deleteRoleService = async (id, actor, reassignRoleId, req = null) => {
   assertRoleManagementAuthority(actor)
 
   const role = await findRoleById(id)
@@ -309,9 +415,9 @@ export const deleteRoleService = async (id, actor, reassignRoleId) => {
     throw new ForbiddenError("You cannot delete roles belonging to another company")
   }
 
-  // System role protection
-  if (role.isSystem) {
-    throw new ForbiddenError("System roles cannot be deleted")
+  // Core system role protection
+  if (role.isSystem || SYSTEM_ROLE_NAMES.includes(role.name)) {
+    throw new ForbiddenError("Core system roles cannot be deleted")
   }
 
   // Rank guard
@@ -375,6 +481,18 @@ export const deleteRoleService = async (id, actor, reassignRoleId) => {
     await deleteRolePermissions(role.id, tx)
     // 2. Delete the role
     await deleteRole(role.id, tx)
+    // 3. Audit log
+    await recordAuditLog({
+      req,
+      moduleName: "ROLE_PERMISSION",
+      action: "ROLE_DELETED",
+      entityType: "ROLE",
+      entityId: role.id,
+      performedById: actor.id,
+      companyId: role.companyId || actor.companyId,
+      details: { roleName: role.name },
+      tx
+    })
     return { success: true, message: "Role successfully deleted" }
   }, {
     maxWait: 15000,
@@ -385,7 +503,7 @@ export const deleteRoleService = async (id, actor, reassignRoleId) => {
 /**
  * Toggles a custom role's status
  */
-export const toggleRoleStatusService = async (id, actor) => {
+export const toggleRoleStatusService = async (id, actor, req = null) => {
   assertRoleManagementAuthority(actor)
 
   const role = await findRoleById(id)
@@ -410,6 +528,18 @@ export const toggleRoleStatusService = async (id, actor) => {
 
   const nextStatus = role.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"
   const updated = await updateRole(role.id, { status: nextStatus })
+
+  await recordAuditLog({
+    req,
+    moduleName: "ROLE_PERMISSION",
+    action: "ROLE_STATUS_TOGGLED",
+    entityType: "ROLE",
+    entityId: role.id,
+    performedById: actor.id,
+    companyId: role.companyId || actor.companyId,
+    details: { roleName: role.name, newStatus: nextStatus }
+  })
+
   return updated
 }
 

@@ -16,7 +16,7 @@ import {
 } from "../../utils/AppError.js"
 import { hashPassword } from "../../utils/passwordUtils.js"
 import prisma from "../../config/db.js"
-import { settingsCache } from "../../services/settingsCache.service.js"
+import { seedCompanySystemRoles } from "../../config/initSystem.js"
 
 /**
  * Onboards a new company and creates its default Company Admin user atomically within a transaction.
@@ -122,7 +122,14 @@ export const createCompanyService = async (data, actor) => {
       status
     }, tx)
 
-    // B. Create Admin User mapped to the company scope
+    // B. Seed company-scoped system roles for the new company
+    await seedCompanySystemRoles(company.id, tx)
+
+    const targetCompanyAdminRole = await tx.role.findFirst({
+      where: { name: "COMPANY_ADMIN", companyId: company.id }
+    }) || companyAdminRole
+
+    // C. Create Admin User mapped to the company scope
     const user = await tx.user.create({
       data: {
         name: adminName.trim(),
@@ -134,11 +141,11 @@ export const createCompanyService = async (data, actor) => {
       }
     })
 
-    // C. Assign UserRole mapping to COMPANY_ADMIN (Primary role)
+    // D. Assign UserRole mapping to COMPANY_ADMIN (Primary role)
     await tx.userRole.create({
       data: {
         userId: user.id,
-        roleId: companyAdminRole.id,
+        roleId: targetCompanyAdminRole.id,
         companyId: company.id,
         branchId: null,
         isPrimary: true,
@@ -146,9 +153,16 @@ export const createCompanyService = async (data, actor) => {
       }
     })
 
-    // D. Assign Secondary roles mapping if they exist
-    if (secondaryRolesDb.length > 0) {
-      const secondaryMappings = secondaryRolesDb.map(role => ({
+    // E. Assign Secondary roles mapping if they exist
+    if (adminSecondaryRoles && adminSecondaryRoles.length > 0) {
+      const companySecondaryRoles = await tx.role.findMany({
+        where: {
+          companyId: company.id,
+          name: { in: adminSecondaryRoles }
+        }
+      })
+
+      const secondaryMappings = companySecondaryRoles.map(role => ({
         userId: user.id,
         roleId: role.id,
         companyId: company.id,
@@ -157,9 +171,11 @@ export const createCompanyService = async (data, actor) => {
         assignedBy: actor?.id || null
       }))
 
-      await tx.userRole.createMany({
-        data: secondaryMappings
-      })
+      if (secondaryMappings.length > 0) {
+        await tx.userRole.createMany({
+          data: secondaryMappings
+        })
+      }
     }
 
     return company

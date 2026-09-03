@@ -317,15 +317,24 @@ export const assignUserToBranchService = async (branchId, data, actor) => {
   // Combine primary and secondary role selections to load them in one DB query
   const uniqueRoleNames = Array.from(new Set([primaryRole, ...secondaryRoles]))
 
-  const rolesFromDb = await prisma.role.findMany({
+  const rolesFromDbRaw = await prisma.role.findMany({
     where: {
       name: { in: uniqueRoleNames },
       OR: [
-        { companyId: null }, // Global/System roles
-        { companyId: branch.companyId } // Tenant-scoped custom roles
+        { companyId: branch.companyId }, // Tenant-scoped custom or cloned system roles
+        { companyId: null } // Global/System fallback roles
       ]
     }
   })
+
+  // Prefer company-scoped roles over global null roles for each requested name
+  const rolesFromDbMap = new Map()
+  rolesFromDbRaw.forEach(r => {
+    if (!rolesFromDbMap.has(r.name) || r.companyId === branch.companyId) {
+      rolesFromDbMap.set(r.name, r)
+    }
+  })
+  const rolesFromDb = Array.from(rolesFromDbMap.values())
 
   // Ensure all requested roles were found in the database
   if (rolesFromDb.length !== uniqueRoleNames.length) {
