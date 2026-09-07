@@ -18,10 +18,10 @@ router.use(authenticate)
 
 /**
  * @route GET /api/v1/settings
- * @desc Get company system settings
- * @access Private (System Administrators / Authorized Roles)
+ * @desc Get sanitized company system settings (timezone, currency, date format, stage defaults)
+ * @access Private (All Authenticated Company Users)
  */
-router.get("/", hasPermission("SYSTEM_SETTINGS", "canView"), getSettingsController)
+router.get("/", getSettingsController)
 
 /**
  * @route POST /api/v1/settings/test-email
