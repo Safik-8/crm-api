@@ -70,6 +70,11 @@ const verifyCategoryPermission = (actor, category, action = "canEdit") => {
  * Service: Retrieves company system settings.
  */
 export const getSettingsService = async (actor, requestedCompanyId) => {
+  const isSuperAdmin = (actor.primaryRole || "").toUpperCase() === "SUPER_ADMIN"
+  if (isSuperAdmin && !requestedCompanyId) {
+    return DEFAULT_COMPANY_SETTINGS
+  }
+
   const companyId = resolveCompanyId(actor, requestedCompanyId)
 
   // 1. Check in-memory cache
