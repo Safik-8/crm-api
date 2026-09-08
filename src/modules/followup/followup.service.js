@@ -141,6 +141,13 @@ const fanOutFollowupNotification = async (followup, message, eventSubType, creat
       CANCELLED: 'Follow-up Cancelled',
     };
 
+    const FILTER_MAP = {
+      SCHEDULED: 'PENDING',
+      COMPLETED: 'COMPLETED',
+      CANCELLED: 'CANCELLED',
+    };
+    const filterParam = FILTER_MAP[eventSubType] || 'ALL';
+
     dispatchNotification({
       eventType,
       companyId: followup.companyId,
@@ -150,9 +157,9 @@ const fanOutFollowupNotification = async (followup, message, eventSubType, creat
       followupId: followup.id,
       title: titleMap[eventSubType] || 'Follow-up Notification',
       message: `${prefix} ${message}`,
-      // Deep-link: opens the Lead drawer directly on the Follow-ups tab.
+      // Deep-link: opens the Lead drawer directly on the Follow-ups tab with the matching filter.
       // Falls back to /followups list if this follow-up has no associated lead.
-      actionUrl: followup.leadId ? `/leads?leadId=${followup.leadId}&tab=followups` : '/followups',
+      actionUrl: followup.leadId ? `/leads?leadId=${followup.leadId}&tab=followups&filter=${filterParam}` : '/followups',
     });
   } catch (err) {
     console.error("[FollowupService] fanOutFollowupNotification failed:", err.message);

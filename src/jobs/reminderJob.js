@@ -28,6 +28,7 @@ const buildReminderMessage = (type, followup) => {
  */
 const createRecipientNotif = async (userId, followup, notificationType, message, expiresAt = null) => {
   try {
+    const filterParam = notificationType === "REMINDER" ? "PENDING" : "MISSED";
     await dispatchNotification({
       eventType: notificationType === "REMINDER" ? "FOLLOWUP_REMINDER" : "FOLLOWUP_MISSED",
       companyId: followup.companyId,
@@ -36,9 +37,9 @@ const createRecipientNotif = async (userId, followup, notificationType, message,
       leadId: followup.leadId,
       followupId: followup.id,
       message,
-      // Deep-link: opens Leads page with the specific lead's Follow-ups tab active.
-      // Pattern: /leads?leadId=<id>&tab=followups
-      actionUrl: followup.leadId ? `/leads?leadId=${followup.leadId}&tab=followups` : `/leads`,
+      // Deep-link: opens Leads page with the specific lead's Follow-ups tab active and filtered.
+      // Pattern: /leads?leadId=<id>&tab=followups&filter=<PENDING|MISSED>
+      actionUrl: followup.leadId ? `/leads?leadId=${followup.leadId}&tab=followups&filter=${filterParam}` : `/leads`,
     });
   } catch (err) {
     console.error(`[ReminderJob] Failed to create ${notificationType} for user ${userId} followup ${followup.id}:`, err.message);

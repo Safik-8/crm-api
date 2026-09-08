@@ -83,6 +83,7 @@ export const findUpcomingFollowups = (hoursAhead = 24) => {
     where: {
       status:      "PENDING",
       scheduledAt: { gte: now, lte: cutoff },
+      lead:        { isDeleted: false },
     },
     include: {
       assignedTo: { select: { id: true, name: true, companyId: true, branchId: true } },
@@ -101,6 +102,7 @@ export const findOverdueFollowups = () =>
     where: {
       status:      { in: ["PENDING", "MISSED"] },
       scheduledAt: { lt: new Date() },
+      lead:        { isDeleted: false },
     },
     include: {
       assignedTo: { select: { id: true, name: true, companyId: true, branchId: true } },

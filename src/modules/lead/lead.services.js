@@ -840,6 +840,17 @@ export const deleteLeadService = async (leadId, actor, req = null) => {
       updatedById: actor.id
     }, tx);
 
+    // Cancel any active/pending followups on this lead
+    await tx.followup.updateMany({
+      where: { leadId: id, status: "PENDING" },
+      data:  { status: "CANCELLED" }
+    });
+
+    // Remove or archive pending unread notifications for this deleted lead
+    await tx.notification.deleteMany({
+      where: { leadId: id, isRead: false }
+    });
+
     await createAuditLog({
       req,
       companyId:     lead.companyId,
