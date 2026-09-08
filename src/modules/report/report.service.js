@@ -946,12 +946,6 @@ export const generateReportData = async (user, filters) => {
       throw new NotFoundError(`Unknown report type: ${reportType}`);
   }
 
-  // Step 6: Debug Logging
-  console.log('=== REPORTS GENERATION DEBUGGING LOG ===');
-  console.log(`- user.roleRank: ${rank}`);
-  console.log(`- final dataset count: ${total}`);
-  console.log('========================================');
-
   return {
     summary,
     items,

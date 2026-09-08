@@ -32,7 +32,7 @@ export const createOpportunity = async (actor, payload, req = null) => {
   }
 
   // 2. Business Rule 2.4: Lead qualification check (queries LeadQualification table with parallel dev toggle support)
-  const isDevBypass = process.env.SKIP_QUALIFICATION_CHECK !== 'false';
+  const isDevBypass = process.env.SKIP_QUALIFICATION_CHECK === 'true';
   if (!isDevBypass) {
     const qualification = await prisma.leadQualification.findFirst({
       where: { leadId: payload.leadId, status: 'QUALIFIED' },

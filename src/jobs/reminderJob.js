@@ -46,7 +46,6 @@ const createRecipientNotif = async (userId, followup, notificationType, message,
 };
 
 export const runReminderScan = async () => {
-  console.log("[ReminderJob] Scan started:", new Date().toISOString());
   let createdCount = 0;
   let missedCount  = 0;
 
@@ -126,8 +125,6 @@ export const runReminderScan = async () => {
         }
       }
     }
-
-    console.log(`[ReminderJob] Complete. Notifications created: ${createdCount}. Marked MISSED: ${missedCount}`);
   } catch (err) {
     console.error("[ReminderJob] Scan failed:", err.message);
   }
