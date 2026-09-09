@@ -78,28 +78,27 @@ export const login = async (req, res, next) => {
 // ══════════════════════════════════════
 export const refresh = async (req, res, next) => {
     try {
-        const authHeader = req.headers?.authorization || req.headers?.Authorization
-        const bearerToken =
-            typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")
-                ? authHeader.slice(7).trim()
-                : undefined
-
         const refreshToken =
             req.cookies?.refreshToken ||
-            req.body?.refreshToken ||
-            bearerToken
+            req.body?.refreshToken
+
+        if (!refreshToken) {
+            return next(new UnauthorizedError("Refresh token not found"))
+        }
 
         const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.headers["x-real-ip"] || req.ip || req.socket.remoteAddress || ""
         const metadata = parseUserAgent(req.headers, ip)
 
         const result = await refreshTokenService(refreshToken, metadata)
 
-        // Set new access token in cookie
+        // Set new access token & refresh token in cookies
         res.cookie("accessToken", result.accessToken, ACCESS_COOKIE_OPTIONS)
         res.cookie("refreshToken", result.refreshToken, REFRESH_COOKIE_OPTIONS)
 
         return sendSuccess(res, {
             user: result.user,
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
         }, "Token refreshed")
 
     } catch (err) {
@@ -112,13 +111,15 @@ export const refresh = async (req, res, next) => {
 // ══════════════════════════════════════
 export const logout = async (req, res, next) => {
     try {
-        const refreshToken = req.cookies?.refreshToken
+        const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
 
-        await logoutService(refreshToken)
+        if (refreshToken) {
+            await logoutService(refreshToken)
+        }
 
         // Clear both cookies
-        res.clearCookie("accessToken")
-        res.clearCookie("refreshToken")
+        res.clearCookie("accessToken", ACCESS_COOKIE_OPTIONS)
+        res.clearCookie("refreshToken", REFRESH_COOKIE_OPTIONS)
 
         return sendSuccess(res, null, "Logged out successfully")
 
