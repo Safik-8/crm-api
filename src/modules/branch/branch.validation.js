@@ -9,13 +9,13 @@ export const createBranchSchema = z.object({
   companyId: z.number({
     required_error: "Company ID is required",
     invalid_type_error: "Company ID must be a number"
-  }).int().positive(),
+  }).int().positive("Company ID must be a positive number"),
   name: z.string({
     required_error: "Branch name is required"
   }).trim().min(1, "Branch name cannot be empty"),
   code: z.string({
     required_error: "Branch code is required"
-  }).trim().min(1, "Branch code cannot be empty").toUpperCase(),
+  }).trim().min(1, "Branch code cannot be empty").regex(/^[A-Za-z0-9_-]+$/, "Branch code must be alphanumeric and can only contain dashes or underscores").toUpperCase(),
   address: z.string().trim().optional().nullable(),
   location: z.string().trim().optional().nullable(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional()

@@ -4,6 +4,7 @@ import { z } from "zod"
 import { ValidationError } from "../../utils/AppError.js"
 import { passwordSchema } from "../auth/auth.validation.js"
 
+// Accepts http/https URLs, domains without protocol (e.g. example.com), or empty/null
 const optionalUrlSchema = z
   .string()
   .trim()
@@ -11,13 +12,36 @@ const optionalUrlSchema = z
     (val) => {
       if (!val || val === "") return true
       try {
-        const parsed = new URL(val)
+        const testUrl = val.startsWith("http://") || val.startsWith("https://") ? val : `https://${val}`
+        const parsed = new URL(testUrl)
         return parsed.protocol === "http:" || parsed.protocol === "https:"
       } catch {
         return false
       }
     },
-    { message: "Must be a valid URL starting with http:// or https:// (e.g. https://example.com)" }
+    { message: "Must be a valid URL (e.g. https://example.com or example.com)" }
+  )
+  .nullable()
+  .optional()
+
+// Accepts base64 data URLs (data:image/...), http/https URLs, relative paths, or empty/null
+const optionalLogoSchema = z
+  .string()
+  .trim()
+  .refine(
+    (val) => {
+      if (!val || val === "") return true
+      if (val.startsWith("data:image/") || val.startsWith("/") || val.startsWith("http://") || val.startsWith("https://")) {
+        return true
+      }
+      try {
+        new URL(val)
+        return true
+      } catch {
+        return false
+      }
+    },
+    { message: "Must be a valid image URL or data image" }
   )
   .nullable()
   .optional()
@@ -32,7 +56,7 @@ export const createCompanySchema = z.object({
     .trim()
     .nonempty("Company code is required")
     .regex(/^[A-Za-z0-9_-]+$/, "Company code must be alphanumeric and can only contain dashes or underscores"),
-  logo: optionalUrlSchema,
+  logo: optionalLogoSchema,
   industry: z.string().trim().optional(),
   website: optionalUrlSchema,
   address: z.string().trim().optional(),
@@ -53,7 +77,7 @@ export const createCompanySchema = z.object({
 // Schema to validate company updates (locks code from editing)
 export const updateCompanySchema = z.object({
   name: z.string().trim().nonempty("Company name cannot be empty").optional(),
-  logo: optionalUrlSchema,
+  logo: optionalLogoSchema,
   industry: z.string().trim().optional(),
   website: optionalUrlSchema,
   address: z.string().trim().optional(),
