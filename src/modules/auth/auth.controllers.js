@@ -78,28 +78,22 @@ export const login = async (req, res, next) => {
 // ══════════════════════════════════════
 export const refresh = async (req, res, next) => {
     try {
-        const authHeader = req.headers?.authorization || req.headers?.Authorization
-        const bearerToken =
-            typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")
-                ? authHeader.slice(7).trim()
-                : undefined
-
         const refreshToken =
             req.cookies?.refreshToken ||
-            req.body?.refreshToken ||
-            bearerToken
+            req.body?.refreshToken
 
         const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.headers["x-real-ip"] || req.ip || req.socket.remoteAddress || ""
         const metadata = parseUserAgent(req.headers, ip)
 
         const result = await refreshTokenService(refreshToken, metadata)
 
-        // Set new access token in cookie
+        // Set new tokens in cookies
         res.cookie("accessToken", result.accessToken, ACCESS_COOKIE_OPTIONS)
         res.cookie("refreshToken", result.refreshToken, REFRESH_COOKIE_OPTIONS)
 
         return sendSuccess(res, {
             user: result.user,
+            accessToken: result.accessToken,
         }, "Token refreshed")
 
     } catch (err) {
