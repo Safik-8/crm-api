@@ -20,6 +20,24 @@ export const errorHandler = (err, req, res, next) => {
     return res.status(err.statusCode).json(err.toJSON())
   }
 
+  // Handle errors that have a custom statusCode/status
+  const customStatus = (typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600)
+    ? err.statusCode
+    : (typeof err.status === 'number' && err.status >= 400 && err.status < 600)
+    ? err.status
+    : null;
+
+  if (customStatus) {
+    return res.status(customStatus).json({
+      success: false,
+      statusCode: customStatus,
+      code: err.code || (customStatus === 400 ? "BAD_REQUEST" : customStatus === 403 ? "FORBIDDEN" : customStatus === 404 ? "NOT_FOUND" : customStatus === 409 ? "CONFLICT" : "CLIENT_ERROR"),
+      message: err.message || "Request failed",
+      details: err.details || null,
+      timestamp: new Date().toISOString()
+    });
+  }
+
   // Zod Validation Error
   if (err.name === 'ZodError') {
     const issues = err.issues || err.errors || []

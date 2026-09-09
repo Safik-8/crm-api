@@ -1,6 +1,14 @@
 import prisma from "../../config/db.js";
 import { recordAuditLog } from "../auditLog/auditLog.service.js";
 import { dispatchNotification } from "../notification/notification.dispatcher.js";
+import {
+  AppError,
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from "../../utils/AppError.js";
 
 
 /**
@@ -191,9 +199,7 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
   } else if (queryTab === "team") {
     // 403 API Guard: Block non-leader BDE / ISE from accessing team analytics
     if (!isTeamLeader && !isBranchManager && !isCompanyAdmin && !isSuperAdmin) {
-      const err = new Error("Forbidden: You do not have permission to access team performance analytics.");
-      err.statusCode = 403;
-      throw err;
+      throw new ForbiddenError("You do not have permission to access team performance analytics.");
     }
 
     if (isTeamLeader && !isBranchManager && !isCompanyAdmin && !isSuperAdmin) {
@@ -446,18 +452,18 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
 
 export const validateKpiDurationDates = (duration, startDateStr, endDateStr) => {
   if (!startDateStr || !endDateStr) {
-    throw new Error("Start Date and End Date are required.");
+    throw new BadRequestError("Start Date and End Date are required.");
   }
 
   const start = new Date(startDateStr);
   const end = new Date(endDateStr);
 
   if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-    throw new Error("Invalid Date format provided.");
+    throw new BadRequestError("Invalid Date format provided.");
   }
 
   if (start > end) {
-    throw new Error("Start Date cannot be after End Date.");
+    throw new BadRequestError("Start Date cannot be after End Date.");
   }
 
   const startYear = start.getUTCFullYear();
@@ -472,11 +478,11 @@ export const validateKpiDurationDates = (duration, startDateStr, endDateStr) => 
 
   if (dur === "MONTHLY") {
     if (startDateNum !== 1) {
-      throw new Error("For Monthly duration, Start Date must be the 1st day of the month.");
+      throw new BadRequestError("For Monthly duration, Start Date must be the 1st day of the month.");
     }
     const lastDayOfMonth = new Date(Date.UTC(startYear, startMonth + 1, 0)).getUTCDate();
     if (startYear !== endYear || startMonth !== endMonth || endDateNum !== lastDayOfMonth) {
-      throw new Error(`For Monthly duration, End Date must be the last day of the same month (${startYear}-${String(startMonth + 1).padStart(2, "0")}-${lastDayOfMonth}).`);
+      throw new BadRequestError(`For Monthly duration, End Date must be the last day of the same month (${startYear}-${String(startMonth + 1).padStart(2, "0")}-${lastDayOfMonth}).`);
     }
   } else if (dur === "QUARTERLY") {
     const validQuarters = [
@@ -496,15 +502,15 @@ export const validateKpiDurationDates = (duration, startDateStr, endDateStr) => 
     );
 
     if (!match) {
-      throw new Error("For Quarterly duration, date range must be a full calendar quarter (Q1: Jan 1-Mar 31, Q2: Apr 1-Jun 30, Q3: Jul 1-Sep 30, Q4: Oct 1-Dec 31).");
+      throw new BadRequestError("For Quarterly duration, date range must be a full calendar quarter (Q1: Jan 1-Mar 31, Q2: Apr 1-Jun 30, Q3: Jul 1-Sep 30, Q4: Oct 1-Dec 31).");
     }
   } else if (dur === "YEARLY") {
     if (startMonth !== 0 || startDateNum !== 1 || endMonth !== 11 || endDateNum !== 31 || startYear !== endYear) {
-      throw new Error(`For Yearly duration, Start Date must be Jan 1 and End Date must be Dec 31 of the same year.`);
+      throw new BadRequestError(`For Yearly duration, Start Date must be Jan 1 and End Date must be Dec 31 of the same year.`);
     }
   } else if (dur === "CUSTOM_RANGE") {
     if (start > end) {
-      throw new Error("For Custom Range, Start Date cannot be after End Date.");
+      throw new BadRequestError("For Custom Range, Start Date cannot be after End Date.");
     }
   }
 };
@@ -543,15 +549,11 @@ export const createKpiTarget = async (user, data) => {
   // Req 5: KPI Type & Value Validation
   const targetVal = Number(targetValue);
   if (isNaN(targetVal) || targetVal <= 0) {
-    const err = new Error("Target Value must be a positive number greater than 0.");
-    err.statusCode = 400;
-    throw err;
+    throw new BadRequestError("Target Value must be a positive number greater than 0.");
   }
 
   if (kpiType.toUpperCase() === "CONVERSION" && (targetVal < 0 || targetVal > 100)) {
-    const err = new Error("Target Value for Conversion Rate KPI must be between 0% and 100%.");
-    err.statusCode = 400;
-    throw err;
+    throw new BadRequestError("Target Value for Conversion Rate KPI must be between 0% and 100%.");
   }
 
   // Req 4: Strict Duration Date Validation
@@ -580,9 +582,7 @@ export const createKpiTarget = async (user, data) => {
     });
 
     if (!targetUser) {
-      const err = new Error("Selected employee not found.");
-      err.statusCode = 404;
-      throw err;
+      throw new NotFoundError("Selected employee");
     }
 
     const targetRoleName = targetUser.userRoles?.[0]?.role?.name || "";
@@ -590,23 +590,17 @@ export const createKpiTarget = async (user, data) => {
 
     // Multitenancy Company Boundary
     if (user.companyId && targetUser.companyId !== user.companyId) {
-      const err = new Error("Unauthorized KPI assignment: Target employee is outside your company.");
-      err.statusCode = 403;
-      throw err;
+      throw new ForbiddenError("Unauthorized KPI assignment: Target employee is outside your company.");
     }
 
     if (!isCompanyAdmin) {
       if (isBranchManager) {
         // Branch Manager Scope
         if (user.branchId && targetUser.branchId !== user.branchId) {
-          const err = new Error("Unauthorized KPI assignment: Target employee is outside your branch.");
-          err.statusCode = 403;
-          throw err;
+          throw new ForbiddenError("Unauthorized KPI assignment: Target employee is outside your branch.");
         }
         if (targetRoleName === "SUPER_ADMIN" || targetRoleName === "COMPANY_ADMIN" || (actorRank > 0 && targetRank > actorRank)) {
-          const err = new Error("Unauthorized KPI assignment: You cannot assign targets to a user with higher rank than yourself.");
-          err.statusCode = 403;
-          throw err;
+          throw new ForbiddenError("Unauthorized KPI assignment: You cannot assign targets to a user with higher rank than yourself.");
         }
       } else {
         // Team Leader / BDE Scope: Must be a member of user's led teams or self
@@ -620,9 +614,7 @@ export const createKpiTarget = async (user, data) => {
             },
           });
           if (!isMember) {
-            const err = new Error("Unauthorized KPI assignment: Target employee is not in any team under your leadership.");
-            err.statusCode = 403;
-            throw err;
+            throw new ForbiddenError("Unauthorized KPI assignment: Target employee is not in any team under your leadership.");
           }
         }
       }
@@ -636,31 +628,23 @@ export const createKpiTarget = async (user, data) => {
     });
 
     if (!targetTeam) {
-      const err = new Error("Selected sales team not found.");
-      err.statusCode = 404;
-      throw err;
+      throw new NotFoundError("Selected sales team");
     }
 
     if (user.companyId && targetTeam.companyId !== user.companyId) {
-      const err = new Error("Unauthorized KPI assignment: Target team is outside your company.");
-      err.statusCode = 403;
-      throw err;
+      throw new ForbiddenError("Unauthorized KPI assignment: Target team is outside your company.");
     }
 
     if (!isCompanyAdmin) {
       if (isBranchManager) {
         if (user.branchId && targetTeam.branchId !== user.branchId) {
-          const err = new Error("Unauthorized KPI assignment: Target team is outside your branch.");
-          err.statusCode = 403;
-          throw err;
+          throw new ForbiddenError("Unauthorized KPI assignment: Target team is outside your branch.");
         }
       } else {
         // Team Leader Scope: Must be a team led by user
         const ledTeamIds = await getUserLedTeamIds(user.id);
         if (!ledTeamIds.includes(targetTeam.id)) {
-          const err = new Error("Unauthorized KPI assignment: You are not authorized to assign targets to this team.");
-          err.statusCode = 403;
-          throw err;
+          throw new ForbiddenError("Unauthorized KPI assignment: You are not authorized to assign targets to this team.");
         }
       }
     }
@@ -702,9 +686,7 @@ export const createKpiTarget = async (user, data) => {
   });
 
   if (existingOverlap) {
-    const err = new Error(`An active ${kpiType.toUpperCase()} target already exists for this ${resolvedScope.toLowerCase()} within an overlapping date range.`);
-    err.statusCode = 400;
-    throw err;
+    throw new ConflictError(`An active ${kpiType.toUpperCase()} target already exists for this ${resolvedScope.toLowerCase()} within an overlapping date range.`);
   }
 
   const target = await prisma.kpiTarget.create({
@@ -757,9 +739,7 @@ export const getKpiDetail = async (user, targetId) => {
 
   // Req 9: ISE Role strictly blocked from detail drilldown
   if (primaryRole === "ISE") {
-    const err = new Error("Forbidden: ISE users are restricted from viewing KPI target details.");
-    err.statusCode = 403;
-    throw err;
+    throw new ForbiddenError("ISE users are restricted from viewing KPI target details.");
   }
 
   const target = await prisma.kpiTarget.findUnique({
@@ -781,23 +761,17 @@ export const getKpiDetail = async (user, targetId) => {
   });
 
   if (!target || target.deletedAt) {
-    const err = new Error("KPI Target not found.");
-    err.statusCode = 404;
-    throw err;
+    throw new NotFoundError("KPI Target");
   }
 
   // Req 9: Security Access Verification
   if (!isSuperAdmin) {
     if (user.companyId && target.companyId !== user.companyId) {
-      const err = new Error("Forbidden: You do not have access to this organization's targets.");
-      err.statusCode = 403;
-      throw err;
+      throw new ForbiddenError("You do not have access to this organization's targets.");
     }
 
     if (isBranchManager && user.branchId && target.branchId && target.branchId !== user.branchId) {
-      const err = new Error("Forbidden: You do not have access to targets outside your branch.");
-      err.statusCode = 403;
-      throw err;
+      throw new ForbiddenError("You do not have access to targets outside your branch.");
     }
 
     if (!isCompanyAdmin && !isBranchManager) {
@@ -818,9 +792,7 @@ export const getKpiDetail = async (user, targetId) => {
       }
 
       if (!isAssignedToSelf && !isTeamMemberTarget) {
-        const err = new Error("Forbidden: You can only inspect your own performance targets or team targets under your leadership.");
-        err.statusCode = 403;
-        throw err;
+        throw new ForbiddenError("You can only inspect your own performance targets or team targets under your leadership.");
       }
     }
   }
