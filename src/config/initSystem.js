@@ -7,7 +7,10 @@ import {
     ROLE_RANKS,
     MODULES,
 } from "./roleConstants.js"
-import { ensureCompanyCriteriaSeeded } from "../modules/qualification/qualification-settings.service.js"
+import {
+    ensureCompanyCriteriaSeeded,
+    batchEnsureCompaniesCriteriaSeeded
+} from "../modules/qualification/qualification-settings.service.js"
 
 // ══════════════════════════════════════
 // SYSTEM ROLES — seeds on every startup
@@ -195,14 +198,10 @@ const ROLE_PERMISSIONS = {
 // INITIALIZE SYSTEM
 // ══════════════════════════════════════
 export const initializeSystem = async () => {
+    const t0 = Date.now()
     try {
 
-        // Check if SuperAdmin already exists
-        const existingSuperAdmin = await prisma.user.findUnique({
-            where: { email: "superadmin@gmail.com" }
-        })
-
-        // ── STEP 0: ENSURE ROLES + PERMISSIONS (FAST SYNC) ─────
+        // ── STEP 1: ENSURE ROLES + PERMISSIONS (FAST SYNC) ─────
         // Keys on name + companyId=null (system roles are globally unique by name with null companyId).
         const existingRoles = await prisma.role.findMany({
             where: { companyId: null },
@@ -226,8 +225,10 @@ export const initializeSystem = async () => {
                 return { id: existing.id, description: r.description, rank: r.rank, status: r.status }
             })
             .filter(Boolean)
-        for (const r of rolesToUpdate) {
-            await prisma.role.update({ where: { id: r.id }, data: { description: r.description, rank: r.rank, status: r.status } })
+        if (rolesToUpdate.length > 0) {
+            await Promise.all(
+                rolesToUpdate.map(r => prisma.role.update({ where: { id: r.id }, data: { description: r.description, rank: r.rank, status: r.status } }))
+            )
         }
 
         // Refresh roles after any creates/updates (we need role ids)
@@ -237,10 +238,22 @@ export const initializeSystem = async () => {
         })
         const roleIdByName = new Map(roles.map(r => [r.name, r.id]))
 
-        // Fetch existing permissions once, then only write diffs
+        // Fetch existing permissions once, including all fields, then only write actual diffs
         const existingPerms = await prisma.permission.findMany({
             where: { roleId: { in: roles.map(r => r.id) } },
-            select: { id: true, roleId: true, module: true, canView: true, canCreate: true, canEdit: true, canDelete: true }
+            select: {
+                id: true,
+                roleId: true,
+                module: true,
+                canView: true,
+                canCreate: true,
+                canEdit: true,
+                canDelete: true,
+                canArchive: true,
+                canExport: true,
+                canAssign: true,
+                canApprove: true
+            }
         })
         const permKey = (roleId, module) => `${roleId}:${module}`
         const permByKey = new Map(existingPerms.map(p => [permKey(p.roleId, p.module), p]))
@@ -256,35 +269,53 @@ export const initializeSystem = async () => {
                 const key = permKey(roleId, moduleName)
                 const existing = permByKey.get(key)
 
+                const targetCanView = perms.canView ?? false
+                const targetCanCreate = perms.canCreate ?? false
+                const targetCanEdit = perms.canEdit ?? false
+                const targetCanDelete = perms.canDelete ?? false
+                const targetCanArchive = perms.canArchive ?? false
+                const targetCanExport = perms.canExport ?? false
+                const targetCanAssign = perms.canAssign ?? false
+                const targetCanApprove = perms.canApprove ?? false
+
                 if (!existing) {
                     permsToCreate.push({
                         roleId,
                         module: moduleName,
-                        canView: perms.canView ?? false,
-                        canCreate: perms.canCreate ?? false,
-                        canEdit: perms.canEdit ?? false,
-                        canDelete: perms.canDelete ?? false,
-                        canArchive: perms.canArchive ?? false,
+                        canView: targetCanView,
+                        canCreate: targetCanCreate,
+                        canEdit: targetCanEdit,
+                        canDelete: targetCanDelete,
+                        canArchive: targetCanArchive,
+                        canExport: targetCanExport,
+                        canAssign: targetCanAssign,
+                        canApprove: targetCanApprove,
                     })
                     continue
                 }
 
                 const changed =
-                    existing.canView !== (perms.canView ?? false) ||
-                    existing.canCreate !== (perms.canCreate ?? false) ||
-                    existing.canEdit !== (perms.canEdit ?? false) ||
-                    existing.canDelete !== (perms.canDelete ?? false) ||
-                    existing.canArchive !== (perms.canArchive ?? false)
+                    existing.canView !== targetCanView ||
+                    existing.canCreate !== targetCanCreate ||
+                    existing.canEdit !== targetCanEdit ||
+                    existing.canDelete !== targetCanDelete ||
+                    existing.canArchive !== targetCanArchive ||
+                    existing.canExport !== targetCanExport ||
+                    existing.canAssign !== targetCanAssign ||
+                    existing.canApprove !== targetCanApprove
 
                 if (changed) {
                     permsToUpdate.push({
                         id: existing.id,
                         data: {
-                            canView: perms.canView ?? false,
-                            canCreate: perms.canCreate ?? false,
-                            canEdit: perms.canEdit ?? false,
-                            canDelete: perms.canDelete ?? false,
-                            canArchive: perms.canArchive ?? false,
+                            canView: targetCanView,
+                            canCreate: targetCanCreate,
+                            canEdit: targetCanEdit,
+                            canDelete: targetCanDelete,
+                            canArchive: targetCanArchive,
+                            canExport: targetCanExport,
+                            canAssign: targetCanAssign,
+                            canApprove: targetCanApprove,
                         }
                     })
                 }
@@ -294,11 +325,13 @@ export const initializeSystem = async () => {
         if (permsToCreate.length) {
             await prisma.permission.createMany({ data: permsToCreate, skipDuplicates: true })
         }
-        for (const p of permsToUpdate) {
-            await prisma.permission.update({ where: { id: p.id }, data: p.data })
+        if (permsToUpdate.length) {
+            await Promise.all(
+                permsToUpdate.map(p => prisma.permission.update({ where: { id: p.id }, data: p.data }))
+            )
         }
 
-        // ── STEP 4: SEED DEFAULT GLOBAL LEAD SOURCES ──────────
+        // ── STEP 2: SEED DEFAULT GLOBAL LEAD SOURCES ──────────
         const defaultLeadSources = [
             "Website",
             "Walk-in",
@@ -323,8 +356,10 @@ export const initializeSystem = async () => {
         }
 
         const leadSourcesToReactivate = existingLeadSources.filter(ls => !ls.isActive)
-        for (const ls of leadSourcesToReactivate) {
-            await prisma.leadSource.update({ where: { id: ls.id }, data: { isActive: true } })
+        if (leadSourcesToReactivate.length > 0) {
+            await Promise.all(
+                leadSourcesToReactivate.map(ls => prisma.leadSource.update({ where: { id: ls.id }, data: { isActive: true } }))
+            )
         }
 
         const createdLeadSourcesCount = leadSourcesToCreate.length
@@ -337,25 +372,30 @@ export const initializeSystem = async () => {
             console.log("✅ Default lead sources already present")
         }
 
-        // ── STEP 3: CREATE/UPDATE INITIAL SUPERADMIN ──────────────
-        // Uses findFirst with name + companyId:null (system roles are unique within null company scope)
+        // ── STEP 3: CREATE / VERIFY INITIAL SUPERADMIN ────────────
         const superAdminRole = await prisma.role.findFirst({
             where: { name: ROLE_NAMES.SUPER_ADMIN, companyId: null }
         })
+        if (!superAdminRole) {
+            throw new Error("SUPER_ADMIN role missing after system role sync in initSystem")
+        }
 
-        const superAdminUser = await prisma.user.upsert({
-            where: { email: "superadmin@gmail.com" },
-            update: { passwordHash: await hashPassword("superadmin123") },
-            create: {
-                name: "Super Admin",
-                email: "superadmin@gmail.com",
-                passwordHash: await hashPassword("superadmin123"),
-                companyId: null,
-                branchId: null,
-            }
+        let superAdminUser = await prisma.user.findUnique({
+            where: { email: "superadmin@gmail.com" }
         })
+        if (!superAdminUser) {
+            superAdminUser = await prisma.user.create({
+                data: {
+                    name: "Super Admin",
+                    email: "superadmin@gmail.com",
+                    passwordHash: await hashPassword("superadmin123"),
+                    companyId: null,
+                    branchId: null,
+                }
+            })
+        }
 
-        // ── STEP 4: ASSIGN ROLE IF MISSING ─
+        // ── STEP 4: ASSIGN SUPERADMIN ROLE IF MISSING ────────────
         const existingAssignment = await prisma.userRole.findFirst({
             where: {
                 userId: superAdminUser.id,
@@ -364,7 +404,7 @@ export const initializeSystem = async () => {
         })
 
         if (!existingAssignment) {
-            // First, remove any duplicate roles for this user
+            // Remove any duplicate roles for this user
             await prisma.userRole.deleteMany({
                 where: {
                     userId: superAdminUser.id,
@@ -387,96 +427,95 @@ export const initializeSystem = async () => {
             console.log("✅ SuperAdmin UserRole verified")
         }
 
-        console.log("System initialized successfully!")
+        // ── STEP 4.1: SEED DEFAULT PIPELINE STAGES ───────────────
+        const createdById = superAdminUser.id
+        const defaultStages = [
+            { name: "Prospect", stageType: "PROSPECT", colorCode: "#3b82f6", code: "PROSPECT" },
+            { name: "Closure",  stageType: "CLOSURE",  colorCode: "#6366f1", code: "CLOSURE"  }
+        ]
+        const existingStages = await prisma.stage.findMany({
+            where: {
+                OR: [
+                    { stageType: { in: defaultStages.map(d => d.stageType) } },
+                    { name: { in: defaultStages.map(d => d.name) } }
+                ]
+            }
+        })
+        const stageByType = new Map(existingStages.map(s => [s.stageType, s]))
+        const stageByName = new Map(existingStages.map(s => [s.name, s]))
 
-        const createdById = (await prisma.user.findUnique({ where: { email: "superadmin@gmail.com" }, select: { id: true } }))?.id
-        if (createdById) {
-            const defaultStages = [
-                { name: "Prospect", stageType: "PROSPECT", colorCode: "#3b82f6", code: "PROSPECT" },
-                { name: "Closure",  stageType: "CLOSURE",  colorCode: "#6366f1", code: "CLOSURE"  }
-            ]
-            for (const def of defaultStages) {
-                const existingStage = await prisma.stage.findFirst({
-                    where: { stageType: def.stageType },
-                    select: { id: true, isDeleted: true, isDefault: true, name: true }
-                }) || await prisma.stage.findUnique({
-                    where: { name: def.name },
-                    select: { id: true, isDeleted: true, isDefault: true, name: true }
+        for (const def of defaultStages) {
+            const existingStage = stageByType.get(def.stageType) || stageByName.get(def.name)
+            if (!existingStage) {
+                await prisma.stage.create({
+                    data: {
+                        name: def.name,
+                        code: def.code,
+                        stageType: def.stageType,
+                        colorCode: def.colorCode,
+                        isDefault: true,
+                        isDeleted: false,
+                        status: "ACTIVE",
+                        createdById
+                    }
                 })
-                if (!existingStage) {
-                    await prisma.stage.create({
-                        data: {
-                            name: def.name,
-                            code: def.code,
-                            stageType: def.stageType,
-                            colorCode: def.colorCode,
-                            isDefault: true,
-                            isDeleted: false,
-                            status: "ACTIVE",
-                            createdById
-                        }
-                    })
-                    console.log(`✅ Default stage seeded: ${def.name}`)
-                } else if (existingStage.isDeleted || !existingStage.isDefault) {
-                    await prisma.stage.update({
-                        where: { id: existingStage.id },
-                        data: {
-                            name: def.name,
-                            stageType: def.stageType,
-                            colorCode: def.colorCode,
-                            isDefault: true,
-                            isDeleted: false,
-                            status: "ACTIVE",
-                            updatedById: createdById
-                        }
-                    })
-                    console.log(`✅ Default stage synced: ${def.name}`)
-                }
+                console.log(`✅ Default stage seeded: ${def.name}`)
+            } else if (existingStage.isDeleted || !existingStage.isDefault) {
+                await prisma.stage.update({
+                    where: { id: existingStage.id },
+                    data: {
+                        name: def.name,
+                        stageType: def.stageType,
+                        colorCode: def.colorCode,
+                        isDefault: true,
+                        isDeleted: false,
+                        status: "ACTIVE",
+                        updatedById: createdById
+                    }
+                })
+                console.log(`✅ Default stage synced: ${def.name}`)
             }
         }
 
-        // ── STEP 4.2: SEED DEFAULT GLOBAL LEAD STATUSES ──
+        // ── STEP 4.2: SEED DEFAULT GLOBAL LEAD STATUSES ──────────
         const defaultStatuses = [
             { name: "New", code: "NEW", displayColor: "#3b82f6", sequenceOrder: 1000, isDefault: true, isSystem: true },
             { name: "Open", code: "OPEN", displayColor: "#10b981", sequenceOrder: 2000, isDefault: false, isSystem: true },
             { name: "Duplicate", code: "DUPLICATE", displayColor: "#6b7280", sequenceOrder: 4000, isDefault: false, isSystem: true },
             { name: "Closed", code: "CLOSED", displayColor: "#ef4444", sequenceOrder: 7000, isDefault: false, isSystem: true }
         ]
-        for (const status of defaultStatuses) {
-            const existingStatus = await prisma.leadStatus.findFirst({
-                where: { companyId: null, code: status.code }
-            })
-            if (!existingStatus) {
-                await prisma.leadStatus.create({
-                    data: {
-                        ...status,
-                        companyId: null,
-                        isActive: true
-                    }
-                })
-                console.log(`✅ Default lead status seeded: ${status.name}`)
-            }
+        const existingGlobalStatuses = await prisma.leadStatus.findMany({
+            where: { companyId: null }
+        })
+        const statusByCode = new Map(existingGlobalStatuses.map(s => [s.code, s]))
+
+        const statusesToCreate = defaultStatuses
+            .filter(s => !statusByCode.has(s.code))
+            .map(s => ({ ...s, companyId: null, isActive: true }))
+
+        if (statusesToCreate.length > 0) {
+            await prisma.leadStatus.createMany({ data: statusesToCreate })
+            console.log(`✅ Default lead statuses seeded (${statusesToCreate.length} created)`)
         }
 
-        // Auto-space all global statuses in database by 1000 on startup
-        const globalStatuses = await prisma.leadStatus.findMany({
+        // Auto-space any unspaced global statuses in database by 1000 in correct order
+        const allGlobalStatuses = await prisma.leadStatus.findMany({
             where: { companyId: null },
             orderBy: { sequenceOrder: 'asc' }
         })
-        for (let idx = 0; idx < globalStatuses.length; idx++) {
-            const targetSeq = (idx + 1) * 1000
-            if (globalStatuses[idx].sequenceOrder !== targetSeq) {
-                await prisma.leadStatus.update({
-                    where: { id: globalStatuses[idx].id },
-                    data: { sequenceOrder: targetSeq }
-                })
-                console.log(`🔄 Spaced out global status: ${globalStatuses[idx].name} to ${targetSeq}`)
-            }
+        const unspacedStatuses = allGlobalStatuses.filter((s, idx) => s.sequenceOrder !== (idx + 1) * 1000)
+        if (unspacedStatuses.length > 0) {
+            await Promise.all(
+                allGlobalStatuses.map((s, idx) =>
+                    prisma.leadStatus.update({
+                        where: { id: s.id },
+                        data: { sequenceOrder: (idx + 1) * 1000 }
+                    })
+                )
+            )
         }
 
-
-
-        // ── STEP 5: SEED DEFAULT COMPANY HIERARCHY ──────────
+        // ── STEP 5: SEED DEFAULT COMPANY HIERARCHY ──────────────
         // Only seed if no companies exist yet
         const companyCount = await prisma.company.count();
         if (companyCount === 0) {
@@ -511,11 +550,12 @@ export const initializeSystem = async () => {
 
             const defaultPasswordHash = await hashPassword("password123");
 
-            // 3. Create Users in Rank Order (establishing reportingManagerId hierarchy)
-
+            // 3. Create Users in Rank Order with upsert to prevent unique constraint conflicts
             // Tier 1: Company Admin (Rank 80)
-            const defaultAdmin = await prisma.user.create({
-                data: {
+            const defaultAdmin = await prisma.user.upsert({
+                where: { email: "admin@stackdot.in" },
+                update: {},
+                create: {
                     name: "Dinesh Baraiya",
                     firstName: "Dinesh",
                     lastName: "Baraiya",
@@ -524,8 +564,8 @@ export const initializeSystem = async () => {
                     passwordHash: defaultPasswordHash,
                     status: "ACTIVE",
                     companyId: stackdotCompany.id,
-                    branchId: mainBranch.id, // Usually company admins might not have branch, but for org chart let's assign
-                    reportingManagerId: null // Top of hierarchy
+                    branchId: mainBranch.id,
+                    reportingManagerId: null
                 }
             });
             await prisma.userRole.create({
@@ -533,8 +573,10 @@ export const initializeSystem = async () => {
             });
 
             // Tier 2: Branch Manager (Rank 60) - Reports to Company Admin
-            const defaultManager = await prisma.user.create({
-                data: {
+            const defaultManager = await prisma.user.upsert({
+                where: { email: "manager@stackdot.in" },
+                update: {},
+                create: {
                     name: "Jeet Jagani",
                     firstName: "Jeet",
                     lastName: "Jagani",
@@ -544,7 +586,7 @@ export const initializeSystem = async () => {
                     status: "ACTIVE",
                     companyId: stackdotCompany.id,
                     branchId: mainBranch.id,
-                    reportingManagerId: defaultAdmin.id // Rank 60 reports to Rank 80
+                    reportingManagerId: defaultAdmin.id
                 }
             });
             await prisma.userRole.create({
@@ -552,8 +594,10 @@ export const initializeSystem = async () => {
             });
 
             // Tier 3: BDE (Rank 40) - Reports to Branch Manager
-            const defaultBDE = await prisma.user.create({
-                data: {
+            const defaultBDE = await prisma.user.upsert({
+                where: { email: "bde@stackdot.in" },
+                update: {},
+                create: {
                     name: "Vivek Godhani",
                     firstName: "Vivek",
                     lastName: "Godhani",
@@ -563,7 +607,7 @@ export const initializeSystem = async () => {
                     status: "ACTIVE",
                     companyId: stackdotCompany.id,
                     branchId: mainBranch.id,
-                    reportingManagerId: defaultManager.id // Rank 40 reports to Rank 60
+                    reportingManagerId: defaultManager.id
                 }
             });
             await prisma.userRole.create({
@@ -571,8 +615,10 @@ export const initializeSystem = async () => {
             });
 
             // Tier 4: ISE (Rank 20) - Reports to BDE
-            const defaultISE = await prisma.user.create({
-                data: {
+            const defaultISE = await prisma.user.upsert({
+                where: { email: "ise@stackdot.in" },
+                update: {},
+                create: {
                     name: "Pratik Vaghela",
                     firstName: "Pratik",
                     lastName: "Vaghela",
@@ -582,7 +628,7 @@ export const initializeSystem = async () => {
                     status: "ACTIVE",
                     companyId: stackdotCompany.id,
                     branchId: mainBranch.id,
-                    reportingManagerId: defaultBDE.id // Rank 20 reports to Rank 40
+                    reportingManagerId: defaultBDE.id
                 }
             });
             await prisma.userRole.create({
@@ -592,21 +638,52 @@ export const initializeSystem = async () => {
             console.log("✅ Default StackDot Hierarchy Seeded Successfully!");
         }
 
-        // ── STEP 6: SEED QUALIFICATION CRITERIA FOR ALL COMPANIES ──
-        // This runs at every startup — idempotent, safe, and ensures
-        // every company always has default BANT criteria + pass thresholds.
-        // This is the CORRECT pattern: seed at startup after companies exist,
-        // NOT inside read-request API handlers.
+        // ── STEP 6: BATCH SEED QUALIFICATION CRITERIA & ROLES FOR ALL COMPANIES ──
         const allCompanies = await prisma.company.findMany({
             where: { status: 'ACTIVE' },
             select: { id: true, name: true }
         })
-        for (const company of allCompanies) {
-            await seedCompanySystemRoles(company.id)
-            await ensureCompanyCriteriaSeeded(company.id)
-            console.log(`✅ Qualification criteria & company roles verified for company: ${company.name} (ID: ${company.id})`)
 
-            // ── STEP 7: SEED NOTIFICATION EVENT CONFIGS ──
+        if (allCompanies.length > 0) {
+            const companyIds = allCompanies.map(c => c.id)
+            const systemRoleNames = [
+                ROLE_NAMES.COMPANY_ADMIN,
+                ROLE_NAMES.BRANCH_MANAGER,
+                ROLE_NAMES.BDE,
+                ROLE_NAMES.ISE,
+            ]
+            // Pre-fetch master template roles and all company-scoped roles in bulk
+            const [cachedMasterRoles, allCompanyRoles] = await Promise.all([
+                prisma.role.findMany({
+                    where: { companyId: null, name: { in: systemRoleNames } },
+                    include: { rolePermissions: true }
+                }),
+                prisma.role.findMany({
+                    where: { companyId: { in: companyIds }, name: { in: systemRoleNames } },
+                    include: { rolePermissions: true }
+                })
+            ])
+
+            const companyRolesByCompanyId = new Map()
+            for (const r of allCompanyRoles) {
+                if (!companyRolesByCompanyId.has(r.companyId)) {
+                    companyRolesByCompanyId.set(r.companyId, [])
+                }
+                companyRolesByCompanyId.get(r.companyId).push(r)
+            }
+
+            // Run role verification and bulk qualification criteria verification
+            await Promise.all([
+                batchEnsureCompaniesCriteriaSeeded(companyIds),
+                Promise.all(
+                    allCompanies.map((company) =>
+                        seedCompanySystemRoles(company.id, prisma, cachedMasterRoles, companyRolesByCompanyId.get(company.id) || [])
+                    )
+                )
+            ])
+            console.log(`✅ Qualification criteria & company roles verified for ${allCompanies.length} companies`)
+
+            // ── STEP 7: BATCH SEED NOTIFICATION EVENT CONFIGS (1 BULK QUERY) ──
             const defaultEvents = [
                 { eventType: "LEAD_ASSIGNED", moduleName: "LEAD" },
                 { eventType: "LEAD_REASSIGNED", moduleName: "LEAD" },
@@ -626,20 +703,38 @@ export const initializeSystem = async () => {
                 { eventType: "MAINTENANCE_ANNOUNCEMENT", moduleName: "SYSTEM" },
                 { eventType: "BACKUP_COMPLETED", moduleName: "SYSTEM" },
             ]
-            for (const evt of defaultEvents) {
-                await prisma.notificationEventConfig.upsert({
-                    where: { companyId_eventType: { companyId: company.id, eventType: evt.eventType } },
-                    update: {},
-                    create: {
-                        companyId: company.id,
-                        eventType: evt.eventType,
-                        moduleName: evt.moduleName,
-                        isEnabled: true,
-                        channels: { inApp: true, email: true, push: false },
+
+            const existingConfigs = await prisma.notificationEventConfig.findMany({
+                where: { companyId: { in: companyIds } },
+                select: { companyId: true, eventType: true }
+            })
+            const existingConfigSet = new Set(existingConfigs.map(c => `${c.companyId}_${c.eventType}`))
+
+            const missingConfigs = []
+            for (const company of allCompanies) {
+                for (const evt of defaultEvents) {
+                    if (!existingConfigSet.has(`${company.id}_${evt.eventType}`)) {
+                        missingConfigs.push({
+                            companyId: company.id,
+                            eventType: evt.eventType,
+                            moduleName: evt.moduleName,
+                            isEnabled: true,
+                            channels: { inApp: true, email: true, push: false },
+                        })
                     }
-                }).catch(() => {})
+                }
+            }
+
+            if (missingConfigs.length > 0) {
+                await prisma.notificationEventConfig.createMany({
+                    data: missingConfigs,
+                    skipDuplicates: true
+                })
+                console.log(`✅ Seeded ${missingConfigs.length} missing notification configs`)
             }
         }
+
+        console.log(`✅ System initialized in ${Date.now() - t0}ms`)
 
     } catch (error) {
         console.error("System initialization failed:", error)
@@ -652,7 +747,7 @@ export const initializeSystem = async () => {
  * Clones from global master templates (companyId: null) if not present.
  * Also remaps any userRole pointing to global master roles to point to company-scoped roles instead.
  */
-export const seedCompanySystemRoles = async (companyId, tx = prisma) => {
+export const seedCompanySystemRoles = async (companyId, tx = prisma, cachedMasterRoles = null, cachedCompanyRoles = null) => {
     const systemRoleNames = [
         ROLE_NAMES.COMPANY_ADMIN,
         ROLE_NAMES.BRANCH_MANAGER,
@@ -660,15 +755,15 @@ export const seedCompanySystemRoles = async (companyId, tx = prisma) => {
         ROLE_NAMES.ISE,
     ]
 
-    // Fetch master template roles (companyId: null) with permissions
-    const masterRoles = await tx.role.findMany({
+    // Fetch master template roles (companyId: null) with permissions if not passed in
+    const masterRoles = cachedMasterRoles || await tx.role.findMany({
         where: { companyId: null, name: { in: systemRoleNames } },
         include: { rolePermissions: true }
     })
     const masterRoleByName = new Map(masterRoles.map(r => [r.name, r]))
 
-    // Fetch existing company-scoped roles
-    const existingCompanyRoles = await tx.role.findMany({
+    // Fetch existing company-scoped roles if not passed in
+    const existingCompanyRoles = cachedCompanyRoles || await tx.role.findMany({
         where: { companyId, name: { in: systemRoleNames } },
         include: { rolePermissions: true }
     })
@@ -721,16 +816,5 @@ export const seedCompanySystemRoles = async (companyId, tx = prisma) => {
                 data: { isSystem: true }
             })
         }
-
-        // Remap any userRole for users in this company pointing to the master template role ID
-        await tx.userRole.updateMany({
-            where: {
-                companyId: companyId,
-                roleId: masterRole.id
-            },
-            data: {
-                roleId: companyRole.id
-            }
-        })
     }
 }

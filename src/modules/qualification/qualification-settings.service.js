@@ -75,6 +75,95 @@ export const DEFAULT_SETTINGS = {
 };
 
 /**
+ * Seed default BANT qualification criteria for multiple companies in bulk.
+ * Called at startup (via initSystem.js) for high performance over remote database connections.
+ */
+export const batchEnsureCompaniesCriteriaSeeded = async (companyIds) => {
+  if (!companyIds || companyIds.length === 0) return;
+
+  const [allCriteria, allSettings] = await Promise.all([
+    prisma.companyQualificationCriteria.findMany({
+      where: { companyId: { in: companyIds }, isActive: true },
+      orderBy: { id: 'asc' },
+    }),
+    prisma.companyQualificationSettings.findMany({
+      where: { companyId: { in: companyIds } },
+    }),
+  ]);
+
+  const criteriaByCompany = new Map();
+  for (const c of allCriteria) {
+    if (!criteriaByCompany.has(c.companyId)) criteriaByCompany.set(c.companyId, []);
+    criteriaByCompany.get(c.companyId).push(c);
+  }
+
+  const existingSettingsCompanyIds = new Set(allSettings.map(s => s.companyId));
+  const missingCriteriaData = [];
+  const duplicateIdsToDelete = [];
+
+  for (const companyId of companyIds) {
+    const list = criteriaByCompany.get(companyId) || [];
+    const seenKeys = new Set();
+    list.forEach((c) => {
+      if (seenKeys.has(c.key)) {
+        duplicateIdsToDelete.push(c.id);
+      } else {
+        seenKeys.add(c.key);
+      }
+    });
+
+    // Backfill any missing default criteria (handles both 0 criteria and partial criteria)
+    const missingItems = DEFAULT_QUALIFICATION_CRITERIA.filter(item => !seenKeys.has(item.key));
+    for (const item of missingItems) {
+      missingCriteriaData.push({
+        ...item,
+        companyId,
+        isActive: true,
+      });
+    }
+  }
+
+  const missingSettingsData = companyIds
+    .filter(id => !existingSettingsCompanyIds.has(id))
+    .map(companyId => ({
+      companyId,
+      passThreshold: DEFAULT_SETTINGS.passThreshold,
+      holdThreshold: DEFAULT_SETTINGS.holdThreshold,
+      validStatuses: DEFAULT_SETTINGS.validStatuses,
+    }));
+
+  // Execute deduplication deletes sequentially first to prevent race condition with inserts
+  if (duplicateIdsToDelete.length > 0) {
+    await prisma.companyQualificationCriteria.deleteMany({
+      where: { id: { in: duplicateIdsToDelete } },
+    });
+  }
+
+  // Execute missing criteria and settings creation in parallel
+  const createOps = [];
+  if (missingCriteriaData.length > 0) {
+    createOps.push(
+      prisma.companyQualificationCriteria.createMany({
+        data: missingCriteriaData,
+        skipDuplicates: true,
+      })
+    );
+  }
+  if (missingSettingsData.length > 0) {
+    createOps.push(
+      prisma.companyQualificationSettings.createMany({
+        data: missingSettingsData,
+        skipDuplicates: true,
+      })
+    );
+  }
+
+  if (createOps.length > 0) {
+    await Promise.all(createOps);
+  }
+};
+
+/**
  * Seed default BANT qualification criteria for a company — only if none exist yet.
  * Called at startup (via initSystem.js) after the company is guaranteed to exist.
  * NEVER called from a read-request handler.
@@ -131,26 +220,41 @@ export const ensureCompanyCriteriaSeeded = async (companyId) => {
 };
 
 /**
- * Get active criteria for a company
+ * Get active criteria for a company (Fast direct read with self-healing lazy fallback)
  */
 export const getCompanyCriteriaService = async (companyId) => {
-  await ensureCompanyCriteriaSeeded(companyId);
-
-  return prisma.companyQualificationCriteria.findMany({
+  let criteria = await prisma.companyQualificationCriteria.findMany({
     where: { companyId, isActive: true },
     orderBy: { displayOrder: 'asc' },
   });
+
+  if (!criteria || criteria.length === 0) {
+    await ensureCompanyCriteriaSeeded(companyId);
+    criteria = await prisma.companyQualificationCriteria.findMany({
+      where: { companyId, isActive: true },
+      orderBy: { displayOrder: 'asc' },
+    });
+  }
+
+  return criteria;
 };
 
 /**
- * Get company threshold settings
+ * Get company threshold settings (Fast direct read with self-healing lazy fallback)
  */
 export const getCompanySettingsService = async (companyId) => {
-  await ensureCompanyCriteriaSeeded(companyId);
-
-  return prisma.companyQualificationSettings.findUnique({
+  let settings = await prisma.companyQualificationSettings.findUnique({
     where: { companyId },
   });
+
+  if (!settings) {
+    await ensureCompanyCriteriaSeeded(companyId);
+    settings = await prisma.companyQualificationSettings.findUnique({
+      where: { companyId },
+    });
+  }
+
+  return settings;
 };
 
 /**
