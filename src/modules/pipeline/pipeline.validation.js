@@ -16,10 +16,10 @@ export const updatePipelineSchema = z.object({
 })
 
 export const assignStagesSchema = z.object({
-  stageIds: z.array(z.number().int().positive()).optional(),
+  stageIds: z.array(z.number().int().positive()).nullable().optional(),
   newStages: z.array(z.object({
     name: z.string().trim().min(1, "Stage name cannot be empty")
-  })).optional(),
+  })).nullable().optional(),
   orderedStageIds: z.array(z.number().int().positive()).optional().nullable()
 })
 

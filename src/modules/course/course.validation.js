@@ -11,7 +11,7 @@ export const createCourseSchema = z.object({
     required_error: "Course name is required"
   }).trim().min(1, "Course name cannot be empty"),
   
-  code: z.string().trim().toUpperCase().optional(), // Normalize course codes to uppercase
+  code: z.string().trim().toUpperCase().nullable().optional(), // Normalize course codes to uppercase
   
   description: z.string().trim().optional().nullable(),
   
@@ -51,7 +51,7 @@ export const updateCourseSchema = z.object({
   
   // Note: code is typically immutable to prevent integrity issues.
   // We keep it optional here in case admins are allowed to correct typo during creation.
-  code: z.string().trim().min(1, "Course code cannot be empty").toUpperCase().optional(),
+  code: z.string().trim().min(1, "Course code cannot be empty").toUpperCase().nullable().optional(),
   
   description: z.string().trim().optional().nullable(),
   

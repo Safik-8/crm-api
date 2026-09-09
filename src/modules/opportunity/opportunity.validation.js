@@ -28,11 +28,12 @@ export const createOpportunitySchema = z.object({
     .int()
     .min(0, 'Probability must be at least 0%')
     .max(100, 'Probability cannot exceed 100%')
+    .nullable()
     .optional(),
   closingDate: z
     .string({ required_error: 'Target closing date is required' })
     .refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid closing date format' }),
-  notes: z.string().max(1000, 'Notes cannot exceed 1000 characters').optional(),
+  notes: z.string().max(1000, 'Notes cannot exceed 1000 characters').nullable().optional(),
 });
 
 /**
@@ -47,8 +48,8 @@ export const closeOpportunitySchema = z.object({
   outcome: z.enum(['WON', 'LOST', 'CANCELLED'], {
     required_error: 'Outcome (WON, LOST, CANCELLED) is required',
   }),
-  reasonId: z.number().int().positive().optional(),
-  remarks: z.string().max(1000, 'Remarks cannot exceed 1000 characters').optional(),
+  reasonId: z.number().int().positive().nullable().optional(),
+  remarks: z.string().max(1000, 'Remarks cannot exceed 1000 characters').nullable().optional(),
 });
 
 /**

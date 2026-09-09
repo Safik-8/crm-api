@@ -17,16 +17,16 @@ export const createRoleSchema = z.object({
   name: z.string({ required_error: "Role name is required" })
     .trim()
     .nonempty("Role name is required"),
-  description: z.string().trim().optional(),
-  rank: z.number().min(0).max(100).optional(),
+  description: z.string().trim().nullable().optional(),
+  rank: z.number().min(0).max(100).nullable().optional(),
   companyId: z.number().nullable().optional(),
   permissions: z.array(permissionSchema).optional().default([]),
 })
 
 export const updateRoleSchema = z.object({
   name: z.string().trim().nonempty("Role name cannot be empty").optional(),
-  description: z.string().trim().optional(),
-  rank: z.number().min(0).max(100).optional(),
+  description: z.string().trim().nullable().optional(),
+  rank: z.number().min(0).max(100).nullable().optional(),
   companyId: z.number().nullable().optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
   permissions: z.array(permissionSchema).optional(),

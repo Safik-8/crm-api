@@ -15,7 +15,7 @@ export const createUserSchema = z.object({
   email: z.string({
     required_error: "Email is required"
   }).trim().email("Enter a valid email address").toLowerCase(),
-  password: passwordSchema.optional(),
+  password: passwordSchema.nullable().optional(),
   mobileNumber: z.string({
     required_error: "Mobile number is required"
   }).trim().regex(/^\d{10}$/, "Mobile number must be exactly 10 digits"),
@@ -45,11 +45,11 @@ export const createUserSchema = z.object({
 
 // Schema for editing an existing user
 export const updateUserSchema = z.object({
-  firstName: z.string().trim().min(1, "First name cannot be empty").optional(),
-  lastName: z.string().trim().min(1, "Last name cannot be empty").optional(),
-  mobileNumber: z.string().trim().regex(/^\d{10}$/, "Mobile number must be exactly 10 digits").optional(),
-  branchId: z.number().int().positive().optional(),
-  roleId: z.number().int().positive().optional(),
+  firstName: z.string().trim().min(1, "First name cannot be empty").nullable().optional(),
+  lastName: z.string().trim().min(1, "Last name cannot be empty").nullable().optional(),
+  mobileNumber: z.string().trim().regex(/^\d{10}$/, "Mobile number must be exactly 10 digits").nullable().optional(),
+  branchId: z.number().int().positive().nullable().optional(),
+  roleId: z.number().int().positive().nullable().optional(),
   reportingManagerId: z.number().int().positive().nullable().optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
   address: z.string().trim().optional().nullable(),

@@ -57,9 +57,9 @@ export const createCompanySchema = z.object({
     .nonempty("Company code is required")
     .regex(/^[A-Za-z0-9_-]+$/, "Company code must be alphanumeric and can only contain dashes or underscores"),
   logo: optionalLogoSchema,
-  industry: z.string().trim().optional(),
+  industry: z.string().trim().nullable().optional(),
   website: optionalUrlSchema,
-  address: z.string().trim().optional(),
+  address: z.string().trim().nullable().optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
 
   // Company Admin User details
@@ -78,9 +78,9 @@ export const createCompanySchema = z.object({
 export const updateCompanySchema = z.object({
   name: z.string().trim().nonempty("Company name cannot be empty").optional(),
   logo: optionalLogoSchema,
-  industry: z.string().trim().optional(),
+  industry: z.string().trim().nullable().optional(),
   website: optionalUrlSchema,
-  address: z.string().trim().optional(),
+  address: z.string().trim().nullable().optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional()
 })
 

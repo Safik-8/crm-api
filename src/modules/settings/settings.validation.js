@@ -96,15 +96,15 @@ export const emailSettingsSchema = z.object({
   smtpUser: z.string().trim().optional().nullable(),
   smtpPassword: z.string().optional().nullable(),
   smtpSenderName: z.string().trim().optional().nullable(),
-  smtpSenderEmail: z.string().email("Invalid sender email").optional().nullable(),
+  smtpSenderEmail: z.string().email("Invalid sender email").optional().nullable().or(z.literal("")),
   smtpEncryption: z.enum(["TLS", "SSL", "NONE"]).optional(),
   emailSignatureTemplate: z.string().optional().nullable(),
 }).partial()
 
 export const brandingSettingsSchema = z.object({
-  primaryColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, "Invalid primary hex color").optional(),
-  secondaryColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, "Invalid secondary hex color").optional(),
-  accentColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, "Invalid accent hex color").optional(),
+  primaryColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, "Invalid primary hex color").optional().nullable().or(z.literal("")),
+  secondaryColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, "Invalid secondary hex color").optional().nullable().or(z.literal("")),
+  accentColor: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, "Invalid accent hex color").optional().nullable().or(z.literal("")),
   themeMode: z.enum(["LIGHT", "DARK", "SYSTEM"]).optional(),
   loginBackgroundUrl: optionalUrlSchema,
   customDomain: optionalDomainSchema,

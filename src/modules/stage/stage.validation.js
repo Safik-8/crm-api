@@ -15,18 +15,19 @@ export const createStageSchema = z.object({
   code: z
     .string()
     .trim()
-    .min(1, "Code cannot be empty")
     .max(30, "Code must be 30 characters or less")
-    .transform((v) => v.toUpperCase())
+    .transform((v) => (v ? v.toUpperCase() : null))
     .optional()
-    .nullable(),
+    .nullable()
+    .or(z.literal("")),
 
   colorCode: z
     .string()
     .trim()
     .regex(/^#[0-9A-Fa-f]{6}$/, "colorCode must be a valid 6-digit hex color (e.g. #22c55e)")
     .optional()
-    .nullable(),
+    .nullable()
+    .or(z.literal("")),
 
   displayOrder: z.preprocess(
     (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
@@ -55,18 +56,19 @@ export const updateStageSchema = z
     code: z
       .string()
       .trim()
-      .min(1, "Code cannot be empty")
       .max(30, "Code must be 30 characters or less")
-      .transform((v) => v.toUpperCase())
+      .transform((v) => (v ? v.toUpperCase() : null))
       .optional()
-      .nullable(),
+      .nullable()
+      .or(z.literal("")),
 
     colorCode: z
       .string()
       .trim()
       .regex(/^#[0-9A-Fa-f]{6}$/, "colorCode must be a valid 6-digit hex color (e.g. #22c55e)")
       .optional()
-      .nullable(),
+      .nullable()
+      .or(z.literal("")),
 
     displayOrder: z.preprocess(
       (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),

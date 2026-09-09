@@ -23,9 +23,9 @@ export const createTeamSchema = z.object({
     required_error: "BDE ID is required"
   }).int().positive(),
 
-  companyId: z.number().int().positive().optional(),
+  companyId: z.number().int().positive().nullable().optional(),
 
-  iseIds: z.array(z.number().int().positive()).optional().default([]),
+  iseIds: z.array(z.number().int().positive()).nullable().optional().default([]),
 
   status: z.enum(["ACTIVE", "INACTIVE"]).optional().default("ACTIVE")
 });
@@ -46,7 +46,7 @@ export const updateTeamSchema = z.object({
     required_error: "Status is required"
   }),
 
-  iseIds: z.array(z.number().int().positive()).optional().default([])
+  iseIds: z.array(z.number().int().positive()).nullable().optional().default([])
 });
 
 /**
