@@ -36,13 +36,15 @@ export const createLeadSource = async (data, tx = prisma) => {
   })
 }
 
-export const findLeadSources = async (where, tx = prisma) => {
+export const findLeadSources = async (where, take, skip, tx = prisma) => {
   return tx.leadSource.findMany({
     where,
     orderBy: [
       { companyId: "asc" },
       { name: "asc" }
     ],
+    take,
+    skip,
     select: {
       id: true,
       name: true,
@@ -51,6 +53,10 @@ export const findLeadSources = async (where, tx = prisma) => {
       companyId: true
     }
   })
+}
+
+export const countLeadSources = async (where, tx = prisma) => {
+  return tx.leadSource.count({ where })
 }
 
 export const updateLeadSource = async (id, data, tx = prisma) => {

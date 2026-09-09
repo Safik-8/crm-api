@@ -11,6 +11,7 @@ import {
   findDuplicateLeadSource,
   createLeadSource,
   findLeadSources,
+  countLeadSources,
   updateLeadSource
 } from "./leadsources.repository.js"
 
@@ -83,7 +84,11 @@ export const createLeadSourceService = async (data, actor) => {
 // ══════════════════════════════════════════════════════════
 
 export const getLeadSourcesService = async (query, actor) => {
-  const { search, isActive } = query
+  const { search, isActive, page = 1, limit = 10 } = query
+
+  const parsedPage = Math.max(1, parseInt(page) || 1)
+  const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 10))
+  const skip = (parsedPage - 1) * parsedLimit
 
   // Build where:
   // Super Admin → all global + all company specific
@@ -122,17 +127,28 @@ export const getLeadSourcesService = async (query, actor) => {
     }
   }
 
-  const leadSources = await findLeadSources(where)
+  const [leadSources, total] = await Promise.all([
+    findLeadSources(where, parsedLimit, skip),
+    countLeadSources(where)
+  ])
 
   // Label each as GLOBAL or COMPANY
-  return leadSources.map(ls => ({
-    id: ls.id,
-    name: ls.name,
-    description: ls.description,
-    isActive: ls.isActive,
-    companyId: ls.companyId,
-    type: ls.companyId ? "COMPANY" : "GLOBAL"
-  }))
+  return {
+    sources: leadSources.map(ls => ({
+      id: ls.id,
+      name: ls.name,
+      description: ls.description,
+      isActive: ls.isActive,
+      companyId: ls.companyId,
+      type: ls.companyId ? "COMPANY" : "GLOBAL"
+    })),
+    pagination: {
+      page: parsedPage,
+      limit: parsedLimit,
+      total,
+      totalPages: Math.ceil(total / parsedLimit) || 1
+    }
+  }
 }
 
 // ══════════════════════════════════════════════════════════
