@@ -209,10 +209,94 @@ export const refreshTokenService = async (refreshToken, metadata = {}) => {
     throw new UnauthorizedError("Refresh token not found")
   }
 
-  // ── 4. CHECK EXPIRY ────────────────────────────────────
+  // ── 4. CHECK EXPIRY OR REVOCATION WITH GRACE PERIOD ──────
   if (stored.expiresAt < new Date()) {
-    await deleteRefreshToken(refreshToken)
+    await deleteRefreshToken(refreshToken).catch(() => {})
     throw new UnauthorizedError("Refresh token expired")
+  }
+
+  // Handle concurrent refresh requests within 30-second grace window
+  if (stored.isRevoked) {
+    const gracePeriodMs = 30 * 1000;
+    const isWithinGracePeriod = stored.revokedAt && (Date.now() - new Date(stored.revokedAt).getTime()) < gracePeriodMs;
+
+    if (isWithinGracePeriod) {
+      const user = await findUserById(payload.userId);
+      if (!user || user.status !== "ACTIVE") {
+        throw new UnauthorizedError("User not found or inactive");
+      }
+
+      const latestToken = await prisma.refreshToken.findFirst({
+        where: { userId: payload.userId, isRevoked: false, expiresAt: { gt: new Date() } },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      const primaryUserRole = user.userRoles.find(ur => ur.isPrimary) ?? user.userRoles[0];
+      const allRoles = user.userRoles.map(ur => ({
+        name: ur.role.name,
+        rank: ur.role.rank ?? 0,
+        companyId: ur.companyId,
+        branchId: ur.branchId,
+        isPrimary: ur.isPrimary,
+      }));
+
+      const permissionsMap = {};
+      user.userRoles.forEach(ur => {
+        ur.role.rolePermissions.forEach(rp => {
+          if (!permissionsMap[rp.module]) {
+            permissionsMap[rp.module] = {
+              canView: false,
+              canCreate: false,
+              canEdit: false,
+              canDelete: false,
+              canArchive: false,
+            };
+          }
+          if (rp.canView) permissionsMap[rp.module].canView = true;
+          if (rp.canCreate) permissionsMap[rp.module].canCreate = true;
+          if (rp.canEdit) permissionsMap[rp.module].canEdit = true;
+          if (rp.canDelete) permissionsMap[rp.module].canDelete = true;
+          if (rp.canArchive) permissionsMap[rp.module].canArchive = true;
+        });
+      });
+
+      const accessToken = generateAccessToken({
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        companyId: user.companyId,
+        branchId: user.branchId,
+        primaryRole: primaryUserRole.role.name,
+        primaryRoleRank: primaryUserRole.role.rank ?? 0,
+        roles: allRoles,
+        permissions: permissionsMap,
+      });
+
+      return {
+        accessToken,
+        refreshToken: latestToken ? latestToken.token : refreshToken,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          companyId: user.companyId,
+          companyName: user.company?.name ?? null,
+          companyCode: user.company?.code ?? null,
+          company: user.company,
+          branchId: user.branchId,
+          branchName: user.branch?.name ?? null,
+          branchCode: user.branch?.code ?? null,
+          primaryRole: primaryUserRole.role.name,
+          primaryRoleRank: primaryUserRole.role.rank ?? 0,
+          roles: allRoles,
+          permissions: permissionsMap,
+          mustChangePassword: user.mustChangePassword,
+        }
+      };
+    }
+
+    // Outside grace period: security violation
+    throw new UnauthorizedError("Refresh token already used and revoked");
   }
 
   // ── 5. GET FRESH USER DATA ─────────────────────────────
@@ -269,10 +353,23 @@ export const refreshTokenService = async (refreshToken, metadata = {}) => {
     })
   })
 
-  // ── 7. 🔥 REFRESH TOKEN ROTATION (TRANSACTIONAL) ──────────
+  // ── 8. 🔥 REFRESH TOKEN ROTATION (TRANSACTIONAL WITH GRACE PERIOD) ──────────
   const { newAccessToken, newRefreshToken } = await prisma.$transaction(async (tx) => {
-    // Delete old refresh token from DB
-    await deleteRefreshToken(refreshToken, tx)
+    // Mark old refresh token as revoked with timestamp for grace window
+    await tx.refreshToken.update({
+      where: { id: stored.id },
+      data: { isRevoked: true, revokedAt: new Date() }
+    })
+
+    // Clean up older revoked tokens (older than 2 minutes)
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000)
+    await tx.refreshToken.deleteMany({
+      where: {
+        userId: user.id,
+        isRevoked: true,
+        revokedAt: { lt: twoMinutesAgo }
+      }
+    }).catch(() => {})
 
     // Generate new tokens
     const newAccessToken = generateAccessToken({

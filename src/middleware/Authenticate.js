@@ -58,13 +58,14 @@ export const authenticate = async (req, res, next) => {
       const activeSession = await prisma.refreshToken.findUnique({
         where: { token: refreshToken }
       })
-      if (!activeSession) {
+      const isRevokedExpired = activeSession?.isRevoked && activeSession?.revokedAt && (Date.now() - new Date(activeSession.revokedAt).getTime() > 30000);
+      if (!activeSession || isRevokedExpired) {
         return next(new UnauthorizedError("Session has been revoked or expired"))
       }
 
       // Throttle updating lastActive to once per minute to avoid DB write spam
       const oneMinuteAgo = new Date(Date.now() - 60 * 1000)
-      if (!activeSession.lastActive || activeSession.lastActive < oneMinuteAgo) {
+      if (!activeSession.isRevoked && (!activeSession.lastActive || activeSession.lastActive < oneMinuteAgo)) {
         await prisma.refreshToken.update({
           where: { id: activeSession.id },
           data: { lastActive: new Date() }
