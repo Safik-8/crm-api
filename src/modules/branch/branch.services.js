@@ -150,31 +150,37 @@ export const getBranchesPaginatedService = async (query, actor) => {
   } = query
 
   // Determine company scope
+  const compIdParam = company_id || query.companyId
   const scopedCompanyId = actor.primaryRole === "SUPER_ADMIN"
-    ? Number(company_id)
+    ? (compIdParam ? Number(compIdParam) : undefined)
     : actor.companyId
 
-  if (!scopedCompanyId) {
+  if (actor.primaryRole !== "SUPER_ADMIN" && !scopedCompanyId) {
     throw new ValidationError("Validation failed", [
       { field: "company_id", message: "company_id is required" }
     ])
   }
 
   // Non super admin scope check
-  if (actor.primaryRole !== "SUPER_ADMIN" && company_id) {
-    if (Number(company_id) !== actor.companyId) {
+  if (actor.primaryRole !== "SUPER_ADMIN" && compIdParam) {
+    if (Number(compIdParam) !== actor.companyId) {
       throw new ForbiddenError("Access denied")
     }
   }
 
-  // Company exists check
-  const company = await prisma.company.findUnique({
-    where: { id: scopedCompanyId }
-  })
-  if (!company) throw new NotFoundError("Company")
+  // Company exists check if scopedCompanyId is defined
+  if (scopedCompanyId) {
+    const company = await prisma.company.findUnique({
+      where: { id: scopedCompanyId }
+    })
+    if (!company) throw new NotFoundError("Company")
+  }
 
   // Build filters
-  const where = { companyId: scopedCompanyId }
+  const where = {}
+  if (scopedCompanyId) {
+    where.companyId = scopedCompanyId
+  }
   if (status) where.status = status
 
   if (search?.trim()) {
@@ -188,7 +194,9 @@ export const getBranchesPaginatedService = async (query, actor) => {
 
   // If the actor is not a system or company administrator, lock views to their own branch
   if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
-    where.id = actor.branchId
+    if (actor.branchId) {
+      where.id = actor.branchId
+    }
   }
 
   // Pagination parameters
