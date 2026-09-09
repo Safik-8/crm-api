@@ -16,6 +16,26 @@ const priorityField = z
   })
   .default("MEDIUM");
 
+const parseRequiredId = (v) => {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  return isNaN(n) ? undefined : n;
+};
+
+const parseNullableId = (v) => {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  const n = Number(v);
+  return isNaN(n) ? undefined : n;
+};
+
+const parseNullableNumber = (v) => {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? undefined : n;
+};
+
 // ─── Create Lead Schema ───────────────────────────────────────────────────────
 
 export const createLeadSchema = z.object({
@@ -29,7 +49,7 @@ export const createLeadSchema = z.object({
   mobile: mobileField,
 
   sourceId: z.preprocess(
-    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    parseRequiredId,
     z
       .number({ required_error: "Lead source is required" })
       .int()
@@ -37,7 +57,7 @@ export const createLeadSchema = z.object({
   ),
 
   courseId: z.preprocess(
-    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    parseRequiredId,
     z
       .number({ required_error: "Interested course is required" })
       .int()
@@ -45,7 +65,7 @@ export const createLeadSchema = z.object({
   ),
 
   statusId: z.preprocess(
-    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    parseNullableId,
     z.number().int().positive().optional().nullable()
   ),
 
@@ -68,7 +88,7 @@ export const createLeadSchema = z.object({
     .or(z.literal("")),
 
   budget: z.preprocess(
-    (v) => (v !== undefined && v !== null && v !== "" ? parseFloat(v) : undefined),
+    parseNullableNumber,
     z
       .number()
       .nonnegative("Budget cannot be negative")
@@ -82,13 +102,13 @@ export const createLeadSchema = z.object({
   notes:   z.string().trim().optional().nullable(),
 
   assignedToId: z.preprocess(
-    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    parseNullableId,
     z.number().int().positive().optional().nullable()
   ),
 
   // Optional — Kanban flow still passes pipelineId
   pipelineId: z.preprocess(
-    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    parseNullableId,
     z.number().int().positive().optional().nullable()
   ),
 
@@ -97,11 +117,11 @@ export const createLeadSchema = z.object({
   interested_for: z.string().trim().optional().nullable(),
 
   companyId: z.preprocess(
-    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    parseNullableId,
     z.number().int().positive().optional().nullable()
   ),
   branchId: z.preprocess(
-    (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+    parseNullableId,
     z.number().int().positive().optional().nullable()
   ),
   overrideDuplicate: z.boolean().optional(),
@@ -142,17 +162,17 @@ export const updateLeadSchema = z
       .or(z.literal("")),
 
     sourceId: z.preprocess(
-      (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+      parseRequiredId,
       z.number().int().positive().optional()
     ),
 
     courseId: z.preprocess(
-      (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+      parseRequiredId,
       z.number().int().positive().optional()
     ),
 
     statusId: z.preprocess(
-      (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+      parseNullableId,
       z.number().int().positive().optional().nullable()
     ),
 
@@ -163,7 +183,7 @@ export const updateLeadSchema = z
       .optional(),
 
     budget: z.preprocess(
-      (v) => (v !== undefined && v !== null && v !== "" ? parseFloat(v) : undefined),
+      parseNullableNumber,
       z.number().nonnegative("Budget cannot be negative").optional().nullable()
     ),
 
@@ -173,7 +193,17 @@ export const updateLeadSchema = z
     notes:   z.string().trim().optional().nullable(),
 
     assignedToId: z.preprocess(
-      (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+      parseNullableId,
+      z.number().int().positive().optional().nullable()
+    ),
+
+    // Pipeline / Kanban assignment
+    pipelineId: z.preprocess(
+      parseNullableId,
+      z.number().int().positive().optional().nullable()
+    ),
+    stageId: z.preprocess(
+      parseNullableId,
       z.number().int().positive().optional().nullable()
     ),
 
@@ -182,11 +212,11 @@ export const updateLeadSchema = z
     interested_for: z.string().trim().optional().nullable(),
 
     companyId: z.preprocess(
-      (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+      parseNullableId,
       z.number().int().positive().optional().nullable()
     ),
     branchId: z.preprocess(
-      (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined),
+      parseNullableId,
       z.number().int().positive().optional().nullable()
     ),
     overrideDuplicate: z.boolean().optional(),

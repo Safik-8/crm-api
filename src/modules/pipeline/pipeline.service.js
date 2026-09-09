@@ -177,12 +177,29 @@ export const createPipelineService = async (data, actor, req = null) => {
   return pipeline
 }
 
-export const listPipelinesService = async (query, actor) => {
+export const listPipelinesService = async (query = {}, actor) => {
   const where = { isDeleted: false }
 
-  if ((!actor.primaryRoleRank || actor.primaryRoleRank < 100) && actor.primaryRole !== 'SUPER_ADMIN') {
-    if (actor.companyId) where.companyId = actor.companyId;
-    if (actor.branchId && actor.primaryRoleRank < 80) where.branchId = actor.branchId;
+  const queryCompanyId = query?.companyId !== undefined && query?.companyId !== '' && !isNaN(Number(query.companyId))
+    ? Number(query.companyId)
+    : null;
+  const queryBranchId = query?.branchId !== undefined && query?.branchId !== '' && !isNaN(Number(query.branchId))
+    ? Number(query.branchId)
+    : null;
+
+  const isSuperAdmin = (actor?.primaryRoleRank && actor.primaryRoleRank >= 100) || actor?.primaryRole === 'SUPER_ADMIN';
+  const isCompanyAdmin = (actor?.primaryRoleRank && actor.primaryRoleRank >= 80) || actor?.primaryRole === 'COMPANY_ADMIN';
+
+  if (!isSuperAdmin) {
+    if (actor?.companyId) where.companyId = actor.companyId;
+    if (actor?.branchId && !isCompanyAdmin) {
+      where.branchId = actor.branchId;
+    } else if (queryBranchId) {
+      where.branchId = queryBranchId;
+    }
+  } else {
+    if (queryCompanyId) where.companyId = queryCompanyId;
+    if (queryBranchId) where.branchId = queryBranchId;
   }
 
   const pipelines = await findPipelinesByWhere(where)
@@ -263,9 +280,33 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     throw new ValidationError("Validation failed", [{ field: "id", message: "Invalid pipeline id" }])
   }
 
-  const pipeline = await findPipelineWithStages(pipelineId)
+  let pipeline = await findPipelineWithStages(pipelineId)
   if (!pipeline) throw new NotFoundError("Pipeline")
   assertPipelineScope(actor, pipeline)
+
+  // Auto-heal: Ensure pipeline has at least default Prospect & Closure stages
+  if (!pipeline.stages || pipeline.stages.length === 0) {
+    let prospect = await prisma.stage.findFirst({ where: { stageType: 'PROSPECT', isDeleted: false } });
+    if (!prospect) {
+      prospect = await prisma.stage.create({
+        data: { name: 'Prospect', stageType: 'PROSPECT', colorCode: '#3b82f6', code: 'PROSPECT', isDefault: true, isDeleted: false }
+      });
+    }
+    let closure = await prisma.stage.findFirst({ where: { stageType: 'CLOSURE', isDeleted: false } });
+    if (!closure) {
+      closure = await prisma.stage.create({
+        data: { name: 'Closure', stageType: 'CLOSURE', colorCode: '#8b5cf6', code: 'CLOSURE', isDefault: true, isDeleted: false }
+      });
+    }
+    await prisma.pipelineStage.createMany({
+      data: [
+        { pipelineId: pipeline.id, stageId: prospect.id, orderNo: 1 },
+        { pipelineId: pipeline.id, stageId: closure.id, orderNo: 2 }
+      ],
+      skipDuplicates: true
+    });
+    pipeline = await findPipelineWithStages(pipelineId);
+  }
 
   const options = buildLeadBoardQueryOptions(query)
 
@@ -280,6 +321,9 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     status:    ps.stage.status,
     leads:     []
   }))
+
+  const validStageIds = new Set(stages.map(s => s.id))
+  const defaultFirstStageId = stages[0]?.id
 
   const leadWhere = {
     pipelineId: pipeline.id,
@@ -349,10 +393,28 @@ export const getPipelineDetailsService = async (id, query, actor) => {
   const leads = await findLeadsForBoard(leadWhere, options.sortBy, options.sortOrder)
 
   const leadsByStageId = new Map()
+  const leadsToAutoHeal = []
+
   for (const lead of leads) {
-    const stageLeads = leadsByStageId.get(lead.stageId) || []
+    let effectiveStageId = lead.stageId
+    if (!effectiveStageId || !validStageIds.has(effectiveStageId)) {
+      if (defaultFirstStageId) {
+        effectiveStageId = defaultFirstStageId
+        lead.stageId = defaultFirstStageId
+        leadsToAutoHeal.push(lead.id)
+      }
+    }
+    const stageLeads = leadsByStageId.get(effectiveStageId) || []
     stageLeads.push(lead)
-    leadsByStageId.set(lead.stageId, stageLeads)
+    leadsByStageId.set(effectiveStageId, stageLeads)
+  }
+
+  // Non-blocking auto-heal for orphaned leads in DB
+  if (leadsToAutoHeal.length > 0 && defaultFirstStageId) {
+    prisma.lead.updateMany({
+      where: { id: { in: leadsToAutoHeal } },
+      data: { stageId: defaultFirstStageId }
+    }).catch(err => console.error("Error auto-healing lead stages:", err));
   }
 
   const boardStages = stages.map(stage => ({

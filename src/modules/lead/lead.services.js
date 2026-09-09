@@ -664,13 +664,17 @@ export const updateLeadService = async (leadId, data, actor, req = null) => {
   if (data.notes         !== undefined) updateData.notes          = data.notes          || null;
   if (data.assignedToId  !== undefined) updateData.assignedToId   = data.assignedToId   ?? null;
 
-  // Duplicate check — only if contact details are being changed
-  if (data.mobile || data.email || data.alternateMobile) {
+  // Duplicate check — only if contact details are actually being changed
+  const mobileChanged = data.mobile !== undefined && data.mobile !== lead.mobile;
+  const emailChanged = data.email !== undefined && data.email !== lead.email;
+  const altMobileChanged = data.alternateMobile !== undefined && data.alternateMobile !== lead.alternateMobile;
+
+  if (mobileChanged || emailChanged || altMobileChanged) {
     const duplicate = await findDuplicateLead({
       mobile: data.mobile !== undefined ? data.mobile : lead.mobile,
       email: data.email !== undefined ? data.email : lead.email,
       alternateMobile: data.alternateMobile !== undefined ? data.alternateMobile : lead.alternateMobile,
-      companyId: lead.companyId,
+      companyId: updateData.companyId || lead.companyId,
       excludeLeadId: id
     });
 
@@ -733,6 +737,58 @@ export const updateLeadService = async (leadId, data, actor, req = null) => {
           { field: "notes", message: "A proper closure reason must be provided in notes when closing a lead" }
         ]);
       }
+    }
+  }
+
+  // Pipeline / Stage assignment
+  if (data.pipelineId !== undefined) {
+    if (data.pipelineId) {
+      const targetPipelineId = Number(data.pipelineId);
+      const pipeline = await prisma.pipeline.findUnique({
+        where: { id: targetPipelineId },
+        include: {
+          stages: {
+            include: { stage: true },
+            orderBy: { orderNo: "asc" }
+          }
+        }
+      });
+      if (!pipeline || pipeline.isDeleted) {
+        throw new BadRequestError("Selected pipeline not found");
+      }
+      const effectiveCompanyId = updateData.companyId || lead.companyId;
+      if (effectiveCompanyId && pipeline.companyId !== effectiveCompanyId) {
+        throw new BadRequestError("Selected pipeline does not belong to the lead's company");
+      }
+
+      updateData.pipelineId = targetPipelineId;
+
+      if (data.stageId !== undefined && data.stageId !== null) {
+        updateData.stageId = Number(data.stageId);
+        updateData.stageChangedById = actor.id;
+        updateData.stageChangedAt = new Date();
+        updateData.previousStageId = lead.stageId || null;
+      } else if (lead.pipelineId !== targetPipelineId) {
+        const activeStages = (pipeline.stages || []).filter(s => s.stage && !s.stage.isDeleted);
+        const firstStage = activeStages.find(s => s.stage?.stageType === "PROSPECT" || s.stage?.isDefault) || activeStages[0];
+        if (firstStage) {
+          const newStageId = firstStage.stageId || firstStage.stage?.id;
+          updateData.stageId = newStageId;
+          updateData.stageChangedById = actor.id;
+          updateData.stageChangedAt = new Date();
+          updateData.previousStageId = lead.stageId || null;
+        }
+      }
+    } else {
+      updateData.pipelineId = null;
+      updateData.stageId = null;
+    }
+  } else if (data.stageId !== undefined) {
+    updateData.stageId = data.stageId ? Number(data.stageId) : null;
+    if (data.stageId) {
+      updateData.stageChangedById = actor.id;
+      updateData.stageChangedAt = new Date();
+      updateData.previousStageId = lead.stageId || null;
     }
   }
 
