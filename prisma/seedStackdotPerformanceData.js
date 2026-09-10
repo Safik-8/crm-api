@@ -80,6 +80,9 @@ async function main() {
 
   const augustDate = new Date("2026-08-10T10:00:00.000Z");
 
+  let pipeline = await prisma.pipeline.findFirst({ where: { companyId: company.id } });
+  let leadStage = await prisma.stage.findFirst({ where: { isDeleted: false } });
+
   // 3. Create Leads for Vivek Godhani (BDE) - 10 Leads
   console.log("🌱 Creating 10 Leads for BDE Vivek Godhani...");
   for (let i = 1; i <= 10; i++) {
@@ -88,6 +91,8 @@ async function main() {
       data: {
         companyId: company.id,
         branchId: branch.id,
+        pipelineId: pipeline?.id || null,
+        stageId: leadStage?.id || null,
         teamId: alphaTeam.id,
         assignedToId: bdeUser.id,
         name: `StackDot Lead Vivek #${i}`,
@@ -182,6 +187,8 @@ async function main() {
       data: {
         companyId: company.id,
         branchId: branch.id,
+        pipelineId: pipeline?.id || null,
+        stageId: leadStage?.id || null,
         teamId: betaTeam.id,
         assignedToId: managerUser.id,
         name: `StackDot Lead Jeet #${i}`,
