@@ -7,8 +7,8 @@ const router = Router();
 router.use(authenticate);
 
 // Stats must come before /:id so it isn't swallowed
-router.get('/stats', hasPermission('PIPELINE', 'canView'), ctrl.getDealsStats);
-router.get('/',      hasPermission('PIPELINE', 'canView'), ctrl.getDealsList);
-router.get('/:id',   hasPermission('PIPELINE', 'canView'), ctrl.getDealById);
+router.get('/stats', hasPermission('DEAL', 'canView'), ctrl.getDealsStats);
+router.get('/',      hasPermission('DEAL', 'canView'), ctrl.getDealsList);
+router.get('/:id',   hasPermission('DEAL', 'canView'), ctrl.getDealById);
 
 export default router;

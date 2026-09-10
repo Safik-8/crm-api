@@ -29,8 +29,8 @@ router.get("/unread-count", getUnreadCount);
 router.get("/reminder-summary", getReminderSummary);
 
 // ── Notification Event Configurations (Admin Only, guarded in service) ───────
-router.get("/configs", getNotificationConfigs);
-router.patch("/configs/:id", validateBody(updateNotificationConfigSchema), updateNotificationConfig);
+router.get("/configs", hasPermission("NOTIFICATION", "canView"), getNotificationConfigs);
+router.patch("/configs/:id", hasPermission("NOTIFICATION", "canEdit"), validateBody(updateNotificationConfigSchema), updateNotificationConfig);
 
 // ── Full paginated list & audit history (Personal by default, scoped in service)
 router.get(
