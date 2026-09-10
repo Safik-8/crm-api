@@ -500,13 +500,17 @@ export const updateOpportunityTx = async (id, companyId, data, updatedById, req 
  */
 export const closeOpportunityTx = async (id, companyId, status, updatedById, remarks = null, reasonId = null, req = null) => {
   return prisma.$transaction(async (tx) => {
-    const oldVal = await tx.opportunity.findUnique({ where: { id } });
+    const oppId = Number(id);
+    const oldVal = await tx.opportunity.findUnique({ where: { id: oppId } });
+    if (!oldVal) {
+      throw new NotFoundError('Opportunity');
+    }
 
     // 1. Resolve matching terminal stage for the company (with fallbacks)
-    const queryCompanyId = oldVal ? oldVal.companyId : companyId;
+    const targetCompanyId = oldVal?.companyId || companyId || 1;
     let targetStage = await tx.opportunityStage.findFirst({
       where: {
-        companyId: queryCompanyId,
+        companyId: targetCompanyId,
         stageType: status, // "WON" | "LOST" | "CANCELLED"
         status: 'ACTIVE',
       },
@@ -515,7 +519,7 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
     if (!targetStage) {
       targetStage = await tx.opportunityStage.findFirst({
         where: {
-          companyId: queryCompanyId,
+          companyId: targetCompanyId,
           code: status,
           status: 'ACTIVE',
         },
@@ -525,7 +529,7 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
     if (!targetStage) {
       targetStage = await tx.opportunityStage.findFirst({
         where: {
-          companyId: queryCompanyId,
+          companyId: targetCompanyId,
           name: { equals: status, mode: 'insensitive' },
           status: 'ACTIVE',
         },
@@ -533,7 +537,7 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
     }
 
     const opportunity = await tx.opportunity.update({
-      where: { id },
+      where: { id: oppId },
       data: {
         status, // "WON" | "LOST" | "CANCELLED"
         stageId: targetStage ? targetStage.id : oldVal.stageId,
@@ -552,9 +556,9 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
     if (targetStage) {
       await tx.opportunityStageHistory.create({
         data: {
-          opportunityId: id,
-          companyId,
-          branchId: opportunity.branchId,
+          opportunityId: oppId,
+          companyId: targetCompanyId,
+          branchId: opportunity.branchId || oldVal.branchId || null,
           previousStageId: oldVal.stageId,
           newStageId: targetStage.id,
           changedById: updatedById,
@@ -566,11 +570,11 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
     await buildTxAuditData({
       req,
       tx,
-      companyId,
+      companyId: targetCompanyId,
       moduleName: 'OPPORTUNITY',
       actionType: 'UPDATE',
       entityType: 'OPPORTUNITY',
-      entityId: id,
+      entityId: oppId,
       action: `OPPORTUNITY_CLOSED_${status}`,
       oldValue: { status: oldVal?.status, stageId: oldVal?.stageId },
       newValue: { status, stageId: targetStage ? targetStage.id : oldVal?.stageId },
