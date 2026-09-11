@@ -10,13 +10,13 @@ export const buildDealWhere = (actor, q = {}) => {
   if (!isSA && actor.companyId) where.companyId = actor.companyId;
   if (isSA  && q.companyId)     where.companyId = parseInt(q.companyId);
 
-  // Branch scope
-  if (rank >= 60 && rank < 80 && actor.branchId) where.branchId = actor.branchId;
-  if (rank >= 80 && q.branchId)                  where.branchId = parseInt(q.branchId);
+  // Branch scope (Branch Manager & below rank <= 60 locked to branch, rank >= 61 is company-wide)
+  if (rank >= 41 && rank <= 60 && actor.branchId) where.branchId = actor.branchId;
+  if (rank >= 61 && q.branchId)                  where.branchId = parseInt(q.branchId);
 
-  // BDE/ISE see only own
-  if (rank < 60) where.closedById = actor.id;
-  if (rank >= 60 && q.ownerId) where.closedById = parseInt(q.ownerId);
+  // BDE/ISE/Custom Reps see only own
+  if (rank <= 40) where.closedById = actor.id;
+  if (rank > 40 && q.ownerId) where.closedById = parseInt(q.ownerId);
 
   // Outcome filter
   if (q.outcome) where.outcome = q.outcome;

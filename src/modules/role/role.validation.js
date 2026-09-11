@@ -18,6 +18,7 @@ export const createRoleSchema = z.object({
     .trim()
     .nonempty("Role name is required"),
   description: z.string().trim().nullable().optional(),
+  hierarchyBracket: z.string().optional(),
   rank: z.number().min(0).max(100).nullable().optional(),
   companyId: z.number().nullable().optional(),
   permissions: z.array(permissionSchema).optional().default([]),
@@ -26,6 +27,7 @@ export const createRoleSchema = z.object({
 export const updateRoleSchema = z.object({
   name: z.string().trim().nonempty("Role name cannot be empty").optional(),
   description: z.string().trim().nullable().optional(),
+  hierarchyBracket: z.string().optional(),
   rank: z.number().min(0).max(100).nullable().optional(),
   companyId: z.number().nullable().optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),

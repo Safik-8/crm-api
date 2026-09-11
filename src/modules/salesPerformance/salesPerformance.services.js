@@ -48,8 +48,8 @@ export function applyRoleScopingGuard(actor, queryFilters) {
     scopedFilters.companyId = actor.companyId;
   }
 
-  // 2. Branch Scoping: Enforced for all roles below Company Admin (Rank < 80) if assigned to a branch
-  if (actor.primaryRoleRank < ROLE_RANKS.COMPANY_ADMIN) {
+  // 2. Branch Scoping: Enforced for branch tier and below (Rank <= 60) if assigned to a branch
+  if (actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER) {
     if (actor.branchId) {
       scopedFilters.branchId = actor.branchId;
     }

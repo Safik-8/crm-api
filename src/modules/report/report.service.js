@@ -344,10 +344,10 @@ export const generateReportData = async (user, filters) => {
       if (user.companyId) where.companyId = user.companyId;
     }
 
-    // Branch Scoping
-    if (rank >= 60 && rank < 80) {
+    // Branch Scoping (Branch Manager & below rank <= 60 locked to branch, rank >= 61 is company-wide)
+    if (rank >= 41 && rank <= 60) {
       where.branchId = user.branchId;
-    } else if (rank >= 80) {
+    } else if (rank >= 61) {
       if (filters.branchId) where.branchId = parseInt(filters.branchId);
     } else {
       if (user.branchId) where.branchId = user.branchId;
@@ -824,7 +824,7 @@ export const generateReportData = async (user, filters) => {
       if (user.companyId && rank < 100) {
         where.companyId = user.companyId;
       }
-      if (user.branchId && rank >= 60 && rank < 80) {
+      if (user.branchId && rank >= 41 && rank <= 60) {
         where.branchId = user.branchId;
       }
 
@@ -835,7 +835,10 @@ export const generateReportData = async (user, filters) => {
           userRoles: {
             some: {
               role: {
-                name: { in: ['BDE', 'ISE'] }
+                OR: [
+                  { name: { in: ['BDE', 'ISE'] } },
+                  { rank: { lte: 40 } }
+                ]
               }
             }
           }

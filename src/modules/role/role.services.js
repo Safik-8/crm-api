@@ -49,20 +49,14 @@ export const getRolesService = async (query, actor) => {
   if (actor.primaryRole !== "SUPER_ADMIN") {
     companyIdFilter = actor.companyId
     where = {
-      OR: [
-        { companyId: actor.companyId },
-        { companyId: null } // Include global system roles
-      ],
+      companyId: actor.companyId,
       rank: { lte: actor.primaryRoleRank } // Hide roles above their rank (show assignable/equal roles)
     }
   } else {
     if (query.companyId) {
       companyIdFilter = parseInt(query.companyId, 10)
       where = {
-        OR: [
-          { companyId: companyIdFilter },
-          { companyId: null } // Include global system roles
-        ]
+        companyId: companyIdFilter
       }
     }
   }
@@ -93,17 +87,8 @@ export const getRolesService = async (query, actor) => {
     countRoles(where)
   ])
 
-  // Filter out global template roles if a company-scoped role with the same name exists for the company
   let filteredRoles = roles
   if (companyIdFilter !== null) {
-    const companyScopedNames = new Set(
-      roles.filter(r => r.companyId === companyIdFilter).map(r => r.name)
-    )
-    filteredRoles = roles.filter(r => {
-      if (r.companyId === companyIdFilter) return true
-      return !companyScopedNames.has(r.name)
-    })
-
     const counts = await prisma.userRole.groupBy({
       by: ["roleId"],
       where: {
@@ -129,10 +114,10 @@ export const getRolesService = async (query, actor) => {
   return {
     roles: filteredRoles,
     pagination: {
-      total: filteredRoles.length,
+      total,
       page: parseInt(page, 10),
       limit: take,
-      totalPages: Math.ceil(filteredRoles.length / take)
+      totalPages: Math.ceil(total / take)
     }
   }
 }
@@ -155,6 +140,18 @@ export const getRoleByIdService = async (id, actor) => {
 }
 
 /**
+ * Helper to identify the hierarchy bracket from a given rank.
+ */
+export const getBracketForRank = (rank) => {
+  const r = Number(rank || 0)
+  if (r >= 61 && r <= 79) return "COMPANY_ADMIN_TO_BRANCH_MANAGER"
+  if (r >= 41 && r <= 59) return "BRANCH_MANAGER_TO_BDE"
+  if (r >= 21 && r <= 39) return "BDE_TO_ISE"
+  if (r <= 19) return "BELOW_ISE"
+  return "COMPANY_ADMIN_TO_BRANCH_MANAGER"
+}
+
+/**
  * Helper to compute next available sequential rank in selected hierarchy bracket for a company.
  * Brackets:
  * - COMPANY_ADMIN_TO_BRANCH_MANAGER: max 79, min 61 (Between Company Admin [80] & Branch Manager [60])
@@ -162,7 +159,7 @@ export const getRoleByIdService = async (id, actor) => {
  * - BDE_TO_ISE: max 39, min 21 (Between BDE [40] & ISE [20])
  * - BELOW_ISE: max 19, min 1 (Below ISE [20])
  */
-export const calculateCustomRoleRank = async (companyId, hierarchyBracket = 'COMPANY_ADMIN_TO_BRANCH_MANAGER') => {
+export const calculateCustomRoleRank = async (companyId, hierarchyBracket = 'COMPANY_ADMIN_TO_BRANCH_MANAGER', tx = prisma) => {
   let maxRank = 79
   let minRank = 61
 
@@ -347,7 +344,20 @@ export const updateRoleService = async (id, data, actor, req = null) => {
     const updatedRoleData = {}
     if (data.name && !isCoreSystemRole) updatedRoleData.name = data.name.trim()
     if (data.description !== undefined) updatedRoleData.description = data.description?.trim() || null
-    if (data.rank !== undefined && !isCoreSystemRole) updatedRoleData.rank = Number(data.rank)
+    if (!isCoreSystemRole) {
+      if (data.rank !== undefined) {
+        updatedRoleData.rank = Number(data.rank)
+      } else if (data.hierarchyBracket) {
+        const currentBracket = getBracketForRank(role.rank)
+        if (data.hierarchyBracket !== currentBracket) {
+          const newRank = await calculateCustomRoleRank(role.companyId, data.hierarchyBracket, tx)
+          if (actor.primaryRole !== "SUPER_ADMIN" && newRank >= actor.primaryRoleRank) {
+            throw new ForbiddenError(`Cannot assign an authority rank (${newRank}) equal to or higher than your own (${actor.primaryRoleRank})`)
+          }
+          updatedRoleData.rank = newRank
+        }
+      }
+    }
     if (data.status && role.companyId !== null) updatedRoleData.status = data.status
 
     let updatedRole = role

@@ -368,8 +368,9 @@ export const getUsersService = async (query, actor) => {
     where.companyId = scopedCompanyId
   }
 
-  // Branch Manager & BDE visibility lockdown: Lock views to their own branch
-  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+  // Branch Manager & BDE visibility lockdown: Lock views to their own branch (rank <= 60)
+  const isCompanyWide = actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 61);
+  if (!isCompanyWide) {
     where.branchId = actor.branchId
   } else if (branchId) {
     where.branchId = Number(branchId)

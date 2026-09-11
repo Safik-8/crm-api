@@ -89,7 +89,8 @@ const actorScope = (actor) => {
     return scope;
   }
   if (actor.companyId) scope.companyId = actor.companyId;
-  if (actor.branchId && (!actor.primaryRoleRank || actor.primaryRoleRank < 80)) {
+  // Branch scoping only applies to Branch Manager & below (rank <= 60). Rank >= 61 is Company-Wide.
+  if (actor.branchId && (!actor.primaryRoleRank || actor.primaryRoleRank <= 60)) {
     scope.branchId = actor.branchId;
   }
   return scope;
@@ -109,7 +110,7 @@ const assertLeadScope = async (actor, lead) => {
   if (lead.companyId && actor.companyId && lead.companyId !== actor.companyId) {
     throw new ForbiddenError("Lead does not belong to your company");
   }
-  if (lead.branchId && actor.branchId && lead.branchId !== actor.branchId) {
+  if (actor.primaryRoleRank <= 60 && lead.branchId && actor.branchId && lead.branchId !== actor.branchId) {
     throw new ForbiddenError("Lead does not belong to your branch");
   }
 
@@ -118,7 +119,7 @@ const assertLeadScope = async (actor, lead) => {
     if (actor.companyId && lead.pipeline.companyId !== actor.companyId) {
       throw new ForbiddenError("Lead does not belong to your company");
     }
-    if (actor.branchId && lead.pipeline.branchId !== actor.branchId) {
+    if (actor.primaryRoleRank <= 60 && actor.branchId && lead.pipeline.branchId !== actor.branchId) {
       throw new ForbiddenError("Lead does not belong to your branch");
     }
   }
@@ -1215,7 +1216,7 @@ export const importLeadsFromExcelService = async (
     if (!resolvedBranch) {
       throw new BadRequestError("Selected Branch does not belong to the selected Company or is inactive.");
     }
-  } else if (actor.primaryRole === "COMPANY_ADMIN") {
+  } else if (actor.primaryRole === "COMPANY_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 61)) {
     companyId = actor.companyId;
     if (!branchId) {
       throw new BadRequestError("Branch scope must be selected.");

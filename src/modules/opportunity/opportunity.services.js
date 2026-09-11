@@ -87,7 +87,7 @@ export const createOpportunity = async (actor, payload, req = null) => {
       include: { userRoles: { include: { role: true } } },
     });
 
-    if (actor.primaryRoleRank === ROLE_RANKS.BRANCH_MANAGER && ownerUser && ownerUser.branchId !== actor.branchId) {
+    if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && ownerUser && ownerUser.branchId !== actor.branchId) {
       throw new ForbiddenError('Branch Managers can only assign opportunities to users within their branch.');
     }
     if (actor.primaryRoleRank <= ROLE_RANKS.BDE && ownerId !== actor.id) {
@@ -143,7 +143,7 @@ export const updateOpportunity = async (actor, id, payload, req = null) => {
   if (actor.primaryRoleRank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
     throw new ForbiddenError('You can only edit opportunities assigned to you.');
   }
-  if (actor.primaryRoleRank === ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
+  if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
     throw new ForbiddenError('You can only edit opportunities within your branch.');
   }
 
@@ -167,7 +167,7 @@ export const closeOpportunity = async (actor, id, payload, req = null) => {
   if (actor.primaryRoleRank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
     throw new ForbiddenError('You can only close opportunities assigned to you.');
   }
-  if (actor.primaryRoleRank === ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
+  if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
     throw new ForbiddenError('You can only close opportunities within your branch.');
   }
 
@@ -187,7 +187,7 @@ export const getOpportunityById = async (actor, id) => {
   if (actor.primaryRoleRank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
     throw new ForbiddenError('You can only view opportunities assigned to you.');
   }
-  if (actor.primaryRoleRank === ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
+  if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
     throw new ForbiddenError('You can only view opportunities within your branch.');
   }
 
@@ -195,22 +195,14 @@ export const getOpportunityById = async (actor, id) => {
 };
 
 /**
- * Lists paginated opportunities with HRBAC scoping filters
+ * Lists Opportunities with Dynamic Scoping
  */
-export const getOpportunitiesList = async (actor, queryParams) => {
-  const page = parseInt(queryParams.page) || 1;
-  const limit = parseInt(queryParams.limit) || 10;
-  const skip = (page - 1) * limit;
-
+export const getOpportunities = async (actor, queryParams = {}) => {
+  const where = {};
   const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN';
 
-  // Build HRBAC Scoped Where Object
-  const where = {
-    isDeleted: false,
-  };
-
-  // Restrict by companyId only for non-Super Admin users
-  if (!isSuperAdmin && actor.companyId) {
+  // Company Scoping
+  if (actor.companyId && !isSuperAdmin) {
     where.companyId = actor.companyId;
   }
 
@@ -219,13 +211,13 @@ export const getOpportunitiesList = async (actor, queryParams) => {
     where.companyId = parseInt(queryParams.companyId);
   }
 
-  const isCompanyAdmin = actor.primaryRoleRank >= ROLE_RANKS.COMPANY_ADMIN && !isSuperAdmin;
+  const isCompanyAdmin = actor.primaryRoleRank >= 61 && !isSuperAdmin;
 
-  // Branch Scoping for Managers
-  if (actor.primaryRoleRank === ROLE_RANKS.BRANCH_MANAGER && actor.branchId) {
+  // Branch Scoping for Managers (Branch Manager + Level 2 custom roles 41..60)
+  if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && actor.branchId) {
     where.branchId = actor.branchId;
   }
-  // User Scoping for BDE / ISE — only see opportunities they own
+  // User Scoping for BDE / ISE / Custom Reps — only see opportunities they own
   if (actor.primaryRoleRank <= ROLE_RANKS.BDE) {
     where.ownerId = actor.id;
   }

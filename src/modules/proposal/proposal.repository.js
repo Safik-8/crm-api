@@ -12,20 +12,20 @@ export const buildProposalWhere = (actor, q = {}) => {
     where.companyId = parseInt(q.companyId);
   }
 
-  // Branch Scope
-  if (rank >= 60 && rank < 80 && actor.branchId) {
+  // Branch Scope (Branch Manager & below rank <= 60 locked to branch, rank >= 61 is company-wide)
+  if (rank >= 41 && rank <= 60 && actor.branchId) {
     where.branchId = actor.branchId;
-  } else if (rank >= 80 && q.branchId) {
+  } else if (rank >= 61 && q.branchId) {
     where.branchId = parseInt(q.branchId);
   }
 
-  // Owner scope (Sales BDE/ISE can only see their own proposals or opportunities they own)
-  if (rank < 60) {
+  // Owner scope (Sales BDE/ISE/Custom Reps rank <= 40 can only see their own proposals or opportunities they own)
+  if (rank <= 40) {
     where.OR = [
       { createdById: actor.id },
       { opportunity: { ownerId: actor.id } }
     ];
-  } else if (rank >= 60 && q.ownerId) {
+  } else if (rank >= 41 && q.ownerId) {
     where.createdById = parseInt(q.ownerId);
   }
 

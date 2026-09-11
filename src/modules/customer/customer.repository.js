@@ -17,23 +17,23 @@ export const buildCustomerWhere = (actor, queryParams = {}) => {
     where.companyId = parseInt(queryParams.companyId);
   }
 
-  // Branch Manager → restrict to own branch
-  if (rank >= 40 && rank < 80 && actor.branchId) {
+  // Branch tier (Branch Manager + Level 2 custom roles rank 41..60) → restrict to own branch
+  if (rank >= 41 && rank <= 60 && actor.branchId) {
     where.branchId = actor.branchId;
   }
 
-  // SA/Company Admin can filter by branch explicitly
-  if (rank >= 80 && queryParams.branchId) {
+  // SA/Company Admin & Custom roles (rank >= 61) can filter by branch explicitly
+  if (rank >= 61 && queryParams.branchId) {
     where.branchId = parseInt(queryParams.branchId);
   }
 
-  // BDE/ISE → only their own customers
-  if (rank < 60) {
+  // BDE/ISE & Lower Tiers (rank <= 40) → only their own customers
+  if (rank <= 40) {
     where.assignedOwnerId = actor.id;
   }
 
-  // Manager+ can filter by specific owner
-  if (rank >= 60 && queryParams.ownerId) {
+  // Manager+ (rank >= 41) can filter by specific owner
+  if (rank >= 41 && queryParams.ownerId) {
     where.assignedOwnerId = parseInt(queryParams.ownerId);
   }
 

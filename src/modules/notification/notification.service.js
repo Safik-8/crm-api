@@ -28,7 +28,7 @@ const buildNotifScope = (actor, query = {}) => {
   const where = {};
 
   if (scopeType === "company") {
-    if (actor.primaryRoleRank < 80) {
+    if (actor.primaryRoleRank < 61) {
       throw new ForbiddenError("Access denied: Only Company Admin and Super Admin can access company-wide notification audits.");
     }
     if (actor.companyId && actor.primaryRoleRank < 100) {
@@ -154,8 +154,8 @@ export const markNotificationReadService = async (id, actor) => {
   const notif = await findNotificationById(notifId);
   if (!notif) throw new NotFoundError("Notification");
 
-  // Personal ownership guard: users can update notifications sent to them or supervisors
-  if (notif.userId !== actor.id && actor.primaryRoleRank < 80) {
+  // Personal ownership guard: users can update notifications sent to them or supervisors (rank >= 61)
+  if (notif.userId !== actor.id && actor.primaryRoleRank < 61) {
     throw new ForbiddenError("You can only update your own notifications");
   }
 
@@ -182,8 +182,8 @@ export const deleteNotificationService = async (id, actor) => {
   const notif = await findNotificationById(notifId);
   if (!notif) throw new NotFoundError("Notification");
 
-  // Personal ownership guard: users can delete their own personal notifications OR supervisors
-  if (notif.userId !== actor.id && actor.primaryRoleRank < 80) {
+  // Personal ownership guard: users can delete their own personal notifications OR supervisors (rank >= 61)
+  if (notif.userId !== actor.id && actor.primaryRoleRank < 61) {
     throw new ForbiddenError("You can only delete your own notifications");
   }
 
@@ -206,14 +206,14 @@ export const deleteAllNotificationsService = async (actor) => {
 // ── NOTIFICATION EVENT CONFIG SERVICES ────────────────────────────────────────
 
 export const getNotificationConfigsService = async (actor) => {
-  if (actor.primaryRoleRank < 80) {
+  if (actor.primaryRoleRank < 61) {
     throw new ForbiddenError("Access denied: Only Company Admin and Super Admin can access event configurations.");
   }
   return findNotificationConfigs(actor.companyId);
 };
 
 export const updateNotificationConfigService = async (id, body, actor) => {
-  if (actor.primaryRoleRank < 80) {
+  if (actor.primaryRoleRank < 61) {
     throw new ForbiddenError("Access denied: Only Company Admin and Super Admin can modify event configurations.");
   }
   const configId = Number(id);

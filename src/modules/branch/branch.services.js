@@ -192,8 +192,9 @@ export const getBranchesPaginatedService = async (query, actor) => {
     ]
   }
 
-  // If the actor is not a system or company administrator, lock views to their own branch
-  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+  // If the actor is Branch Manager & below (rank <= 60), lock views to their own branch
+  const isCompanyWide = actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 61);
+  if (!isCompanyWide) {
     if (actor.branchId) {
       where.id = actor.branchId
     }
@@ -245,8 +246,9 @@ export const getBranchByIdService = async (id, actor) => {
   // Scope check
   assertCompanyScope(actor, branch.companyId)
 
-  // Branch level scope check
-  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+  // Branch level scope check (only applies to Branch Manager & below rank <= 60)
+  const isCompanyWide = actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 61);
+  if (!isCompanyWide) {
     if (branch.id !== actor.branchId) {
       throw new ForbiddenError("You do not have access to view this branch")
     }

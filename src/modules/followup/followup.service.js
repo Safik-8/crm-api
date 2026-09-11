@@ -11,6 +11,9 @@ import {
 
 // ── INTERNAL HELPERS ──────────────────────────────────────────────────────────
 
+const isBdeTier = (actor) =>
+  actor.primaryRole === "BDE" || ((actor.primaryRoleRank ?? 0) >= 21 && (actor.primaryRoleRank ?? 0) <= 40);
+
 /**
  * Builds Prisma `where` for LIST queries (scope by role rank).
  * BDE scope handled per-query (requires async team lookup).
@@ -18,12 +21,12 @@ import {
 const buildScopeWhere = (actor) => {
   const scope = {};
   if (actor.companyId) scope.companyId = actor.companyId;
-  // Branch Manager: restrict to own branch
-  if (actor.primaryRoleRank >= 60 && actor.primaryRoleRank < 80 && actor.branchId) {
+  // Branch Manager & Branch Custom Roles (Rank 41..60): restrict to own branch
+  if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= 60 && actor.branchId) {
     scope.branchId = actor.branchId;
   }
-  // ISE and custom rank < 60 (non-BDE): own assigned only
-  if (actor.primaryRoleRank < 60 && actor.primaryRole !== "BDE") {
+  // ISE and personal rank <= 20 (non-BDE tier): own assigned only
+  if (actor.primaryRoleRank <= 20) {
     scope.assignedToId = actor.id;
   }
   return scope;
@@ -42,15 +45,19 @@ const assertFollowupScope = (actor, followup, bdeTeamMemberIds = null) => {
   if (actor.companyId && followup.companyId && followup.companyId !== actor.companyId) {
     throw new ForbiddenError("Follow-up does not belong to your company");
   }
-  // 2. Branch Manager: branch-scoped read
-  if (actor.primaryRoleRank >= 60 && actor.primaryRoleRank < 80) {
+  // 2. Company Admin & Tier 1 Custom Roles (Rank >= 61)
+  if (actor.primaryRoleRank >= 61 || actor.primaryRole === "COMPANY_ADMIN" || actor.primaryRole === "SUPER_ADMIN") {
+    return;
+  }
+  // 3. Branch Manager & Branch Custom Roles (Rank 41..60)
+  if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= 60) {
     if (actor.branchId && followup.branchId && followup.branchId !== actor.branchId) {
       throw new ForbiddenError("Follow-up does not belong to your branch");
     }
     return;
   }
-  // 3. BDE: team-scoped
-  if (actor.primaryRole === "BDE") {
+  // 4. BDE & Team Pod Custom Roles (Rank 21..40)
+  if (isBdeTier(actor)) {
     if (
       bdeTeamMemberIds &&
       !bdeTeamMemberIds.includes(followup.assignedToId) &&
@@ -60,11 +67,9 @@ const assertFollowupScope = (actor, followup, bdeTeamMemberIds = null) => {
     }
     return;
   }
-  // 4. ISE / custom rank < 60: own only
-  if (actor.primaryRoleRank < 60) {
-    if (followup.assignedToId !== actor.id && followup.createdById !== actor.id) {
-      throw new ForbiddenError("You can only manage your own follow-ups");
-    }
+  // 5. ISE / personal rank <= 20: own only
+  if (followup.assignedToId !== actor.id && followup.createdById !== actor.id) {
+    throw new ForbiddenError("You can only manage your own follow-ups");
   }
 };
 
@@ -186,7 +191,7 @@ export const createFollowupService = async (data, actor) => {
   // Lead ownership check for rank < 60
   if (actor.primaryRoleRank < 60) {
     if (lead.assignedToId !== actor.id) {
-      if (actor.primaryRole === "BDE") {
+      if (isBdeTier(actor)) {
         const teamIds = await findBdeTeamMemberIds(actor.id);
         if (!teamIds.includes(lead.assignedToId))
           throw new ForbiddenError("You can only schedule follow-ups for leads assigned to you or your team");
@@ -200,10 +205,10 @@ export const createFollowupService = async (data, actor) => {
   let assignedToId = actor.id;
   if (data.assignedToId) {
     const reqId = Number(data.assignedToId);
-    if (actor.primaryRoleRank < 60) {
+    if (actor.primaryRoleRank <= 20) {
       if (reqId !== actor.id) throw new ForbiddenError("You can only assign follow-ups to yourself");
     } else {
-      const scopedBranchId = actor.primaryRoleRank < 80 ? actor.branchId : null;
+      const scopedBranchId = actor.primaryRoleRank <= 60 ? actor.branchId : null;
       const targetUser = await findUserInScope(reqId, actor.companyId || lead.companyId, scopedBranchId);
       if (!targetUser) throw new ForbiddenError("The specified user is not within your scope");
     }
@@ -246,8 +251,8 @@ export const createFollowupService = async (data, actor) => {
 export const getFollowupsService = async (query, actor) => {
   const where = buildScopeWhere(actor);
 
-  // BDE OR clause — sees own created + all team assignees
-  if (actor.primaryRole === "BDE") {
+  // BDE & Team Pod OR clause — sees own created + all team assignees
+  if (isBdeTier(actor)) {
     const teamIds = await findBdeTeamMemberIds(actor.id);
     where.OR = [
       { assignedToId: { in: teamIds } },
@@ -261,7 +266,7 @@ export const getFollowupsService = async (query, actor) => {
   if (query.leadId)                                            where.leadId       = Number(query.leadId);
   if (query.status      && VALID_STATUSES.includes(query.status))   where.status       = query.status;
   if (query.followupType && VALID_TYPES.includes(query.followupType)) where.followupType = query.followupType;
-  if (query.assignedToId && actor.primaryRoleRank >= 60)       where.assignedToId = Number(query.assignedToId);
+  if (query.assignedToId && actor.primaryRoleRank >= 41)       where.assignedToId = Number(query.assignedToId);
   if (query.dateFrom || query.dateTo) {
     where.scheduledAt = {};
     if (query.dateFrom) where.scheduledAt.gte = new Date(query.dateFrom);
@@ -291,10 +296,10 @@ export const getFollowupsByLeadService = async (leadId, query, actor) => {
   const where = { leadId: id };
   if (actor.companyId) where.companyId = actor.companyId;
 
-  if (actor.primaryRole === "BDE") {
+  if (isBdeTier(actor)) {
     const teamIds = await findBdeTeamMemberIds(actor.id);
     where.OR = [{ assignedToId: { in: teamIds } }, { createdById: actor.id }];
-  } else if (actor.primaryRoleRank < 60) {
+  } else if (actor.primaryRoleRank <= 20) {
     where.assignedToId = actor.id;
   }
 
@@ -339,7 +344,7 @@ export const getFollowupByIdService = async (id, actor) => {
   const followup = await findFollowupById(followupId);
   if (!followup) throw new NotFoundError("Follow-up");
   let bdeTeamMemberIds = null;
-  if (actor.primaryRole === "BDE") bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
+  if (isBdeTier(actor)) bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
   assertFollowupScope(actor, followup, bdeTeamMemberIds);
   return followup;
 };
@@ -356,7 +361,7 @@ export const updateFollowupService = async (id, data, actor) => {
     throw new BadRequestError(`Cannot edit a follow-up with status "${followup.status}". Only PENDING can be edited.`);
 
   let bdeTeamMemberIds = null;
-  if (actor.primaryRole === "BDE") bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
+  if (isBdeTier(actor)) bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
   assertFollowupScope(actor, followup, bdeTeamMemberIds);
 
   const updateData = { updatedById: actor.id };
@@ -390,11 +395,11 @@ export const completeFollowupService = async (id, data, actor) => {
     throw new BadRequestError(`Cannot complete a follow-up with status "${followup.status}"`);
 
   let bdeTeamMemberIds = null;
-  if (actor.primaryRole === "BDE") bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
+  if (isBdeTier(actor)) bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
   assertFollowupScope(actor, followup, bdeTeamMemberIds);
 
-  // ISE: can only complete their OWN assigned followups
-  if (actor.primaryRoleRank < 60 && actor.primaryRole !== "BDE") {
+  // ISE & Personal rank <= 20: can only complete their OWN assigned followups
+  if (actor.primaryRoleRank <= 20) {
     if (followup.assignedToId !== actor.id)
       throw new ForbiddenError("You can only complete follow-ups assigned to you");
   }
@@ -421,7 +426,6 @@ export const completeFollowupService = async (id, data, actor) => {
     actor.id
   );
 
-
   return updated;
 };
 
@@ -437,7 +441,7 @@ export const cancelFollowupService = async (id, actor) => {
     throw new BadRequestError(`Cannot cancel a follow-up with status "${followup.status}"`);
 
   let bdeTeamMemberIds = null;
-  if (actor.primaryRole === "BDE") bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
+  if (isBdeTier(actor)) bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
   assertFollowupScope(actor, followup, bdeTeamMemberIds);
 
   const updated = await updateFollowupDb(followupId, { status: "CANCELLED", updatedById: actor.id });
@@ -459,7 +463,6 @@ export const cancelFollowupService = async (id, actor) => {
   return updated;
 };
 
-
 export const deleteFollowupService = async (id, actor) => {
   const perm = actor.permissions?.FOLLOWUP;
   if (!perm?.canDelete) throw new ForbiddenError("You do not have permission to delete follow-ups");
@@ -470,7 +473,7 @@ export const deleteFollowupService = async (id, actor) => {
   if (!followup) throw new NotFoundError("Follow-up");
 
   let bdeTeamMemberIds = null;
-  if (actor.primaryRole === "BDE") bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
+  if (isBdeTier(actor)) bdeTeamMemberIds = await findBdeTeamMemberIds(actor.id);
   assertFollowupScope(actor, followup, bdeTeamMemberIds);
 
   await deleteFollowupDb(followupId);
