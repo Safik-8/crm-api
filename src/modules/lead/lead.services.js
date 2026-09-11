@@ -562,13 +562,45 @@ export const getLeadsService = async (query, actor) => {
     }
   }
 
-  // Kanban filters
+  // Pipeline & Stage filters
   if (query?.pipelineId) {
     where.pipelineId = Number(query.pipelineId);
-    // Exclude leads converted to opportunities from active prospecting Kanban board
-    where.opportunities = { none: { isDeleted: false } };
+    if (query?.excludeConvertedToOpportunity === 'true' || query?.isBoard === 'true') {
+      where.opportunities = { none: { isDeleted: false } };
+    }
   }
-  if (query?.stageId)    where.stageId    = Number(query.stageId);
+  if (query?.stageId) where.stageId = Number(query.stageId);
+
+  // Qualification filters
+  if (query?.isQualified !== undefined) {
+    const isQual = query.isQualified === 'true' || query.isQualified === true;
+    if (isQual) {
+      const qualOr = [
+        { isQualified: true },
+        { qualificationStatus: 'QUALIFIED' },
+        { qualification: { status: 'QUALIFIED' } }
+      ];
+      if (where.AND) {
+        where.AND.push({ OR: qualOr });
+      } else if (where.OR) {
+        where.AND = [{ OR: where.OR }, { OR: qualOr }];
+        delete where.OR;
+      } else {
+        where.OR = qualOr;
+      }
+    } else {
+      where.isQualified = false;
+      where.NOT = [
+        { qualificationStatus: 'QUALIFIED' },
+        { qualification: { status: 'QUALIFIED' } }
+      ];
+    }
+  }
+
+  // Opportunity exclusion filter (e.g. for opportunity creation)
+  if (query?.withoutOpenOpportunity === 'true' || query?.withoutOpenOpportunity === true) {
+    where.opportunities = { none: { status: 'OPEN', isDeleted: false } };
+  }
 
   // Scope filters
   if (query?.companyId) {

@@ -411,7 +411,7 @@ export const findLeads = async (params, tx = prisma) => {
           evaluatedAt: true,
         }
       },
-      opportunities: { select: { id: true }, where: { isDeleted: false } },
+      opportunities: { select: { id: true, opportunityName: true, status: true }, where: { isDeleted: false } },
       ...leadStageLogInclude
     }
   });
