@@ -104,15 +104,15 @@ export function applyRoleScopingGuard(actor, queryFilters) {
     scopedFilters.companyId = actor.companyId;
   }
 
-  // 2. Branch Scoping: Enforced for all operational roles below Company Admin (Rank < 80)
-  if (roleRank < ROLE_RANKS.COMPANY_ADMIN) {
+  // 2. Branch Scoping: Enforced for branch tier and below (Rank <= 60)
+  if (roleRank <= ROLE_RANKS.BRANCH_MANAGER) {
     if (actor.branchId) {
       scopedFilters.branchId = actor.branchId;
     }
   }
 
-  // 3. BDE Personal Scoping: Enforced for BDE (Rank = 40)
-  if (actor.primaryRole === 'BDE' || roleRank === ROLE_RANKS.BDE) {
+  // 3. BDE & Team Pod Scoping: Enforced for BDE tier (Rank <= 40)
+  if (actor.primaryRole === 'BDE' || (roleRank >= 21 && roleRank <= ROLE_RANKS.BDE)) {
     scopedFilters.closedById = actor.id;
   }
 

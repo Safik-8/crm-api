@@ -15,11 +15,12 @@ const getActorRole = (user) => (user?.primaryRole || user?.role || "").toUpperCa
 
 /**
  * Access Control Middleware:
- * Restrict access strictly to Super Admin and Company Admin.
+ * Restrict audit log inspection strictly to Super Admin and Company Admin.
  */
 const requireAdminAccess = (req, res, next) => {
   const role = getActorRole(req.user);
-  if (role === "SUPER_ADMIN" || role === "COMPANY_ADMIN") {
+  const rank = Number(req.user?.primaryRoleRank ?? 0);
+  if (role === "SUPER_ADMIN" || role === "COMPANY_ADMIN" || rank >= 80) {
     return next();
   }
   return res.status(403).json({
@@ -36,7 +37,8 @@ const requireAdminAccess = (req, res, next) => {
  */
 const requireSuperAdminAccess = (req, res, next) => {
   const role = getActorRole(req.user);
-  if (role === "SUPER_ADMIN") {
+  const rank = Number(req.user?.primaryRoleRank ?? 0);
+  if (role === "SUPER_ADMIN" || rank >= 100) {
     return next();
   }
   return res.status(403).json({

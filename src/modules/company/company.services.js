@@ -307,6 +307,11 @@ export const updateCompanyService = async (id, data, actor) => {
     throw new ForbiddenError("Access denied: You cannot update details for another company")
   }
 
+  // Guard: Only SUPER_ADMIN can activate or deactivate a company tenant
+  if (data?.status !== undefined && actor?.primaryRole !== "SUPER_ADMIN") {
+    throw new ForbiddenError("Access denied: Only Super Admins can change company status")
+  }
+
   // Verify existence first
   const company = await findCompanyById(companyId)
   if (!company) {

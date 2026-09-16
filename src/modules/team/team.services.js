@@ -31,11 +31,40 @@ const assertCompanyScope = (actor, targetCompanyId) => {
 };
 
 /**
+ * Asserts team management permission.
+ */
+const assertTeamManagementPermission = (actor, action) => {
+  if (actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN") return;
+  const rank = actor.primaryRoleRank ?? 0;
+  if (rank >= 41) return;
+  throw new ForbiddenError("You do not have permission to perform team management actions");
+};
+
+/**
+ * Checks if actor is scoped to their specific branch (< Rank 80)
+ */
+const isBranchScopedActor = (actor) => {
+  if (actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 61)) return false;
+  const rank = actor.primaryRoleRank ?? 0;
+  return actor.primaryRole === "BRANCH_MANAGER" || (rank <= 60 && !!actor.branchId);
+};
+
+/**
  * Validates that a user exists, has a BDE role, and belongs to the specified branch.
  */
 const validateBdeUser = async (bdeId, branchId, companyId, excludeTeamId) => {
-  const user = await prisma.user.findUnique({
-    where: { id: bdeId },
+  const user = await prisma.user.findFirst({
+    where: {
+      id: Number(bdeId),
+      companyId: Number(companyId),
+      userRoles: {
+        some: {
+          role: {
+            name: "BDE"
+          }
+        }
+      }
+    },
     include: {
       userRoles: {
         include: {
@@ -46,37 +75,25 @@ const validateBdeUser = async (bdeId, branchId, companyId, excludeTeamId) => {
   });
 
   if (!user) {
-    throw new NotFoundError("BDE User");
+    throw new NotFoundError("BDE User not found in this company");
   }
 
-  if (user.companyId !== companyId) {
-    throw new ValidationError("BDE user company mismatch");
+  // Branch check
+  if (user.branchId !== Number(branchId)) {
+    throw new ValidationError("User does not belong to the selected branch");
   }
 
-  if (user.branchId !== branchId) {
-    throw new ValidationError("BDE user must belong to the same branch as the team");
-  }
-
-  // Check if any role of the user is "BDE"
-  const isBde = user.userRoles.some((ur) => ur.role.name === "BDE");
-  if (!isBde) {
-    throw new ValidationError("Selected user does not hold a BDE role");
-  }
-
-  if (user.status !== "ACTIVE") {
-    throw new ValidationError("Selected BDE user is inactive");
-  }
-
-  // Verify BDE is not already owning another active team
-  const existingOwnedTeam = await prisma.team.findFirst({
+  // Active membership check (cannot lead multiple active teams simultaneously)
+  const existingActiveLeader = await prisma.team.findFirst({
     where: {
-      bdeId,
-      isDeleted: false,
-      ...(excludeTeamId ? { id: { not: excludeTeamId } } : {})
+      bdeId: Number(bdeId),
+      status: "ACTIVE",
+      ...(excludeTeamId ? { id: { not: Number(excludeTeamId) } } : {})
     }
   });
-  if (existingOwnedTeam) {
-    throw new ValidationError(`Selected BDE is already the owner of team "${existingOwnedTeam.name}"`);
+
+  if (existingActiveLeader) {
+    throw new ConflictError("User is already leading another active team");
   }
 
   return user;
@@ -158,7 +175,7 @@ export const createTeamService = async (data, actor, req = null) => {
   assertCompanyScope(actor, companyId);
 
   // 3. Branch manager scoping: can only onboard in their own branch
-  if (actor.primaryRole === "BRANCH_MANAGER" && Number(branchId) !== actor.branchId) {
+  if (isBranchScopedActor(actor) && Number(branchId) !== actor.branchId) {
     throw new ForbiddenError("You can only create teams within your assigned branch");
   }
 
@@ -221,7 +238,7 @@ export const updateTeamService = async (id, data, actor, req = null) => {
   assertCompanyScope(actor, team.companyId);
 
   // 2. Branch manager scoping
-  if (actor.primaryRole === "BRANCH_MANAGER" && team.branchId !== actor.branchId) {
+  if (isBranchScopedActor(actor) && team.branchId !== actor.branchId) {
     throw new ForbiddenError("You can only modify teams within your assigned branch");
   }
 
@@ -300,7 +317,7 @@ export const toggleTeamStatusService = async (id, status, actor, req = null) => 
 
   assertCompanyScope(actor, team.companyId);
 
-  if (actor.primaryRole === "BRANCH_MANAGER" && team.branchId !== actor.branchId) {
+  if (isBranchScopedActor(actor) && team.branchId !== actor.branchId) {
     throw new ForbiddenError("You can only modify teams within your assigned branch");
   }
 
@@ -331,7 +348,7 @@ export const softDeleteTeamService = async (id, actor, req = null) => {
 
   assertCompanyScope(actor, team.companyId);
 
-  if (actor.primaryRole === "BRANCH_MANAGER" && team.branchId !== actor.branchId) {
+  if (isBranchScopedActor(actor) && team.branchId !== actor.branchId) {
     throw new ForbiddenError("You can only delete teams within your assigned branch");
   }
 
@@ -351,7 +368,7 @@ export const getTeamByIdService = async (id, actor) => {
 
   assertCompanyScope(actor, team.companyId);
 
-  if (actor.primaryRole === "BRANCH_MANAGER" && team.branchId !== actor.branchId) {
+  if (isBranchScopedActor(actor) && team.branchId !== actor.branchId) {
     throw new ForbiddenError("You can only view details of teams within your assigned branch");
   }
 
@@ -386,15 +403,17 @@ export const getTeamsListService = async (params, actor) => {
     if (branchId) {
       where.branchId = Number(branchId);
     }
-  } else if (actor.primaryRole === "COMPANY_ADMIN") {
+  } else if (actor.primaryRole === "COMPANY_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 61)) {
     where.companyId = actor.companyId;
     if (branchId) {
       where.branchId = Number(branchId);
     }
   } else {
-    // Branch manager: strictly locked to their own branch
+    // Branch scoped (Branch Manager + Level 2 custom roles + sales reps)
     where.companyId = actor.companyId;
-    where.branchId = actor.branchId;
+    if (actor.branchId) {
+      where.branchId = actor.branchId;
+    }
   }
 
   if (status) {
@@ -450,7 +469,7 @@ export const removeTeamMemberService = async (teamIdParam, userIdParam, actor, r
   assertCompanyScope(actor, team.companyId);
 
   // 2. Branch manager scoping
-  if (actor.primaryRole === "BRANCH_MANAGER" && team.branchId !== actor.branchId) {
+  if (isBranchScopedActor(actor) && team.branchId !== actor.branchId) {
     throw new ForbiddenError("You can only modify teams within your assigned branch");
   }
 
@@ -487,7 +506,7 @@ export const replaceTeamOwnerService = async (id, newBdeId, actor, req = null) =
   assertCompanyScope(actor, team.companyId);
 
   // 2. Branch manager scoping
-  if (actor.primaryRole === "BRANCH_MANAGER" && team.branchId !== actor.branchId) {
+  if (isBranchScopedActor(actor) && team.branchId !== actor.branchId) {
     throw new ForbiddenError("You can only modify teams within your assigned branch");
   }
 

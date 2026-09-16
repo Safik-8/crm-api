@@ -162,8 +162,8 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
   const rank = user.primaryRoleRank ?? 0;
 
   const isSuperAdmin = primaryRole === "SUPER_ADMIN" || rank >= 100;
-  const isCompanyAdmin = primaryRole === "COMPANY_ADMIN" || rank === 80;
-  const isBranchManager = primaryRole === "BRANCH_MANAGER" || rank === 60;
+  const isCompanyAdmin = primaryRole === "COMPANY_ADMIN" || (rank >= 61 && rank < 100);
+  const isBranchManager = primaryRole === "BRANCH_MANAGER" || (rank >= 41 && rank <= 60);
 
   // 1. Teams where user is assigned as BDE owner (Team.bdeId = user.id)
   const bdeLeaderTeams = await prisma.team.findMany({
@@ -566,8 +566,8 @@ export const createKpiTarget = async (user, data) => {
   const actorRole = user.primaryRole || "";
   const actorRank = Number(user.primaryRoleRank || 0);
   const isSuperAdmin = actorRole === "SUPER_ADMIN" || actorRank >= 100;
-  const isCompanyAdmin = isSuperAdmin || actorRole === "COMPANY_ADMIN" || actorRank >= 80;
-  const isBranchManager = isCompanyAdmin || actorRole === "BRANCH_MANAGER" || actorRank >= 60;
+  const isCompanyAdmin = isSuperAdmin || actorRole === "COMPANY_ADMIN" || actorRank >= 61;
+  const isBranchManager = isCompanyAdmin || actorRole === "BRANCH_MANAGER" || actorRank >= 41;
 
   // 1. Strict Scope Validation for Individual Employee Assignment
   if (targetEmployeeId && !isSuperAdmin) {
@@ -734,8 +734,8 @@ export const getKpiDetail = async (user, targetId) => {
   const rank = user.primaryRoleRank ?? 0;
 
   const isSuperAdmin = primaryRole === "SUPER_ADMIN" || rank >= 100;
-  const isCompanyAdmin = primaryRole === "COMPANY_ADMIN" || rank === 80;
-  const isBranchManager = primaryRole === "BRANCH_MANAGER" || rank === 60;
+  const isCompanyAdmin = primaryRole === "COMPANY_ADMIN" || (rank >= 61 && rank < 100);
+  const isBranchManager = primaryRole === "BRANCH_MANAGER" || (rank >= 41 && rank <= 60);
 
   // Req 9: ISE Role strictly blocked from detail drilldown
   if (primaryRole === "ISE") {

@@ -43,12 +43,12 @@ export const getCustomerById = async (actor, id) => {
   if (actor.primaryRole !== 'SUPER_ADMIN' && actor.companyId) {
     scopedWhere.companyId = actor.companyId;
   }
-  // BDE/ISE → only own
-  if (rank < 60) {
+  // BDE/ISE/Lower custom tiers → only own
+  if (rank <= 40) {
     scopedWhere.assignedOwnerId = actor.id;
   }
-  // Branch Manager → own branch
-  if (rank >= 60 && rank < 80 && actor.branchId) {
+  // Branch tier (Branch Manager + Level 2 custom roles rank 41..60) → own branch
+  if (rank >= 41 && rank <= 60 && actor.branchId) {
     scopedWhere.branchId = actor.branchId;
   }
 
@@ -78,7 +78,7 @@ export const updateCustomerStatus = async (actor, id, status) => {
   if (actor.primaryRole !== 'SUPER_ADMIN' && actor.companyId) {
     scopedWhere.companyId = actor.companyId;
   }
-  if (rank >= 60 && rank < 80 && actor.branchId) {
+  if (rank >= 41 && rank <= 60 && actor.branchId) {
     scopedWhere.branchId = actor.branchId;
   }
 

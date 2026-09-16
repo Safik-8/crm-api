@@ -88,7 +88,7 @@ router.get("/:id/pipeline-history", hasPermission("PIPELINE", "canView"), getLea
 router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), validateBody(updateLeadStageSchema), updateLeadStage);
 
 // ── Comments ──────────────────────────────────────────────────────────────────
-router.post("/:id/comments", hasPermission("ACTIVITY", "canCreate"), validateBody(addCommentSchema), addLeadComment);
-router.get( "/:id/comments", hasPermission("ACTIVITY", "canView"),   getLeadComments);
+router.post("/:id/comments", hasPermission("LEAD", "canCreate"), validateBody(addCommentSchema), addLeadComment);
+router.get( "/:id/comments", hasPermission("LEAD", "canView"),   getLeadComments);
 
 export default router;

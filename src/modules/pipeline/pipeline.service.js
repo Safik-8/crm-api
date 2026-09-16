@@ -51,7 +51,7 @@ const resolveOrgContext = async (data, actor) => {
 
 const assertPipelineScope = (actor, pipeline) => {
   if (actor.companyId && pipeline.companyId !== actor.companyId) throw new BadRequestError("Invalid pipeline scope")
-  if (actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
+  if (actor.primaryRoleRank <= 60 && actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
 }
 
 const normalizePipelineStagesOrder = (stages) => {
@@ -188,11 +188,11 @@ export const listPipelinesService = async (query = {}, actor) => {
     : null;
 
   const isSuperAdmin = (actor?.primaryRoleRank && actor.primaryRoleRank >= 100) || actor?.primaryRole === 'SUPER_ADMIN';
-  const isCompanyAdmin = (actor?.primaryRoleRank && actor.primaryRoleRank >= 80) || actor?.primaryRole === 'COMPANY_ADMIN';
+  const isCompanyWide = (actor?.primaryRoleRank && actor.primaryRoleRank >= 61) || actor?.primaryRole === 'COMPANY_ADMIN' || isSuperAdmin;
 
   if (!isSuperAdmin) {
     if (actor?.companyId) where.companyId = actor.companyId;
-    if (actor?.branchId && !isCompanyAdmin) {
+    if (actor?.branchId && !isCompanyWide) {
       where.branchId = actor.branchId;
     } else if (queryBranchId) {
       where.branchId = queryBranchId;
@@ -268,7 +268,7 @@ const actorScope = (actor) => {
     return scope;
   }
   if (actor.companyId) scope.companyId = actor.companyId;
-  if (actor.branchId && (!actor.primaryRoleRank || actor.primaryRoleRank < 80)) {
+  if (actor.branchId && (!actor.primaryRoleRank || actor.primaryRoleRank <= 60)) {
     scope.branchId = actor.branchId;
   }
   return scope;

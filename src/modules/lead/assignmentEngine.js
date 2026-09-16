@@ -79,8 +79,9 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
         const r = ur.role;
         if (r.name === "BDE" || r.name === "ISE") return true;
         if (r.rank <= 40) {
-          const leadPerm = r.rolePermissions.find(rp => rp.module === "LEAD");
-          return leadPerm && leadPerm.canView && leadPerm.canEdit;
+          const leadPerm = r.rolePermissions?.find(rp => rp.module === "LEAD");
+          if (!leadPerm) return true;
+          return leadPerm.canView || leadPerm.canEdit;
         }
         return false;
       });
@@ -90,7 +91,7 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
     });
 
     if (eligibleUsers.length === 0) {
-      return await handleAllFullOrNoCandidates(lead);
+      return await handleAllFullOrNoCandidates(lead, tx);
     }
 
     // 3. Apply algorithm ordering & select candidate
@@ -416,43 +417,36 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
  * Handle notification creation when all reps are full or no candidates exist.
  */
 const handleAllFullOrNoCandidates = async (lead, tx = prisma) => {
-  // Find Branch Manager to notify
-  const branchManagerRole = await tx.role.findFirst({
+  // Find Branch Managers (System role or Custom Roles with rank 60-79) to notify
+  const managers = await tx.user.findMany({
     where: {
-      name: "BRANCH_MANAGER",
-      OR: [
-        { companyId: null },
-        { companyId: lead.companyId }
-      ]
-    }
-  });
-
-  if (branchManagerRole) {
-    const managers = await tx.user.findMany({
-      where: {
-        branchId: lead.branchId,
-        status: "ACTIVE",
-        userRoles: {
-          some: {
-            roleId: branchManagerRole.id
+      branchId: lead.branchId,
+      status: "ACTIVE",
+      userRoles: {
+        some: {
+          role: {
+            OR: [
+              { name: "BRANCH_MANAGER" },
+              { rank: { gte: 60, lte: 79 } }
+            ]
           }
         }
       }
-    });
-
-    if (managers.length > 0) {
-      dispatchNotification({
-        eventType: "LEAD_ASSIGNED",
-        companyId: lead.companyId,
-        branchId: lead.branchId,
-        recipientIds: managers.map(m => m.id),
-        leadId: lead.id,
-        title: "Unassigned Lead Alert",
-        message: `Lead "${lead.name}" remains unassigned because all eligible candidates in the branch have hit their daily limit.`,
-        // Deep-link: manager can open the lead and manually assign from there.
-        actionUrl: `/leads?leadId=${lead.id}`,
-      });
     }
+  });
+
+  if (managers && managers.length > 0) {
+    dispatchNotification({
+      eventType: "LEAD_ASSIGNED",
+      companyId: lead.companyId,
+      branchId: lead.branchId,
+      recipientIds: managers.map(m => m.id),
+      leadId: lead.id,
+      title: "Unassigned Lead Alert",
+      message: `Lead "${lead.name}" remains unassigned because all eligible candidates in the branch have hit their daily limit.`,
+      // Deep-link: manager can open the lead and manually assign from there.
+      actionUrl: `/leads?leadId=${lead.id}`,
+    });
   }
 };
 
