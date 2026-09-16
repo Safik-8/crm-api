@@ -255,10 +255,10 @@ export const generateReportData = async (user, filters) => {
     }
     
     let resolvedBranchId = user.branchId;
-    if (rank >= 80) {
+    if (rank >= 61) {
       resolvedBranchId = filters.branchId ? parseInt(filters.branchId) : null;
     } else {
-      // Lock to branch for Branch Manager and Sales
+      // Lock to branch for Branch Manager and Sales (rank <= 60)
       resolvedBranchId = user.branchId;
       filters.branchId = user.branchId;
     }

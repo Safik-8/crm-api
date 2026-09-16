@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { authenticate } from "../../middleware/Authenticate.js";
-import { hasPermission } from "../../middleware/hasPermission.js";
 import {
   getNotificationsQuerySchema,
   updateNotificationConfigSchema,
@@ -22,6 +21,21 @@ import {
 const router = Router();
 router.use(authenticate);
 
+// ── Admin guard for configuration management ───────────────────────────────
+const requireNotificationAdmin = (req, res, next) => {
+  const role = (req.user?.primaryRole || req.user?.role || "").toUpperCase();
+  const rank = Number(req.user?.primaryRoleRank ?? 0);
+  if (role === "SUPER_ADMIN" || role === "COMPANY_ADMIN" || rank >= 61) {
+    return next();
+  }
+  return res.status(403).json({
+    success: false,
+    statusCode: 403,
+    code: "FORBIDDEN",
+    message: "Access Denied: Notification configuration is restricted to administrators.",
+  });
+};
+
 // ── Unread Badge Counter (All authenticated users) ──────────────────────────
 router.get("/unread-count", getUnreadCount);
 
@@ -29,8 +43,8 @@ router.get("/unread-count", getUnreadCount);
 router.get("/reminder-summary", getReminderSummary);
 
 // ── Notification Event Configurations (Admin Only, guarded in service) ───────
-router.get("/configs", hasPermission("NOTIFICATION", "canView"), getNotificationConfigs);
-router.patch("/configs/:id", hasPermission("NOTIFICATION", "canEdit"), validateBody(updateNotificationConfigSchema), updateNotificationConfig);
+router.get("/configs", requireNotificationAdmin, getNotificationConfigs);
+router.patch("/configs/:id", requireNotificationAdmin, validateBody(updateNotificationConfigSchema), updateNotificationConfig);
 
 // ── Full paginated list & audit history (Personal by default, scoped in service)
 router.get(

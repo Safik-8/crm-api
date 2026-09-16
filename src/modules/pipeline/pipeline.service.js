@@ -188,11 +188,11 @@ export const listPipelinesService = async (query = {}, actor) => {
     : null;
 
   const isSuperAdmin = (actor?.primaryRoleRank && actor.primaryRoleRank >= 100) || actor?.primaryRole === 'SUPER_ADMIN';
-  const isCompanyAdmin = (actor?.primaryRoleRank && actor.primaryRoleRank >= 80) || actor?.primaryRole === 'COMPANY_ADMIN';
+  const isCompanyWide = (actor?.primaryRoleRank && actor.primaryRoleRank >= 61) || actor?.primaryRole === 'COMPANY_ADMIN' || isSuperAdmin;
 
   if (!isSuperAdmin) {
     if (actor?.companyId) where.companyId = actor.companyId;
-    if (actor?.branchId && !isCompanyAdmin) {
+    if (actor?.branchId && !isCompanyWide) {
       where.branchId = actor.branchId;
     } else if (queryBranchId) {
       where.branchId = queryBranchId;

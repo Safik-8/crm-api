@@ -185,7 +185,7 @@ export const createFollowupService = async (data, actor) => {
   if (actor.companyId && lead.companyId !== actor.companyId)
     throw new ForbiddenError("Lead does not belong to your company");
 
-  if (actor.branchId && lead.branchId && lead.branchId !== actor.branchId)
+  if (actor.primaryRoleRank <= 60 && actor.branchId && lead.branchId && lead.branchId !== actor.branchId)
     throw new ForbiddenError("Lead does not belong to your branch");
 
   // Lead ownership check for rank < 60

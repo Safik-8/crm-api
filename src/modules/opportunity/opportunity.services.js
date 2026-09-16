@@ -197,7 +197,11 @@ export const getOpportunityById = async (actor, id) => {
 /**
  * Lists Opportunities with Dynamic Scoping
  */
-export const getOpportunities = async (actor, queryParams = {}) => {
+export const getOpportunitiesList = async (actor, queryParams = {}) => {
+  const page  = Math.max(1, parseInt(queryParams.page)  || 1);
+  const limit = Math.min(100, parseInt(queryParams.limit) || 20);
+  const skip  = (page - 1) * limit;
+
   const where = {};
   const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN';
 
@@ -262,6 +266,8 @@ export const getOpportunities = async (actor, queryParams = {}) => {
     },
   };
 };
+
+export const getOpportunities = getOpportunitiesList;
 
 /**
  * Fetches dynamic Opportunity stages for actor's company with auto-seed fallback
