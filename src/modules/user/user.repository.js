@@ -322,7 +322,7 @@ export const createAuditLog = async (data, tx = prisma, req = null) => {
  * and company scope (global system roles + actor's own company roles).
  */
 export const findAssignableRoles = async (actorRank, companyId) => {
-  return prisma.role.findMany({
+  const roles = await prisma.role.findMany({
     where: {
       status: "ACTIVE",
       rank: { lt: actorRank },
@@ -331,9 +331,23 @@ export const findAssignableRoles = async (actorRank, companyId) => {
         { companyId: null }
       ]
     },
-    orderBy: { rank: "desc" },
-    select: { id: true, name: true, rank: true, isSystem: true, status: true }
+    orderBy: [
+      { rank: "desc" },
+      { companyId: "desc" }
+    ],
+    select: { id: true, name: true, rank: true, isSystem: true, status: true, companyId: true }
   })
+
+  // Deduplicate by name: company-specific role overrides global template role
+  const seenNames = new Set()
+  const uniqueRoles = []
+  for (const r of roles) {
+    if (!seenNames.has(r.name)) {
+      seenNames.add(r.name)
+      uniqueRoles.push(r)
+    }
+  }
+  return uniqueRoles
 }
 
 /**
