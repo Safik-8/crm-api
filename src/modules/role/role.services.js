@@ -58,6 +58,17 @@ export const getRolesService = async (query, actor) => {
       where = {
         companyId: companyIdFilter
       }
+    } else {
+      // SUPER_ADMIN must select a specific company to view roles; otherwise return empty list
+      return {
+        roles: [],
+        pagination: {
+          total: 0,
+          page: parseInt(page, 10) || 1,
+          limit: take,
+          totalPages: 1
+        }
+      }
     }
   }
 

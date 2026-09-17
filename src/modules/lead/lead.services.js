@@ -925,54 +925,6 @@ export const deleteLeadService = async (leadId, actor, req = null) => {
   });
 };
 
-export const deleteAllLeadsService = async (actor, req = null) => {
-  const scope = actorScope(actor);
-  if (!scope.companyId) {
-    throw new BadRequestError("Company scope could not be resolved.");
-  }
-
-  return prisma.$transaction(async (tx) => {
-    // 1. Get count of leads to be deleted
-    const count = await tx.lead.count({
-      where: {
-        isDeleted: false,
-        ...scope
-      }
-    });
-
-    if (count === 0) {
-      return { count: 0 };
-    }
-
-    // 2. Perform bulk soft-delete
-    await tx.lead.updateMany({
-      where: {
-        isDeleted: false,
-        ...scope
-      },
-      data: {
-        isDeleted: true,
-        deletedById: actor.id,
-        deletedAt: new Date(),
-        updatedById: actor.id
-      }
-    });
-
-    // 3. Create a single audit log for the bulk operation
-    await createAuditLog({
-      req,
-      companyId: scope.companyId,
-      entityId: 0,
-      action: "BULK_DELETE",
-      oldValue: JSON.stringify({ count, isDeleted: false }),
-      newValue: JSON.stringify({ count, isDeleted: true }),
-      performedById: actor.id
-    }, tx);
-
-    return { count };
-  });
-};
-
 
 
 // ──────────────────────────────────────────────────────────────────────────────

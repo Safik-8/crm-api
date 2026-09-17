@@ -78,8 +78,8 @@ export const createUserService = async (data, actor, req = null) => {
   // 1. Multitenancy guard: Company Admins and Branch Managers can only onboard in their own company
   assertCompanyScope(actor, Number(companyId))
 
-  // 2. Branch manager scope guard: Branch Managers can only onboard users within their own branch
-  if (actor.primaryRole === "BRANCH_MANAGER" && Number(branchId) !== actor.branchId) {
+  // 2. Branch scope guard: All branch-level actors (rank <= 60 or assigned to a branch) can only onboard within their own branch
+  if (actor.branchId && (actor.primaryRoleRank <= 60 || actor.primaryRole === "BRANCH_MANAGER" || actor.primaryRole === "BDE" || actor.primaryRole === "ISE") && Number(branchId) !== actor.branchId) {
     throw new ForbiddenError("You can only onboard users within your assigned branch")
   }
 

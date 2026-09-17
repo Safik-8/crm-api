@@ -11,7 +11,6 @@ import {
   getLeadById,
   updateLead,
   deleteLead,
-  deleteAllLeads,
   updateLeadStage,
   addLeadComment,
   getLeadComments,
@@ -59,7 +58,6 @@ router.post("/assign", hasPermission("LEAD_ASSIGNMENT", "canEdit"), validateBody
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 router.post(  "/",    hasPermission("LEAD", "canCreate"), validateBody(createLeadSchema), createLead);
 router.get(   "/",    hasPermission("LEAD", "canView"),   getLeads);
-router.delete("/temp-delete-all", hasPermission("LEAD", "canDelete"), deleteAllLeads);
 router.get(   "/:id", hasPermission("LEAD", "canView"),   getLeadById);
 router.put(   "/:id", hasPermission("LEAD", "canEdit"),   validateBody(updateLeadSchema), updateLead);
 router.delete("/:id", hasPermission("LEAD", "canDelete"), deleteLead);
