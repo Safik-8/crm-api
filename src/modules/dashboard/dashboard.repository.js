@@ -163,21 +163,30 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
 export async function findPersonalMetrics({ companyId, employeeId, startDate, endDate } = {}) {
   const w = { companyId, assignedToId: employeeId };
   const dateFilter = makeDateFilter(startDate, endDate);
+  const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
+  const todayEnd = new Date(new Date().setHours(23, 59, 59, 999));
+
   const [
     assignedLeads, qualifiedLeads, followupsToday, pendingFollowups,
-    activeOpportunities, dealsWonAgg, callsCompletedToday,
+    activeOpportunities, dealsWonAgg,
+    callsCompletedToday, coldCallsToday, followupCallsToday, notReceivedCallsToday, receivedCallsToday,
   ] = await Promise.all([
     prisma.lead.count({ where: { ...w, isDeleted: false, ...(startDate && { createdAt: dateFilter }) } }),
     prisma.lead.count({ where: { ...w, isQualified: true, isDeleted: false } }),
-    prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING", scheduledAt: { gte: new Date(new Date().setHours(0,0,0,0)), lte: new Date(new Date().setHours(23,59,59,999)) } } }),
+    prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING", scheduledAt: { gte: todayStart, lte: todayEnd } } }),
     prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING" } }),
     prisma.opportunity.count({ where: { companyId, ownerId: employeeId, isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
     prisma.deal.aggregate({ where: { companyId, closedById: employeeId, outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, _sum: { finalAmount: true }, _count: { id: true } }),
-    prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", isDeleted: false, interactionDate: { gte: new Date(new Date().setHours(0,0,0,0)) } } }),
+    prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", isDeleted: false, interactionDate: { gte: todayStart } } }),
+    prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", callNature: "COLD_CALL", isDeleted: false, interactionDate: { gte: todayStart } } }),
+    prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", callNature: "FOLLOW_UP", isDeleted: false, interactionDate: { gte: todayStart } } }),
+    prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", callOutcome: "NOT_RECEIVED", isDeleted: false, interactionDate: { gte: todayStart } } }),
+    prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", callOutcome: "RECEIVED", isDeleted: false, interactionDate: { gte: todayStart } } }),
   ]);
   return {
     assignedLeads, qualifiedLeads, followupsToday, pendingFollowups,
     activeOpportunities, callsCompletedToday,
+    coldCallsToday, followupCallsToday, notReceivedCallsToday, receivedCallsToday,
     dealsWon: dealsWonAgg._count.id || 0,
     revenue: Number(dealsWonAgg._sum.finalAmount || 0),
   };

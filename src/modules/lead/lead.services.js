@@ -2191,6 +2191,7 @@ export const getLeadTimelineService = async (leadId, query = {}, actor) => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 const VALID_COMMUNICATION_TYPES = ["CALL", "EMAIL", "MEETING", "WHATSAPP"];
+const VALID_CALL_OUTCOMES = ["RECEIVED", "NOT_RECEIVED"];
 
 export const createCommunicationLogService = async (leadId, data, actor) => {
   const id = Number(leadId);
@@ -2201,7 +2202,7 @@ export const createCommunicationLogService = async (leadId, data, actor) => {
 
   await assertLeadScope(actor, lead);
 
-  const { communicationType, summary, interactionDate } = data;
+  const { communicationType, summary, interactionDate, callOutcome } = data;
 
   if (!communicationType || !VALID_COMMUNICATION_TYPES.includes(communicationType.toUpperCase())) {
     throw new ValidationError("Validation failed", [{ field: "communicationType", message: "Invalid or missing communication type" }]);
@@ -2211,13 +2212,50 @@ export const createCommunicationLogService = async (leadId, data, actor) => {
     throw new ValidationError("Validation failed", [{ field: "interactionDate", message: "Interaction date is required" }]);
   }
 
+  const normalizedType = communicationType.toUpperCase();
+  let normalizedOutcome = null;
+  let computedNature = null;
+
+  if (normalizedType === "CALL") {
+    if (callOutcome) {
+      const upperOutcome = callOutcome.toUpperCase();
+      if (!VALID_CALL_OUTCOMES.includes(upperOutcome)) {
+        throw new ValidationError("Validation failed", [{ field: "callOutcome", message: "Invalid call outcome. Must be RECEIVED or NOT_RECEIVED" }]);
+      }
+      normalizedOutcome = upperOutcome;
+    } else {
+      normalizedOutcome = "RECEIVED";
+    }
+  }
+
   return prisma.$transaction(async (tx) => {
+    if (normalizedType === "CALL") {
+      // Intelligent Call Classification Engine:
+      // Check if there is at least one prior non-deleted call for this lead that was RECEIVED
+      const priorReceivedCall = await tx.communicationLog.findFirst({
+        where: {
+          leadId: id,
+          communicationType: "CALL",
+          isDeleted: false,
+          OR: [
+            { callOutcome: "RECEIVED" },
+            { callOutcome: null } // Backwards compatibility for legacy records
+          ]
+        },
+        select: { id: true }
+      });
+
+      computedNature = priorReceivedCall ? "FOLLOW_UP" : "COLD_CALL";
+    }
+
     const log = await tx.communicationLog.create({
       data: {
         leadId: id,
         companyId: lead.companyId ?? actor.companyId,
         branchId: lead.branchId,
-        communicationType: communicationType.toUpperCase(),
+        communicationType: normalizedType,
+        callOutcome: normalizedOutcome,
+        callNature: computedNature,
         summary: summary || null,
         interactionDate: new Date(interactionDate),
         createdById: actor.id
@@ -2227,16 +2265,21 @@ export const createCommunicationLogService = async (leadId, data, actor) => {
       }
     });
 
+    const natureLabel = computedNature === "COLD_CALL" ? "cold call" : computedNature === "FOLLOW_UP" ? "follow-up call" : normalizedType.toLowerCase();
+    const outcomeLabel = normalizedOutcome === "NOT_RECEIVED" ? " (not received)" : normalizedOutcome === "RECEIVED" ? " (received)" : "";
+
     await tx.leadActivity.create({
       data: {
         leadId: id,
         companyId: lead.companyId ?? actor.companyId,
         activityType: "COMMUNICATION_LOGGED",
-        description: `Logged a ${communicationType.toLowerCase()} communication`,
+        description: `Logged a ${natureLabel}${outcomeLabel}`,
         performedById: actor.id,
         metadata: {
           logId: log.id,
-          communicationType
+          communicationType: normalizedType,
+          callOutcome: normalizedOutcome,
+          callNature: computedNature
         }
       }
     });

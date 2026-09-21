@@ -1388,6 +1388,8 @@ model CommunicationLog {
   companyId         Int       @map("company_id")
   branchId          Int?      @map("branch_id")
   communicationType String    @map("communication_type")
+  callOutcome       String?   @map("call_outcome")
+  callNature        String?   @map("call_nature")
   summary           String?   @db.Text
   interactionDate   DateTime  @map("interaction_date")
   isDeleted         Boolean   @default(false) @map("is_deleted")
@@ -1407,8 +1409,11 @@ model CommunicationLog {
   @@index([companyId])
   @@index([branchId])
   @@index([communicationType])
+  @@index([callOutcome])
+  @@index([callNature])
   @@index([interactionDate])
   @@index([companyId, createdById, communicationType, interactionDate])
+  @@index([companyId, createdById, communicationType, interactionDate, callNature], map: "comm_logs_company_rep_type_date_nature_idx")
   @@map("communication_logs")
 }
 
