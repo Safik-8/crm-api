@@ -41,8 +41,10 @@ const assertTeamManagementPermission = (actor, action) => {
   else if (action === "delete") actionKey = "canDelete";
   else if (action === "view") actionKey = "canView";
 
-  const hasDbPerm = actor.permissions?.["TEAM"]?.[actionKey];
-  if (hasDbPerm || rank >= 41) return;
+  const hasDbPerm = Boolean(actor.permissions?.["TEAM"]?.[actionKey]);
+  const isSystemManager = actor.primaryRole === "BRANCH_MANAGER" || actor.primaryRole === "BDE";
+
+  if (hasDbPerm || isSystemManager) return;
   throw new ForbiddenError("You do not have permission to perform team management actions");
 };
 

@@ -8,8 +8,8 @@ export const hasPermission = (module, action) => {
       return next(new PermissionDeniedError(module, action))
     }
 
-    // 1. Super Admin (System Owner) always has absolute global privileges
-    if (req.user.primaryRole === "SUPER_ADMIN") {
+    // 1. Super Admin (System Owner) and Company Admin have full administrative privileges
+    if (req.user.primaryRole === "SUPER_ADMIN" || req.user.primaryRole === "COMPANY_ADMIN") {
       return next()
     }
 
