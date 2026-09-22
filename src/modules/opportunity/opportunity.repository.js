@@ -548,7 +548,7 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
         stage: true,
         product: true,
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true } },
+        lead: { select: { id: true, leadNumber: true, name: true, mobile: true, email: true } },
       },
     });
 
@@ -606,7 +606,7 @@ export const findOpportunityById = async (id, companyId) => {
       stage: true,
       product: { select: { id: true, name: true, code: true } },
       owner: { select: { id: true, name: true, email: true } },
-      lead: { select: { id: true, name: true, mobile: true, email: true } },
+      lead: { select: { id: true, leadNumber: true, name: true, mobile: true, email: true } },
       proposals: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
@@ -648,7 +648,7 @@ export const findOpportunitiesList = async ({ where, skip = 0, take = 10, orderB
         stage: true,
         product: { select: { id: true, name: true, code: true } },
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true } },
+        lead: { select: { id: true, leadNumber: true, name: true, mobile: true, email: true } },
       },
     }),
   ]);
