@@ -117,9 +117,19 @@ export const calculateLiveAchievement = async (target) => {
       }
 
       case "CUSTOMER": {
+        const customerScope = employeeId
+          ? { assignedOwnerId: employeeId }
+          : teamId
+          ? { ownerTeamId: teamId }
+          : branchId
+          ? { branchId }
+          : companyId
+          ? { companyId }
+          : {};
+
         const count = await prisma.customer.count({
           where: {
-            ...(companyId ? { companyId } : {}),
+            ...customerScope,
             createdAt: dateFilter,
           },
         });
@@ -195,7 +205,25 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
 
   // Apply AUTO-SCOPING based on requested tab and role permissions
   if (queryTab === "my" || (!isSuperAdmin && !isCompanyAdmin && !isBranchManager && !isTeamLeader)) {
-    whereClause.employeeId = user.id;
+    // "My Performance" tab: show individual targets + team targets the user is a member of
+    const userTeamMemberships = await prisma.teamMember.findMany({
+      where: { userId: user.id, removedAt: null },
+      select: { teamId: true },
+    });
+    const userTeamIds = [
+      ...userTeamMemberships.map((m) => m.teamId),
+      ...bdeLeaderTeams.map((t) => t.id),
+    ];
+    const uniqueUserTeamIds = Array.from(new Set(userTeamIds));
+
+    if (uniqueUserTeamIds.length > 0) {
+      whereClause.OR = [
+        { employeeId: user.id },
+        { teamId: { in: uniqueUserTeamIds }, employeeId: null },
+      ];
+    } else {
+      whereClause.employeeId = user.id;
+    }
   } else if (queryTab === "team") {
     // 403 API Guard: Block non-leader BDE / ISE from accessing team analytics
     if (!isTeamLeader && !isBranchManager && !isCompanyAdmin && !isSuperAdmin) {
@@ -203,28 +231,18 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
     }
 
     if (isTeamLeader && !isBranchManager && !isCompanyAdmin && !isSuperAdmin) {
-      // Pure Team Leader: scope strictly to the teams they lead and their team members
+      // Pure Team Leader: scope strictly to TEAM-scoped targets in teams they lead
       if (teamIdsLeaded.length > 0) {
-        const members = await prisma.teamMember.findMany({
-          where: { teamId: { in: teamIdsLeaded }, removedAt: null },
-          select: { userId: true },
-        });
-        const memberUserIds = Array.from(new Set([...members.map((m) => m.userId), user.id]));
-
-        whereClause.OR = [
-          { teamId: { in: teamIdsLeaded } },
-          { employeeId: { in: memberUserIds } },
-        ];
+        whereClause.teamId = { in: teamIdsLeaded };
+        whereClause.employeeId = null;
       } else {
         whereClause.employeeId = user.id;
       }
     } else if (isBranchManager || isCompanyAdmin || isSuperAdmin) {
       // Branch Manager / Admin viewing Team Performance tab:
-      // Scope specifically to Team targets within their branch/company
-      whereClause.OR = [
-        { scopeType: "TEAM" },
-        { teamId: { not: null } },
-      ];
+      // Scope specifically to team-scoped targets (employeeId is null, teamId is set)
+      whereClause.teamId = { not: null };
+      whereClause.employeeId = null;
       if (user.branchId && !isSuperAdmin && !isCompanyAdmin) {
         whereClause.AND = [
           {
@@ -277,7 +295,9 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
   }
 
   if (filters.teamId && filters.teamId !== "ALL" && (isBranchManager || isCompanyAdmin || isSuperAdmin || isTeamLeader)) {
-    whereClause.teamId = Number(filters.teamId);
+    // Merge teamId filter safely into AND clause to avoid clobbering existing OR/teamId conditions
+    whereClause.AND = whereClause.AND || [];
+    whereClause.AND.push({ teamId: Number(filters.teamId) });
   }
 
   if (filters.branchId && filters.branchId !== "ALL" && (isCompanyAdmin || isSuperAdmin)) {
@@ -304,10 +324,10 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
     where: whereClause,
     include: {
       employee: {
-        select: { id: true, name: true, email: true, employeeId: true },
+        select: { id: true, name: true, email: true, employeeId: true, branchId: true },
       },
       team: {
-        select: { id: true, name: true, code: true },
+        select: { id: true, name: true, code: true, branchId: true },
       },
       branch: {
         select: { id: true, name: true, code: true },
@@ -340,6 +360,10 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
         duration: t.duration,
         startDate: t.startDate,
         endDate: t.endDate,
+        companyId: t.companyId,
+        branchId: t.branchId,
+        teamId: t.teamId,
+        scopeType: t.scopeType,
         employee: t.employee,
         team: t.team,
         branch: t.branch,
@@ -387,7 +411,7 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
   let branchOptions = [];
   let companyOptions = [];
 
-  if (isBranchManager || isCompanyAdmin || isSuperAdmin || isTeamLeader) {
+  if (isBranchManager || isCompanyAdmin || isSuperAdmin) {
     const teamWhere = {};
     if (user.branchId && !isSuperAdmin && !isCompanyAdmin) teamWhere.branchId = user.branchId;
     if (user.companyId && !isSuperAdmin) teamWhere.companyId = user.companyId;
@@ -397,6 +421,9 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
       select: { id: true, name: true, code: true },
       orderBy: { name: "asc" },
     });
+  } else if (isTeamLeader) {
+    // For pure Team Leaders and BDEs, scope team dropdown strictly to teams they lead!
+    teamOptions = teamsLeaded.map((t) => ({ id: t.id, name: t.name, code: t.code }));
   }
 
   if (isCompanyAdmin || isSuperAdmin) {
@@ -707,10 +734,23 @@ export const createKpiTarget = async (user, data) => {
     },
   });
 
-  const recipientIds = [targetEmployeeId, user.id].filter(Boolean);
+  // Build notification recipients: assignee + team members (if team target) + creator
+  let recipientIds = [targetEmployeeId, user.id].filter(Boolean);
+  if (targetTeamId && !targetEmployeeId) {
+    try {
+      const teamMembers = await prisma.teamMember.findMany({
+        where: { teamId: targetTeamId, removedAt: null },
+        select: { userId: true },
+      });
+      const teamRecord = await prisma.team.findUnique({ where: { id: targetTeamId }, select: { bdeId: true } });
+      const memberIds = teamMembers.map((m) => m.userId);
+      if (teamRecord?.bdeId) memberIds.push(teamRecord.bdeId);
+      recipientIds = Array.from(new Set([...recipientIds, ...memberIds]));
+    } catch (_) { /* ignore notification fetch errors */ }
+  }
   if (recipientIds.length > 0) {
     dispatchNotification({
-      eventType: "TARGET_ACHIEVED",
+      eventType: "KPI_TARGET_ASSIGNED",
       companyId: targetCompanyId,
       branchId: targetBranchId,
       senderId: user.id,
@@ -737,19 +777,20 @@ export const getKpiDetail = async (user, targetId) => {
   const isCompanyAdmin = primaryRole === "COMPANY_ADMIN" || (rank >= 61 && rank < 100);
   const isBranchManager = primaryRole === "BRANCH_MANAGER" || (rank >= 41 && rank <= 60);
 
-  // Req 9: ISE Role strictly blocked from detail drilldown
-  if (primaryRole === "ISE") {
-    throw new ForbiddenError("ISE users are restricted from viewing KPI target details.");
+  // Req 9: ISE / Personal-tier users strictly blocked from detail drilldown (includes custom roles rank 1-19)
+  const isPersonalTier = primaryRole === "ISE" || (rank > 0 && rank <= 20 && !isSuperAdmin && !isCompanyAdmin && !isBranchManager);
+  if (isPersonalTier) {
+    throw new ForbiddenError("Individual-level role users are restricted from viewing KPI target details.");
   }
 
   const target = await prisma.kpiTarget.findUnique({
     where: { id },
     include: {
       employee: {
-        select: { id: true, name: true, email: true, employeeId: true },
+        select: { id: true, name: true, email: true, employeeId: true, branchId: true },
       },
       team: {
-        select: { id: true, name: true, code: true },
+        select: { id: true, name: true, code: true, branchId: true },
       },
       branch: {
         select: { id: true, name: true, code: true },
@@ -818,15 +859,81 @@ export const getKpiDetail = async (user, targetId) => {
 };
 
 /**
+ * Helper to validate manager/admin authority over a target before update or delete.
+ * Enforces that assigned individuals/teams cannot self-edit or delete, and Branch Managers
+ * can only manage targets within their own branch.
+ */
+export const validateTargetManagerAuthority = async (user, targetId) => {
+  const id = Number(targetId);
+  const target = await prisma.kpiTarget.findUnique({
+    where: { id },
+    include: {
+      employee: { select: { id: true, branchId: true, companyId: true } },
+      team: { select: { id: true, branchId: true, companyId: true } },
+      branch: { select: { id: true, companyId: true } },
+    },
+  });
+
+  if (!target || target.deletedAt) {
+    throw new NotFoundError("KPI Target");
+  }
+
+  const actorRole = user.primaryRole || "";
+  const actorRank = Number(user.primaryRoleRank || 0);
+  const isSuperAdmin = actorRole === "SUPER_ADMIN" || actorRank >= 100;
+  const isCompanyAdmin = isSuperAdmin || actorRole === "COMPANY_ADMIN" || actorRank >= 61;
+  const isBranchManager = isCompanyAdmin || actorRole === "BRANCH_MANAGER" || actorRank >= 41;
+
+  // Individual assignees, team leaders, and sales reps CANNOT edit or delete any targets
+  if (!isBranchManager) {
+    throw new ForbiddenError("Unauthorized: Only Branch Managers and Admins can update or delete KPI targets. Assigned individuals and team members cannot modify targets.");
+  }
+
+  // Company Multi-tenancy check
+  if (!isSuperAdmin && user.companyId && target.companyId !== user.companyId) {
+    throw new ForbiddenError("Unauthorized: KPI Target is outside your company.");
+  }
+
+  // Branch Manager Scope: Can only update/delete targets within their OWN branch
+  if (!isCompanyAdmin && isBranchManager) {
+    const targetBranchId = target.branchId || target.employee?.branchId || target.team?.branchId;
+    if (user.branchId && targetBranchId && targetBranchId !== user.branchId) {
+      throw new ForbiddenError("Unauthorized: You can only update or delete KPI targets within your own branch.");
+    }
+  }
+
+  return target;
+};
+
+/**
  * Update an existing KPI Target.
  */
 export const updateKpiTarget = async (user, targetId, data, req = null) => {
   const id = Number(targetId);
+  const existingTarget = await validateTargetManagerAuthority(user, id);
+
+  if (data.targetValue !== undefined) {
+    const val = Number(data.targetValue);
+    if (isNaN(val) || val <= 0) {
+      throw new BadRequestError("Target Value must be a positive number greater than 0.");
+    }
+    if (existingTarget.kpiType === "CONVERSION" && (val < 0 || val > 100)) {
+      throw new BadRequestError("Target Value for Conversion Rate KPI must be between 0% and 100%.");
+    }
+  }
+
+  const newDuration = data.duration || existingTarget.duration;
+  const newStartDate = data.startDate || existingTarget.startDate;
+  const newEndDate = data.endDate || existingTarget.endDate;
+
+  if (data.duration || data.startDate || data.endDate) {
+    validateKpiDurationDates(newDuration, newStartDate, newEndDate);
+  }
 
   const updated = await prisma.kpiTarget.update({
     where: { id },
     data: {
-      targetValue: data.targetValue ? Number(data.targetValue) : undefined,
+      targetValue: data.targetValue !== undefined ? Number(data.targetValue) : undefined,
       duration: data.duration,
       startDate: data.startDate ? new Date(data.startDate) : undefined,
       endDate: data.endDate ? new Date(data.endDate) : undefined,
@@ -837,14 +944,14 @@ export const updateKpiTarget = async (user, targetId, data, req = null) => {
   // Log Audit Entry
   await recordAuditLog({
     req,
-    companyId: user.companyId || 1,
+    companyId: user.companyId || existingTarget.companyId || 1,
     moduleName: "KPI",
     actionType: "UPDATE",
     entityType: "KPI_TARGET",
     entityId: id,
     action: "KPI_TARGET_UPDATED",
-    newValue: { targetValue: data.targetValue, duration: data.duration },
-    performedById: user.id
+    newValue: { targetValue: data.targetValue, duration: data.duration, startDate: data.startDate, endDate: data.endDate },
+    performedById: user.id,
   });
 
   return updated;
@@ -855,6 +962,7 @@ export const updateKpiTarget = async (user, targetId, data, req = null) => {
  */
 export const deleteKpiTarget = async (user, targetId, req = null) => {
   const id = Number(targetId);
+  const existingTarget = await validateTargetManagerAuthority(user, id);
 
   const deleted = await prisma.kpiTarget.update({
     where: { id },
@@ -868,13 +976,13 @@ export const deleteKpiTarget = async (user, targetId, req = null) => {
   // Log Audit Entry
   await recordAuditLog({
     req,
-    companyId: user.companyId || 1,
+    companyId: user.companyId || existingTarget.companyId || 1,
     moduleName: "KPI",
     actionType: "DELETE",
     entityType: "KPI_TARGET",
     entityId: id,
     action: "KPI_TARGET_DELETED",
-    performedById: user.id
+    performedById: user.id,
   });
 
   return deleted;

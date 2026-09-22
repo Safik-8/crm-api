@@ -160,6 +160,7 @@ const ROLE_PERMISSIONS = {
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
         QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        KPI: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
     },
 
     ISE: {
@@ -191,6 +192,7 @@ const ROLE_PERMISSIONS = {
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
         QUALIFICATION: { canView: true, canCreate: true, canEdit: false, canDelete: false },
         OPPORTUNITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        KPI: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
     },
 }
 
