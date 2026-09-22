@@ -367,7 +367,8 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     const searchConditions = [
       { name: { contains: options.search, mode: "insensitive" } },
       { mobile: { contains: options.search, mode: "insensitive" } },
-      { interestedFor: { contains: options.search, mode: "insensitive" } }
+      { interestedFor: { contains: options.search, mode: "insensitive" } },
+      { leadNumber: { contains: options.search, mode: "insensitive" } }
     ];
 
     if (leadWhere.OR) {

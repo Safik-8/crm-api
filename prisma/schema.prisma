@@ -483,6 +483,8 @@ model PipelineStage {
 model Lead {
   id Int @id @default(autoincrement())
 
+  leadNumber String? @unique @map("lead_number")
+
   companyId Int? @map("company_id")
   branchId  Int? @map("branch_id")
 
@@ -573,6 +575,8 @@ model Lead {
   @@index([assignedToId])
   @@index([teamId])
   @@index([mobile])
+  @@index([leadNumber])
+  @@index([companyId, leadNumber])
   @@index([email])
   @@index([alternateMobile])
   @@index([companyId, mobile])

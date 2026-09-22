@@ -233,9 +233,13 @@ export const getOpportunitiesList = async (actor, queryParams = {}) => {
 
   // Search filter
   if (queryParams.search) {
+    const term = queryParams.search.trim();
     where.OR = [
-      { opportunityName: { contains: queryParams.search, mode: 'insensitive' } },
-      { lead: { name: { contains: queryParams.search, mode: 'insensitive' } } },
+      { opportunityName: { contains: term, mode: 'insensitive' } },
+      { lead: { name: { contains: term, mode: 'insensitive' } } },
+      { lead: { leadNumber: { contains: term, mode: 'insensitive' } } },
+      { lead: { mobile: { contains: term, mode: 'insensitive' } } },
+      { lead: { email: { contains: term, mode: 'insensitive' } } },
     ];
   }
 

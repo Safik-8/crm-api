@@ -58,11 +58,13 @@ export const leadStageLogInclude = {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * Fetches all active users in a branch for the "Assign To" dropdown.
+ * Fetches all active users in a branch for the "Assign To" dropdown,
+ * filtered to only users with lower authority rank than the actor (maxRank).
  * @param {number} branchId
  * @param {object} tx - Prisma client or transaction
+ * @param {number|null} maxRank - Authority rank threshold (only rank < maxRank returned)
  */
-export const findBranchUsers = async (branchId, tx = prisma) => {
+export const findBranchUsers = async (branchId, tx = prisma, maxRank = null) => {
   const users = await tx.user.findMany({
     where: { branchId, status: "ACTIVE" },
     select: {
@@ -70,19 +72,32 @@ export const findBranchUsers = async (branchId, tx = prisma) => {
       name: true,
       email: true,
       userRoles: {
-        where: { isPrimary: true },
-        select: { role: { select: { name: true } } }
+        select: {
+          isPrimary: true,
+          role: { select: { name: true, rank: true } }
+        }
       }
     },
     orderBy: { name: "asc" }
   });
 
-  return users.map((u) => ({
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    role: u.userRoles[0]?.role?.name ?? null
-  }));
+  return users
+    .filter((u) => {
+      if (maxRank === null || maxRank === undefined) return true;
+      const primaryRole = u.userRoles.find(r => r.isPrimary) || u.userRoles[0];
+      const userRank = primaryRole?.role?.rank ?? 0;
+      return userRank < maxRank;
+    })
+    .map((u) => {
+      const primaryRole = u.userRoles.find(r => r.isPrimary) || u.userRoles[0];
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: primaryRole?.role?.name ?? null,
+        rank: primaryRole?.role?.rank ?? 0
+      };
+    });
 };
 
 export const getBranchUsersByBranchId = findBranchUsers;
@@ -95,11 +110,13 @@ export const getBranchUsersByBranchId = findBranchUsers;
  * Fetches all data needed to render the lead create/edit form dropdowns.
  * @param {number|null} companyId
  * @param {number|null} branchId
+ * @param {object} tx
+ * @param {number|null} maxRank
  */
-export const findLeadFormData = async (companyId, branchId) => {
+export const findLeadFormData = async (companyId, branchId, tx = prisma, maxRank = null) => {
   const [sources, courses, statuses, users] = await Promise.all([
     // Lead sources: global + company-specific
-    prisma.leadSource.findMany({
+    tx.leadSource.findMany({
       where: {
         isActive: true,
         OR: [
@@ -112,7 +129,7 @@ export const findLeadFormData = async (companyId, branchId) => {
     }),
 
     // Courses: company-scoped active courses
-    prisma.course.findMany({
+    tx.course.findMany({
       where: {
         status: "ACTIVE",
         isDeleted: false,
@@ -123,7 +140,7 @@ export const findLeadFormData = async (companyId, branchId) => {
     }),
 
     // Lead statuses: global + company-specific (active only)
-    prisma.leadStatus.findMany({
+    tx.leadStatus.findMany({
       where: {
         isActive: true,
         OR: [
@@ -135,8 +152,8 @@ export const findLeadFormData = async (companyId, branchId) => {
       orderBy: { sequenceOrder: "asc" }
     }),
 
-    // Branch users for assignment dropdown
-    branchId ? findBranchUsers(branchId) : Promise.resolve([])
+    // Branch users for assignment dropdown (strictly lower rank than logged-in user)
+    branchId ? findBranchUsers(branchId, tx, maxRank) : Promise.resolve([])
   ]);
 
   return { sources, courses, statuses, users };
@@ -337,6 +354,74 @@ export const findProspectStageForPipeline = async (pipelineId, tx = prisma) => {
   });
 
   return mapping ? prospectStage.id : null;
+};
+
+/**
+ * Generates a unique lead number in format LEAD-{YYYYMMDD}-{BRANCH}-{SEQ}
+ * @param {object} tx - Prisma transaction or client
+ * @param {object} params - { companyId, branchId, date }
+ */
+export const generateLeadNumber = async (tx = prisma, { companyId = null, branchId = null, date = new Date() } = {}) => {
+  const d = new Date(date);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const dateStr = `${yyyy}${mm}${dd}`;
+
+  let branchCode = 'HQ';
+  if (branchId) {
+    try {
+      const branch = await tx.branch.findUnique({
+        where: { id: Number(branchId) },
+        select: { code: true, name: true }
+      });
+      if (branch?.code) {
+        branchCode = branch.code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || `BR${branchId}`;
+      } else if (branch?.name) {
+        branchCode = branch.name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || `BR${branchId}`;
+      } else {
+        branchCode = `BR${branchId}`;
+      }
+    } catch (e) {
+      branchCode = `BR${branchId}`;
+    }
+  }
+
+  // Count leads created on this date for this branch / company to calculate sequence
+  const startOfDay = new Date(d);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(d);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  let seqNum = 1;
+  try {
+    const dayCount = await tx.lead.count({
+      where: {
+        ...(companyId ? { companyId: Number(companyId) } : {}),
+        ...(branchId ? { branchId: Number(branchId) } : {}),
+        createdAt: { gte: startOfDay, lte: endOfDay }
+      }
+    });
+    seqNum = dayCount + 1;
+  } catch (e) {
+    seqNum = 1;
+  }
+
+  const seq = String(seqNum).padStart(4, '0');
+  let leadNumber = `LEAD-${dateStr}-${branchCode}-${seq}`;
+
+  // Collision check
+  try {
+    const exists = await tx.lead.findFirst({ where: { leadNumber } });
+    if (exists) {
+      const rand = Math.floor(1000 + Math.random() * 9000);
+      leadNumber = `LEAD-${dateStr}-${branchCode}-${seq}-${rand}`;
+    }
+  } catch (e) {
+    // If column query error or duplicate, keep leadNumber
+  }
+
+  return leadNumber;
 };
 
 /**

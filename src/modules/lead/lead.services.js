@@ -23,6 +23,7 @@ import {
   findPipelineById,
   findProspectStageForPipeline,
   findPipelineStageMapping,
+  generateLeadNumber,
   createLead,
   updateLead,
   findLeads,
@@ -177,7 +178,10 @@ const assertLeadScope = async (actor, lead) => {
 
 export const getBranchUsersForLeadService = async (actor) => {
   if (!actor.branchId) throw new BadRequestError("No branch associated with your account");
-  return findBranchUsers(actor.branchId);
+  const maxRank = (actor.primaryRole === "SUPER_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 100))
+    ? null
+    : (actor.primaryRoleRank != null ? Number(actor.primaryRoleRank) : null);
+  return findBranchUsers(actor.branchId, prisma, maxRank);
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -187,7 +191,10 @@ export const getBranchUsersForLeadService = async (actor) => {
 export const getLeadFormDataService = async (actor, query = {}) => {
   const companyId = actor.companyId ?? (query.companyId ? Number(query.companyId) : null);
   const branchId  = actor.branchId  ?? (query.branchId ? Number(query.branchId) : null);
-  return findLeadFormData(companyId, branchId);
+  const maxRank = (actor.primaryRole === "SUPER_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 100))
+    ? null
+    : (actor.primaryRoleRank != null ? Number(actor.primaryRoleRank) : null);
+  return findLeadFormData(companyId, branchId, prisma, maxRank);
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -365,7 +372,9 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
 
   // 5. Build create payload
   const now = new Date();
+  const leadNumber = await generateLeadNumber(txClient, { companyId, branchId, date: now });
   const payload = {
+    leadNumber,
     companyId,
     branchId,
     pipelineId:       resolvedPipelineId,
@@ -399,10 +408,12 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
   const executeQueries = async (tx) => {
     let lead;
     if (softDeletedDuplicate) {
+      const restoredLeadNumber = softDeletedDuplicate.leadNumber || await generateLeadNumber(tx, { companyId, branchId, date: now });
       lead = await tx.lead.update({
         where: { id: softDeletedDuplicate.id },
         data: {
           ...payload,
+          leadNumber: restoredLeadNumber,
           isDeleted: false,
           deletedById: null,
           deletedAt: null
@@ -601,7 +612,7 @@ export const getLeadsService = async (query, actor) => {
   }
 
   // Search
-  const searchFilter = buildSearchFilter(query?.search, ["name", "mobile", "email"]);
+  const searchFilter = buildSearchFilter(query?.search, ["name", "mobile", "email", "leadNumber", "interestedFor"]);
   if (searchFilter) Object.assign(where, searchFilter);
 
   const [leads, total] = await Promise.all([
@@ -2640,4 +2651,35 @@ export const getLeadPipelineHistoryService = async (leadId, actor) => {
     }
   });
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// AUTO-BACKFILL LEAD NUMBERS FOR PRE-EXISTING LEADS
+// ──────────────────────────────────────────────────────────────────────────────
+export const backfillMissingLeadNumbers = async () => {
+  try {
+    const unnumberedLeads = await prisma.lead.findMany({
+      where: { leadNumber: null },
+      select: { id: true, companyId: true, branchId: true, createdAt: true },
+      take: 5000
+    });
+    for (const lead of unnumberedLeads) {
+      try {
+        const leadNumber = await generateLeadNumber(prisma, {
+          companyId: lead.companyId,
+          branchId: lead.branchId,
+          date: lead.createdAt || new Date()
+        });
+        await prisma.lead.update({
+          where: { id: lead.id },
+          data: { leadNumber }
+        });
+      } catch (_) {}
+    }
+  } catch (_) {}
+};
+
+// Trigger safe backfill on startup
+setTimeout(() => {
+  backfillMissingLeadNumbers().catch(() => {});
+}, 1000);
 
