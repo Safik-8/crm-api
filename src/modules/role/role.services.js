@@ -76,6 +76,14 @@ export const getRolesService = async (query, actor) => {
     where.status = status
   }
 
+  if (query.type) {
+    const t = String(query.type).toLowerCase()
+    if (t === 'system') where.isSystem = true
+    else if (t === 'custom') where.isSystem = false
+  } else if (query.isSystem !== undefined && query.isSystem !== '') {
+    where.isSystem = query.isSystem === 'true' || query.isSystem === true
+  }
+
   if (search) {
     const searchString = search.trim()
     where.AND = [
