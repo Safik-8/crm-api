@@ -1462,6 +1462,9 @@ model Opportunity {
   closingDate           DateTime @map("closing_date")
   status                String   @default("OPEN") @map("status")
   notes                 String?  @db.Text
+  qualificationScore    Int?      @map("qualification_score")
+  qualifiedAt           DateTime? @map("qualified_at")
+  qualificationData     Json?     @map("qualification_data")
 
   isDeleted   Boolean  @default(false) @map("is_deleted")
   createdById Int      @map("created_by_id")

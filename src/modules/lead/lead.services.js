@@ -181,7 +181,16 @@ export const getBranchUsersForLeadService = async (actor) => {
   const maxRank = (actor.primaryRole === "SUPER_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 100))
     ? null
     : (actor.primaryRoleRank != null ? Number(actor.primaryRoleRank) : null);
-  return findBranchUsers(actor.branchId, prisma, maxRank);
+  let users = await findBranchUsers(actor.branchId, prisma, maxRank);
+
+  // If rep (BDE / ISE rank < 60), restrict assignable list to self + subordinates
+  if (actor.primaryRoleRank < 60) {
+    const subordinates = await getSubordinateIds(actor.id, actor.companyId);
+    const allowedIds = new Set([actor.id, ...subordinates]);
+    users = users.filter(u => allowedIds.has(u.id));
+  }
+
+  return users;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -194,7 +203,16 @@ export const getLeadFormDataService = async (actor, query = {}) => {
   const maxRank = (actor.primaryRole === "SUPER_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 100))
     ? null
     : (actor.primaryRoleRank != null ? Number(actor.primaryRoleRank) : null);
-  return findLeadFormData(companyId, branchId, prisma, maxRank);
+  const data = await findLeadFormData(companyId, branchId, prisma, maxRank);
+
+  // If rep (BDE / ISE rank < 60), restrict assignable list to self + subordinates
+  if (actor.primaryRoleRank < 60 && Array.isArray(data.users)) {
+    const subordinates = await getSubordinateIds(actor.id, actor.companyId);
+    const allowedIds = new Set([actor.id, ...subordinates]);
+    data.users = data.users.filter(u => allowedIds.has(u.id));
+  }
+
+  return data;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────

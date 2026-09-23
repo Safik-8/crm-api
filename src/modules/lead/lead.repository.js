@@ -86,7 +86,7 @@ export const findBranchUsers = async (branchId, tx = prisma, maxRank = null) => 
       if (maxRank === null || maxRank === undefined) return true;
       const primaryRole = u.userRoles.find(r => r.isPrimary) || u.userRoles[0];
       const userRank = primaryRole?.role?.rank ?? 0;
-      return userRank < maxRank;
+      return userRank <= maxRank;
     })
     .map((u) => {
       const primaryRole = u.userRoles.find(r => r.isPrimary) || u.userRoles[0];

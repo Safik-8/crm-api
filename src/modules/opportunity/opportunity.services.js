@@ -3,13 +3,68 @@ import * as opportunityRepository from './opportunity.repository.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../utils/AppError.js';
 import { ROLE_RANKS } from '../../config/roleConstants.js';
 import { recordAuditLog } from '../auditLog/auditLog.service.js';
+import { getCompanyCriteriaService, getCompanySettingsService } from '../qualification/qualification-settings.service.js';
 
 // Delegate buildTxAuditData to central recordAuditLog service
 const buildTxAuditData = (data) => recordAuditLog(data);
 import { dispatchNotification } from '../notification/notification.dispatcher.js';
 
 /**
- * Creates a new Opportunity after applying HRBAC and qualification checks
+ * Resolves the ownerId for a newly created opportunity based on actor role.
+ *
+ * - Non-ISE roles (BDE, BM, Admin, SuperAdmin): always own it themselves
+ * - ISE (rank 20): must be in a team → tries team BDE fallback chain
+ *
+ * @param {object} lead - The lead being converted
+ * @param {object} actor - The logged-in user (req.user)
+ * @returns {number} ownerId
+ */
+export const resolveAutoOwner = async (lead, actor) => {
+  // Non-ISE: BDE, BM, Admin, SuperAdmin always own it themselves
+  if (actor.primaryRoleRank !== ROLE_RANKS.ISE) {
+    return actor.id;
+  }
+
+  // ISE path: must be in a team, fallback to BDE via chain
+  // P1: lead's assigned team → that team's active BDE
+  if (lead.teamId) {
+    const team = await prisma.team.findFirst({
+      where: { id: lead.teamId, isDeleted: false, status: 'ACTIVE' },
+      include: { bde: { select: { id: true, status: true } } }
+    });
+    if (team?.bde?.status === 'ACTIVE') return team.bde.id;
+  }
+
+  // P2: ISE's own active TeamMember record → that team's active BDE
+  const membership = await prisma.teamMember.findFirst({
+    where: {
+      userId: actor.id,
+      removedAt: null,
+      team: { isDeleted: false, status: 'ACTIVE' }
+    },
+    include: { team: { include: { bde: { select: { id: true, status: true } } } } }
+  });
+  if (membership?.team?.bde?.status === 'ACTIVE') return membership.team.bde.id;
+
+  // P3: Active Branch Manager of lead's branch
+  if (lead.branchId) {
+    const bm = await prisma.user.findFirst({
+      where: {
+        branchId: lead.branchId,
+        status: 'ACTIVE',
+        userRoles: { some: { role: { name: 'BRANCH_MANAGER' }, isPrimary: true } }
+      },
+      select: { id: true }
+    });
+    if (bm) return bm.id;
+  }
+
+  // P4: Safety net — ISE themselves (admin should reassign via UI)
+  return actor.id;
+};
+
+/**
+ * Creates a new Opportunity after applying HRBAC and active opportunity checks
  */
 export const createOpportunity = async (actor, payload, req = null) => {
   const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN';
@@ -31,17 +86,6 @@ export const createOpportunity = async (actor, payload, req = null) => {
     throw new NotFoundError('Lead');
   }
 
-  // 2. Business Rule 2.4: Lead qualification check (queries LeadQualification table with parallel dev toggle support)
-  const isDevBypass = process.env.SKIP_QUALIFICATION_CHECK === 'true';
-  if (!isDevBypass) {
-    const qualification = await prisma.leadQualification.findFirst({
-      where: { leadId: payload.leadId, status: 'QUALIFIED' },
-    });
-    if (!qualification) {
-      throw new ValidationError('Opportunities can only be created for qualified leads. Please qualify the lead first.');
-    }
-  }
-
   // Business Rule 2.4b: Active Opportunity Check (Prevent duplicate OPEN opportunities for the same lead)
   const existingOpenOpp = await prisma.opportunity.findFirst({
     where: {
@@ -59,41 +103,7 @@ export const createOpportunity = async (actor, payload, req = null) => {
   }
 
   // 3. Resolve ownerId:
-  // For Sales Reps (BDE, Rank <= 40), the opportunity is automatically owned by the BDE creating it (actor.id).
-  // For Managers/Admins (Rank >= 60), default to requested ownerId, lead's assigned BDE (if in same company), or actor.id.
-  let ownerId;
-  if (actor.primaryRoleRank <= ROLE_RANKS.BDE) {
-    ownerId = actor.id;
-  } else {
-    const candidateOwnerId = payload.ownerId || lead.assignedToId;
-    if (candidateOwnerId) {
-      const ownerWhere = { id: candidateOwnerId };
-      if (!isSuperAdmin && actor.companyId) {
-        ownerWhere.companyId = actor.companyId;
-      }
-      const validOwner = await prisma.user.findFirst({ where: ownerWhere });
-      if (validOwner) {
-        ownerId = validOwner.id;
-      }
-    }
-    if (!ownerId) {
-      ownerId = actor.id;
-    }
-  }
-
-  if (ownerId !== actor.id) {
-    const ownerUser = await prisma.user.findFirst({
-      where: { id: ownerId },
-      include: { userRoles: { include: { role: true } } },
-    });
-
-    if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && ownerUser && ownerUser.branchId !== actor.branchId) {
-      throw new ForbiddenError('Branch Managers can only assign opportunities to users within their branch.');
-    }
-    if (actor.primaryRoleRank <= ROLE_RANKS.BDE && ownerId !== actor.id) {
-      throw new ForbiddenError('Sales representatives can only assign opportunities to themselves.');
-    }
-  }
+  const ownerId = await resolveAutoOwner(lead, actor);
 
   const targetCompanyId = actor.companyId || lead.companyId || 1;
   const targetBranchId = actor.branchId || lead.branchId;
@@ -119,6 +129,103 @@ export const createOpportunity = async (actor, payload, req = null) => {
     message: `Opportunity "${createdOpp.opportunityName}" has been created.`,
     actionUrl: `/opportunities/${createdOpp.id}`,
   });
+
+  return createdOpp;
+};
+
+/**
+ * Called when a lead is dragged to the CLOSURE stage on the Kanban board.
+ * Atomically:
+ *   - Creates an opportunity at the default (Qualification) stage
+ *   - Marks the lead as CONVERTED + CLOSED
+ *   - Resolves owner by role (ISE → team BDE, others → self)
+ *   - Sends in-app notification to BDE if actor is ISE
+ */
+export const createOpportunityFromClosure = async (actor, payload, req = null) => {
+  const isSuperAdmin =
+    actor.primaryRoleRank >= ROLE_RANKS.SUPER_ADMIN ||
+    actor.primaryRole === 'SUPER_ADMIN';
+
+  // 1. Fetch lead with tenant scope guard
+  const leadWhere = { id: Number(payload.leadId), isDeleted: false };
+  if (!isSuperAdmin && actor.companyId) leadWhere.companyId = actor.companyId;
+
+  const lead = await prisma.lead.findFirst({ where: leadWhere });
+  if (!lead) throw new NotFoundError('Lead');
+
+  // 2. Guard: lead not already converted
+  if (lead.qualificationStatus === 'CONVERTED') {
+    throw new ValidationError(
+      'This lead has already been converted to an opportunity. It cannot be closed again.'
+    );
+  }
+
+  // 3. Guard: no duplicate open opportunity
+  const existingOpenOpp = await prisma.opportunity.findFirst({
+    where: { leadId: Number(payload.leadId), status: 'OPEN', isDeleted: false }
+  });
+  if (existingOpenOpp) {
+    throw new ValidationError(
+      `An active opportunity already exists for this lead: "${existingOpenOpp.opportunityName}". ` +
+      `Please close or cancel it before creating a new one.`
+    );
+  }
+
+  // 4. Resolve owner by role
+  const targetCompanyId = actor.companyId || lead.companyId;
+  const targetBranchId  = actor.branchId  || lead.branchId;
+  const ownerId = await resolveAutoOwner(lead, actor);
+  const opportunityName = `${lead.name} - Opportunity`;
+
+  // 5. Resolve closure stage for the lead's pipeline (from payload or pipeline lookup)
+  let closureStageId = payload.stageId ? Number(payload.stageId) : null;
+  if (!closureStageId && lead.pipelineId) {
+    const pipelineClosure = await prisma.pipelineStage.findFirst({
+      where: {
+        pipelineId: lead.pipelineId,
+        stage: { stageType: 'CLOSURE' },
+      },
+      select: { stageId: true },
+    });
+    if (pipelineClosure) {
+      closureStageId = pipelineClosure.stageId;
+    }
+  }
+
+  // 6. Atomic DB transaction: create opportunity + mark lead CONVERTED + move to CLOSURE stage
+  const createdOpp = await opportunityRepository.createOpportunityTx(
+    targetCompanyId,
+    targetBranchId,
+    {
+      opportunityName,
+      leadId:          Number(payload.leadId),
+      leadStageId:     closureStageId,
+      expectedRevenue: Number(payload.expectedRevenue),
+      closingDate:     payload.closingDate,
+      productId: payload.productId
+        ? Number(payload.productId)
+        : (lead.courseId || null),
+    },
+    ownerId,
+    actor.id,
+    req
+  );
+
+  // 6. Notify assigned owner if different from actor (ISE → BDE case)
+  if (ownerId !== actor.id) {
+    dispatchNotification({
+      eventType:     'OPPORTUNITY_CREATED',
+      companyId:     targetCompanyId,
+      branchId:      targetBranchId,
+      senderId:      actor.id,
+      recipientIds:  [ownerId],
+      opportunityId: createdOpp.id,
+      leadId:        Number(payload.leadId),
+      title:         'New Opportunity Assigned to You',
+      message:       `Opportunity "${opportunityName}" has been created from pipeline closure and assigned to you.`,
+      actionUrl:     `/opportunities/${createdOpp.id}`,
+    });
+  }
 
   return createdOpp;
 };
@@ -184,8 +291,8 @@ export const getOpportunityById = async (actor, id) => {
   }
 
   // HRBAC Guard
-  if (actor.primaryRoleRank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
-    throw new ForbiddenError('You can only view opportunities assigned to you.');
+  if (actor.primaryRoleRank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id && opportunity.createdById !== actor.id) {
+    throw new ForbiddenError('You can only view opportunities assigned to you or created by you.');
   }
   if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
     throw new ForbiddenError('You can only view opportunities within your branch.');
@@ -221,9 +328,37 @@ export const getOpportunitiesList = async (actor, queryParams = {}) => {
   if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && actor.branchId) {
     where.branchId = actor.branchId;
   }
-  // User Scoping for BDE / ISE / Custom Reps — only see opportunities they own
-  if (actor.primaryRoleRank <= ROLE_RANKS.BDE) {
-    where.ownerId = actor.id;
+
+  // Scope filter: "mine" vs "all"
+  const isMineScope = queryParams.scope === 'mine' || queryParams.mine === 'true' || queryParams.mine === true;
+
+  if (isMineScope) {
+    // When "mine" is selected, reps and managers see only what is assigned to them (ISE also sees what they created)
+    if (actor.primaryRoleRank <= ROLE_RANKS.ISE) {
+      where.AND = where.AND || [];
+      where.AND.push({
+        OR: [
+          { ownerId: actor.id },
+          { createdById: actor.id }
+        ]
+      });
+    } else {
+      where.ownerId = actor.id;
+    }
+  } else {
+    // "all" scope:
+    // BDE (rank 40) / ISE (rank 20): see opportunities owned or created by them (and their team)
+    if (actor.primaryRoleRank <= ROLE_RANKS.BDE) {
+      where.AND = where.AND || [];
+      where.AND.push({
+        OR: [
+          { ownerId: actor.id },
+          { createdById: actor.id }
+        ]
+      });
+    }
+    // BM (rank 60): sees all in branch (via where.branchId above)
+    // Company Admin (rank 80): sees all in company (via where.companyId above)
   }
 
   // SA and Company Admin can filter by branch
@@ -234,13 +369,15 @@ export const getOpportunitiesList = async (actor, queryParams = {}) => {
   // Search filter
   if (queryParams.search) {
     const term = queryParams.search.trim();
-    where.OR = [
-      { opportunityName: { contains: term, mode: 'insensitive' } },
-      { lead: { name: { contains: term, mode: 'insensitive' } } },
-      { lead: { leadNumber: { contains: term, mode: 'insensitive' } } },
-      { lead: { mobile: { contains: term, mode: 'insensitive' } } },
-      { lead: { email: { contains: term, mode: 'insensitive' } } },
-    ];
+    where.AND = where.AND || [];
+    where.AND.push({
+      OR: [
+        { opportunityName: { contains: term, mode: 'insensitive' } },
+        { lead: { name: { contains: term, mode: 'insensitive' } } },
+        { lead: { mobile: { contains: term, mode: 'insensitive' } } },
+        { lead: { email: { contains: term, mode: 'insensitive' } } },
+      ]
+    });
   }
 
   // Status & Stage filters
@@ -709,3 +846,173 @@ export const moveOpportunityStage = async (actor, id, payload, req = null) => {
   });
 };
 
+/**
+ * Qualifies an Opportunity by computing a score from company criteria.
+ * Stores the score on the Opportunity record itself — does NOT touch Lead qualification tables.
+ *
+ * @param {number} opportunityId
+ * @param {Object} data - criteria values keyed by criterion.key
+ * @param {Object} actor - req.user
+ * @param {Object} [req] - Express request object for audit telemetry
+ * @returns {Promise<Object>} updated opportunity with qualificationScore and qualificationData
+ */
+export const qualifyOpportunityService = async (opportunityId, data, actor, req = null) => {
+  const isSuperAdmin =
+    (actor.primaryRoleRank && actor.primaryRoleRank >= 100) ||
+    actor.primaryRole === 'SUPER_ADMIN';
+
+  // 1. Fetch opportunity with HRBAC tenant scope
+  const oppWhere = { id: Number(opportunityId), isDeleted: false };
+  if (!isSuperAdmin && actor.companyId) {
+    oppWhere.companyId = actor.companyId;
+  }
+
+  const opportunity = await prisma.opportunity.findFirst({
+    where: oppWhere,
+    include: { stage: true },
+  });
+
+  if (!opportunity) {
+    throw new NotFoundError('Opportunity');
+  }
+
+  // 2. HRBAC rank guards (mirrors updateOpportunity)
+  const rank = actor.primaryRoleRank || 0;
+  if (rank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
+    throw new ForbiddenError('You can only qualify opportunities assigned to you.');
+  }
+  if (
+    rank >= 41 &&
+    rank <= ROLE_RANKS.BRANCH_MANAGER &&
+    opportunity.branchId !== actor.branchId
+  ) {
+    throw new ForbiddenError('You can only qualify opportunities within your branch.');
+  }
+
+  // 3. Load company qualification criteria & settings
+  const companyId = opportunity.companyId;
+  const [criteriaList, companySettings] = await Promise.all([
+    getCompanyCriteriaService(companyId),
+    getCompanySettingsService(companyId),
+  ]);
+
+  // 4. Validate required criteria fields
+  for (const criterion of criteriaList) {
+    if (criterion.isRequired) {
+      const val = data[criterion.key];
+      if (val === undefined || val === null || val === '') {
+        throw new ValidationError(
+          `Field "${criterion.label}" is required for qualification. Please complete all required criteria fields.`
+        );
+      }
+    }
+  }
+
+  // 5. Compute score using the same algorithm as evaluateLeadService
+  let rawScore = 0;
+  for (const c of criteriaList) {
+    const val = data[c.key];
+    if (c.fieldType === 'boolean' && Boolean(val)) {
+      rawScore += Number(c.maxPoints) || 0;
+    } else if (c.fieldType === 'select') {
+      if (Array.isArray(c.options)) {
+        const matchedOpt = c.options.find((opt) => opt.value === val);
+        if (matchedOpt) {
+          rawScore += Number(matchedOpt.points) || 0;
+        }
+      }
+    } else if (c.fieldType === 'number') {
+      if (val !== undefined && val !== null && !isNaN(val)) {
+        const numVal = Number(val);
+        rawScore += Math.min(Number(c.maxPoints) || 0, Math.max(0, numVal));
+      }
+    }
+  }
+
+  // Normalize 0–100
+  const computedScore = Math.min(100, Math.max(0, rawScore));
+  const passThreshold = companySettings?.passThreshold ?? 60;
+  const actorName =
+    actor.name ||
+    [actor.firstName, actor.lastName].filter(Boolean).join(' ') ||
+    actor.email ||
+    'User';
+
+  const qualPayload = {
+    score: computedScore,
+    passThreshold,
+    passed: computedScore >= passThreshold,
+    answers: data,
+    criteriaSnapshot: criteriaList,
+    evaluatedById: actor.id,
+    evaluatedByName: actorName,
+    evaluatedAt: new Date().toISOString(),
+  };
+
+  // 6. Atomic Transaction: Persist score + qualificationData snapshot, log LeadActivity & AuditLog
+  const updatedOpportunity = await prisma.$transaction(async (tx) => {
+    const updated = await tx.opportunity.update({
+      where: { id: opportunity.id },
+      data: {
+        qualificationScore: computedScore,
+        qualifiedAt: new Date(),
+        qualificationData: qualPayload,
+        updatedById: actor.id,
+      },
+      include: {
+        stage: true,
+        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
+        owner: { select: { id: true, name: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        updatedBy: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    // 7. Log Lead Activity for audit visibility on the linked lead
+    if (opportunity.leadId) {
+      await tx.leadActivity.create({
+        data: {
+          leadId: opportunity.leadId,
+          companyId: opportunity.companyId,
+          activityType: 'OPPORTUNITY_QUALIFIED',
+          description: `Opportunity "${opportunity.opportunityName}" was qualified with score ${computedScore}% by ${actorName}`,
+          relatedEntityType: 'OPPORTUNITY',
+          relatedEntityId: opportunity.id,
+          performedById: actor.id,
+        },
+      });
+    }
+
+    // 8. Record audit log
+    await recordAuditLog({
+      req,
+      tx,
+      companyId: opportunity.companyId,
+      branchId: opportunity.branchId,
+      moduleName: 'OPPORTUNITY',
+      actionType: 'UPDATE',
+      entityType: 'OPPORTUNITY',
+      entityId: opportunity.id,
+      action: 'OPPORTUNITY_QUALIFIED',
+      oldValue: {
+        score: opportunity.qualificationScore,
+      },
+      newValue: {
+        score: computedScore,
+        qualificationData: qualPayload,
+        evaluatedById: actor.id,
+        evaluatedByName: actorName,
+      },
+      performedById: actor.id,
+    });
+
+    return updated;
+  });
+
+  return {
+    opportunity: updatedOpportunity,
+    score: computedScore,
+    passThreshold,
+    qualificationData: qualPayload,
+  };
+};

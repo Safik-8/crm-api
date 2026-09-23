@@ -320,7 +320,8 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         stage: true,
         product: true,
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
       },
     });
 
@@ -336,7 +337,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
       },
     });
 
-    // 2c. Update Lead qualificationStatus to CONVERTED
+    // 2c. Update Lead qualificationStatus to CONVERTED and stage to CLOSURE
     if (data.leadId) {
       // Find the CLOSED or CONVERTED status ID
       const closedStatus = await tx.leadStatus.findFirst({
@@ -351,14 +352,53 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         },
       });
 
-      await tx.lead.update({
+      const leadRecord = await tx.lead.findUnique({
         where: { id: Number(data.leadId) },
-        data: {
-          qualificationStatus: 'CONVERTED',
-          ...(closedStatus ? { statusId: closedStatus.id } : {}),
-        },
+        select: { id: true, stageId: true, pipelineId: true, companyId: true, branchId: true },
       });
 
+      let targetClosureStageId = data.leadStageId ? Number(data.leadStageId) : null;
+      if (!targetClosureStageId && leadRecord?.pipelineId) {
+        const ps = await tx.pipelineStage.findFirst({
+          where: {
+            pipelineId: leadRecord.pipelineId,
+            stage: { stageType: 'CLOSURE' },
+          },
+          select: { stageId: true },
+        });
+        if (ps) targetClosureStageId = ps.stageId;
+      }
+
+      const updateData = {
+        qualificationStatus: 'CONVERTED',
+        ...(closedStatus ? { statusId: closedStatus.id } : {}),
+      };
+
+      if (targetClosureStageId) {
+        updateData.stageId = targetClosureStageId;
+        updateData.previousStageId = leadRecord?.stageId || null;
+        updateData.stageChangedById = createdById;
+        updateData.stageChangedAt = new Date();
+
+        if (leadRecord?.companyId) {
+          await tx.pipelineHistory.create({
+            data: {
+              leadId: Number(data.leadId),
+              companyId: leadRecord.companyId || companyId,
+              branchId: leadRecord.branchId || branchId || null,
+              previousStageId: leadRecord.stageId || null,
+              newStageId: targetClosureStageId,
+              changedById: createdById,
+              reason: 'Moved to Closure & Converted to Opportunity',
+            },
+          });
+        }
+      }
+
+      await tx.lead.update({
+        where: { id: Number(data.leadId) },
+        data: updateData,
+      });
     }
 
     // 3. Create Activity Log on the Lead
@@ -548,7 +588,8 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
         stage: true,
         product: true,
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, leadNumber: true, name: true, mobile: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
       },
     });
 
@@ -606,7 +647,9 @@ export const findOpportunityById = async (id, companyId) => {
       stage: true,
       product: { select: { id: true, name: true, code: true } },
       owner: { select: { id: true, name: true, email: true } },
-      lead: { select: { id: true, leadNumber: true, name: true, mobile: true, email: true } },
+      createdBy: { select: { id: true, name: true, email: true } },
+      updatedBy: { select: { id: true, name: true, email: true } },
+      lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
       proposals: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
@@ -648,7 +691,8 @@ export const findOpportunitiesList = async ({ where, skip = 0, take = 10, orderB
         stage: true,
         product: { select: { id: true, name: true, code: true } },
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, leadNumber: true, name: true, mobile: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
       },
     }),
   ]);
