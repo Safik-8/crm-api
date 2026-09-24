@@ -3,9 +3,18 @@ import prisma from "../config/db.js";
 
 export const socketAuthMiddleware = async (socket, next) => {
   try {
+    // 1. Try handshake auth token, 2. Try Authorization header, 3. Try httpOnly cookie
+    const cookieHeader = socket.handshake.headers?.cookie;
+    const cookieToken = cookieHeader
+      ?.split(";")
+      ?.map((c) => c.trim())
+      ?.find((c) => c.startsWith("accessToken="))
+      ?.split("=")[1];
+
     const token =
       socket.handshake.auth?.token ||
-      socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "");
+      socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "") ||
+      cookieToken;
 
     if (!token) {
       return next(new Error("Authentication error: Token missing"));
