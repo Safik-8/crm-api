@@ -313,6 +313,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         probabilityPercentage: probability,
         closingDate: new Date(data.closingDate),
         notes: data.notes || null,
+        linkedinUrl: data.linkedinUrl || null,
         createdById: createdById,
         status: 'OPEN',
       },
@@ -321,7 +322,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         product: true,
         owner: { select: { id: true, name: true, email: true } },
         createdBy: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
+        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true, linkedinUrl: true } },
       },
     });
 
@@ -491,7 +492,7 @@ export const updateOpportunityTx = async (id, companyId, data, updatedById, req 
         stage: true,
         product: true,
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true } },
+        lead: { select: { id: true, name: true, mobile: true, email: true, linkedinUrl: true } },
         proposals: {
           where: { isDeleted: false },
           orderBy: { createdAt: 'desc' },
@@ -649,7 +650,7 @@ export const findOpportunityById = async (id, companyId) => {
       owner: { select: { id: true, name: true, email: true } },
       createdBy: { select: { id: true, name: true, email: true } },
       updatedBy: { select: { id: true, name: true, email: true } },
-      lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
+      lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true, linkedinUrl: true } },
       proposals: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },

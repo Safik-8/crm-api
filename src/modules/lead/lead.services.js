@@ -404,6 +404,7 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
     mobile:           data.mobile,
     email:            data.email   || null,
     alternateMobile:  data.alternateMobile || null,
+    linkedinUrl:      data.linkedinUrl || null,
     sourceId:         data.sourceId,
     courseId:         resolvedCourseId,
     statusId:         resolvedStatusId,
@@ -716,6 +717,7 @@ export const updateLeadService = async (leadId, data, actor, req = null) => {
   if (data.mobile        !== undefined) updateData.mobile         = data.mobile;
   if (data.email         !== undefined) updateData.email          = data.email          || null;
   if (data.alternateMobile !== undefined) updateData.alternateMobile = data.alternateMobile || null;
+  if (data.linkedinUrl   !== undefined) updateData.linkedinUrl   = data.linkedinUrl   || null;
   if (data.sourceId      !== undefined) updateData.sourceId       = data.sourceId       ?? null;
   if (data.courseId      !== undefined) updateData.courseId       = data.courseId       ?? null;
   if (data.statusId      !== undefined) updateData.statusId       = data.statusId       ?? null;

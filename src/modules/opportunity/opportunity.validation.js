@@ -34,6 +34,13 @@ export const createOpportunitySchema = z.object({
     .string({ required_error: 'Target closing date is required' })
     .refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid closing date format' }),
   notes: z.string().max(1000, 'Notes cannot exceed 1000 characters').nullable().optional(),
+  linkedinUrl: z
+    .string()
+    .trim()
+    .max(500, 'LinkedIn URL cannot exceed 500 characters')
+    .nullable()
+    .optional()
+    .or(z.literal('')),
 });
 
 /**

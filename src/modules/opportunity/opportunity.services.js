@@ -108,10 +108,18 @@ export const createOpportunity = async (actor, payload, req = null) => {
   const targetCompanyId = actor.companyId || lead.companyId || 1;
   const targetBranchId = actor.branchId || lead.branchId;
 
+  // Carry over LinkedIn URL from Lead if not provided or empty
+  const effectivePayload = {
+    ...payload,
+    linkedinUrl: (payload.linkedinUrl !== undefined && payload.linkedinUrl !== null && payload.linkedinUrl !== '')
+      ? payload.linkedinUrl
+      : (lead.linkedinUrl || null),
+  };
+
   const createdOpp = await opportunityRepository.createOpportunityTx(
     targetCompanyId,
     targetBranchId,
-    payload,
+    effectivePayload,
     ownerId,
     actor.id,
     req
@@ -205,6 +213,7 @@ export const createOpportunityFromClosure = async (actor, payload, req = null) =
       productId: payload.productId
         ? Number(payload.productId)
         : (lead.courseId || null),
+      linkedinUrl:     lead.linkedinUrl || null,
     },
     ownerId,
     actor.id,

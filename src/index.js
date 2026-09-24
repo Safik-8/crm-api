@@ -1,7 +1,7 @@
 // src/index.js
 
 import http from "http"
-import express from "express" // Reload Prisma client with qualificationData
+import express from "express" // Reload Prisma client with linkedinUrl
 import dotenv from "dotenv"
 import cors from "cors"
 import helmet from "helmet"

@@ -505,6 +505,7 @@ model Lead {
   mobile          String
   email           String?
   alternateMobile String? @map("alternate_mobile")
+  linkedinUrl     String? @map("linkedin_url")
 
   priority String   @default("MEDIUM")
   budget   Decimal? @db.Decimal(10, 2)
@@ -1465,6 +1466,7 @@ model Opportunity {
   qualificationScore    Int?      @map("qualification_score")
   qualifiedAt           DateTime? @map("qualified_at")
   qualificationData     Json?     @map("qualification_data")
+  linkedinUrl           String?   @map("linkedin_url")
 
   isDeleted   Boolean  @default(false) @map("is_deleted")
   createdById Int      @map("created_by_id")
