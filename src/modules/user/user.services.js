@@ -581,7 +581,10 @@ export const getEligibleReplacementsService = async (targetId, actor) => {
  */
 export const deleteUserService = async (targetId, replacementUserId, actor, req = null) => {
   const actorRank = actor.primaryRoleRank ?? 0
-  if (actorRank < 80) {
+  const isSuperAdmin = actor.primaryRole === "SUPER_ADMIN"
+  const isCompanyAdmin = actor.primaryRole === "COMPANY_ADMIN"
+
+  if (!isSuperAdmin && !isCompanyAdmin && actorRank < 80) {
     throw new ForbiddenError("Only Super Admins and Company Admins can hard delete users")
   }
 
@@ -600,7 +603,7 @@ export const deleteUserService = async (targetId, replacementUserId, actor, req 
 
   // Rank check: actor rank must be strictly higher than target user rank
   const targetRank = getUserRank(targetUser)
-  if (actor.primaryRole !== "SUPER_ADMIN" && targetRank >= actorRank) {
+  if (!isSuperAdmin && targetRank >= actorRank) {
     throw new ForbiddenError("You cannot delete a user with equal or higher rank than your own")
   }
 
