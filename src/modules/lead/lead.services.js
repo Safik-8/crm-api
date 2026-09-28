@@ -1011,8 +1011,8 @@ export const updateLeadStageService = async (leadId, data, actor, req = null) =>
     throw new BadRequestError("Lead has no company scope — cannot record pipeline history");
   }
 
-  // TRANSITION RULE 1: WON and CLOSURE leads cannot be moved out
-  const LOCKED_STAGE_TYPES = ["WON", "CLOSURE"];
+  // TRANSITION RULE 1: CLOSURE leads cannot be moved out
+  const LOCKED_STAGE_TYPES = ["CLOSURE"];
   if (LOCKED_STAGE_TYPES.includes(lead.stage?.stageType)) {
     throw new ForbiddenError(
       `This lead is in "${lead.stage.name}" stage and cannot be moved to another stage.`
