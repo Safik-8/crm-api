@@ -53,7 +53,17 @@ router.get( "/import-logs",        hasPermission("LEAD", "canCreate"), getLeadIm
 router.get( "/import-logs/:id/errors", hasPermission("LEAD", "canCreate"), downloadImportErrors);
 
 // ── Lead Assignment (manual and bulk) ────────────────────────────────────────
-router.post("/assign", hasPermission("LEAD_ASSIGNMENT", "canEdit"), validateBody(assignLeadsSchema), assignLeads);
+router.post(
+  "/assign",
+  (req, res, next) => {
+    const hasPerm = req.user?.permissions?.LEAD_ASSIGNMENT?.canEdit || req.user?.permissions?.LEAD_ASSIGNMENT?.canCreate;
+    const isLeaderOrBde = req.user?.primaryRoleRank >= 40 || req.user?.primaryRole === "BDE";
+    if (hasPerm || isLeaderOrBde) return next();
+    return res.status(403).json({ success: false, message: "You do not have permission to assign leads" });
+  },
+  validateBody(assignLeadsSchema),
+  assignLeads
+);
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 router.post(  "/",    hasPermission("LEAD", "canCreate"), validateBody(createLeadSchema), createLead);
@@ -86,7 +96,7 @@ router.get("/:id/pipeline-history", hasPermission("PIPELINE", "canView"), getLea
 router.patch("/:id/stage", hasPermission("LEAD", "canEdit"), validateBody(updateLeadStageSchema), updateLeadStage);
 
 // ── Comments ──────────────────────────────────────────────────────────────────
-router.post("/:id/comments", hasPermission("LEAD", "canCreate"), validateBody(addCommentSchema), addLeadComment);
+router.post("/:id/comments", hasPermission("LEAD", "canEdit"), validateBody(addCommentSchema), addLeadComment);
 router.get( "/:id/comments", hasPermission("LEAD", "canView"),   getLeadComments);
 
 export default router;

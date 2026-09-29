@@ -56,7 +56,7 @@ export const companySettingsSchema = z.object({
 export const crmSettingsSchema = z.object({
   defaultLeadStatusId: z.number().int().positive().nullable().optional(),
   autoAssignmentEnabled: z.boolean().optional(),
-  defaultAssignmentAlgorithm: z.enum(["ROUND_ROBIN", "LOAD_BALANCED"]).optional(),
+  defaultAssignmentAlgorithm: z.enum(["ROUND_ROBIN", "LEAST_WORKLOAD", "LOAD_BALANCED", "PRIORITY_BASED"]).optional(),
   defaultPipelineId: z.number().int().positive().nullable().optional(),
   defaultOpportunityStageId: z.number().int().positive().nullable().optional(),
   defaultOpportunityWinProb: z.number().int().min(0).max(100).optional(),
