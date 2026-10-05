@@ -10,6 +10,52 @@ const buildTxAuditData = (data) => recordAuditLog(data);
 import { dispatchNotification } from '../notification/notification.dispatcher.js';
 
 /**
+ * Asserts that an actor has permission to mutate (move stage, edit, close, qualify) an opportunity.
+ * 
+ * Rules:
+ * 1. Super Admin (rank >= 100): full access across companies.
+ * 2. Company Admin (rank >= 61): full access within their company.
+ * 3. Branch Manager (rank 41..60): full access within their branch.
+ * 4. Rep tier (ISE, BDE, custom reps): can only mutate opportunities assigned to them (ownerId === actor.id).
+ *
+ * @param {object} actor - Authenticated user context
+ * @param {object} opportunity - Opportunity record with owner & company/branch info
+ * @param {string} actionVerb - Action descriptor (e.g. 'move', 'edit', 'close', 'qualify')
+ */
+export const assertCanMutateOpportunity = (actor, opportunity, actionVerb = 'manage') => {
+  const rank = actor.primaryRoleRank || 0;
+  const isSuperAdmin = rank >= 100 || actor.primaryRole === 'SUPER_ADMIN';
+  if (isSuperAdmin) return;
+
+  const isCompanyAdmin = rank >= 61 || actor.primaryRole === 'COMPANY_ADMIN';
+  if (isCompanyAdmin) {
+    if (opportunity.companyId && actor.companyId && opportunity.companyId !== actor.companyId) {
+      throw new ForbiddenError(`You can only ${actionVerb} opportunities within your company.`);
+    }
+    return;
+  }
+
+  const isBranchManager = (rank >= 41 && rank <= ROLE_RANKS.BRANCH_MANAGER) || actor.primaryRole === 'BRANCH_MANAGER';
+  if (isBranchManager) {
+    if (opportunity.branchId !== actor.branchId) {
+      throw new ForbiddenError(`Branch Managers can only ${actionVerb} opportunities within their branch.`);
+    }
+    return;
+  }
+
+  // Rep level (ISE, BDE, or custom sales roles)
+  if (opportunity.ownerId !== actor.id) {
+    const roleLabel = actor.primaryRole === 'ISE'
+      ? 'Inside Sales Executives'
+      : actor.primaryRole === 'BDE'
+      ? 'Business Development Executives'
+      : 'Sales representatives';
+    const ownerName = opportunity.owner?.name ? ` (currently assigned to ${opportunity.owner.name})` : '';
+    throw new ForbiddenError(`${roleLabel} can only ${actionVerb} opportunities assigned to them${ownerName}.`);
+  }
+};
+
+/**
  * Resolves the ownerId for a newly created opportunity based on actor role.
  *
  * - Non-ISE roles (BDE, BM, Admin, SuperAdmin): always own it themselves
@@ -256,12 +302,7 @@ export const updateOpportunity = async (actor, id, payload, req = null) => {
   }
 
   // HRBAC Access Guard
-  if (actor.primaryRoleRank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
-    throw new ForbiddenError('You can only edit opportunities assigned to you.');
-  }
-  if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
-    throw new ForbiddenError('You can only edit opportunities within your branch.');
-  }
+  assertCanMutateOpportunity(actor, opportunity, 'edit');
 
   return opportunityRepository.updateOpportunityTx(id, actor.companyId, payload, actor.id, req);
 };
@@ -280,12 +321,7 @@ export const closeOpportunity = async (actor, id, payload, req = null) => {
   }
 
   // HRBAC Guard
-  if (actor.primaryRoleRank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
-    throw new ForbiddenError('You can only close opportunities assigned to you.');
-  }
-  if (actor.primaryRoleRank >= 41 && actor.primaryRoleRank <= ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
-    throw new ForbiddenError('You can only close opportunities within your branch.');
-  }
+  assertCanMutateOpportunity(actor, opportunity, 'close');
 
   return opportunityRepository.closeOpportunityTx(id, actor.companyId, payload.outcome, actor.id, payload.remarks, payload.reasonId, req);
 };
@@ -747,7 +783,10 @@ export const moveOpportunityStage = async (actor, id, payload, req = null) => {
 
   const opportunity = await prisma.opportunity.findFirst({
     where: opportunityWhere,
-    include: { stage: true },
+    include: {
+      stage: true,
+      owner: { select: { id: true, name: true, email: true } },
+    },
   });
 
   if (!opportunity) {
@@ -757,13 +796,7 @@ export const moveOpportunityStage = async (actor, id, payload, req = null) => {
   const companyId = opportunity.companyId;
 
   // RBAC Permission Guard
-  const rank = actor.primaryRoleRank || 0;
-  if (rank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
-    throw new ForbiddenError('BDEs can only move their own opportunities.');
-  }
-  if (rank === ROLE_RANKS.BRANCH_MANAGER && opportunity.branchId !== actor.branchId) {
-    throw new ForbiddenError('Branch Managers can only move opportunities within their branch.');
-  }
+  assertCanMutateOpportunity(actor, opportunity, 'move');
 
   // 1. Opportunity must be OPEN
   if (opportunity.status !== 'OPEN') {
@@ -886,17 +919,7 @@ export const qualifyOpportunityService = async (opportunityId, data, actor, req 
   }
 
   // 2. HRBAC rank guards (mirrors updateOpportunity)
-  const rank = actor.primaryRoleRank || 0;
-  if (rank <= ROLE_RANKS.BDE && opportunity.ownerId !== actor.id) {
-    throw new ForbiddenError('You can only qualify opportunities assigned to you.');
-  }
-  if (
-    rank >= 41 &&
-    rank <= ROLE_RANKS.BRANCH_MANAGER &&
-    opportunity.branchId !== actor.branchId
-  ) {
-    throw new ForbiddenError('You can only qualify opportunities within your branch.');
-  }
+  assertCanMutateOpportunity(actor, opportunity, 'qualify');
 
   // 3. Load company qualification criteria & settings
   const companyId = opportunity.companyId;
