@@ -306,10 +306,10 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
     if (companyId && pipeline.companyId !== companyId) throw new ForbiddenError("Invalid pipeline scope");
     if (branchId  && pipeline.branchId  !== branchId)  throw new ForbiddenError("Invalid pipeline scope");
 
-    const stageId = await findProspectStageForPipeline(data.pipelineId);
+    const stageId = await findProspectStageForPipeline(data.pipelineId, txClient);
+    resolvedPipelineId = data.pipelineId;
     if (stageId) {
-      resolvedPipelineId = data.pipelineId;
-      resolvedStageId    = stageId;
+      resolvedStageId = stageId;
     }
   }
 
@@ -521,6 +521,7 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
 
 export const getLeadsService = async (query, actor) => {
   const { page, limit, skip } = parsePagination(query);
+  const viewMode = query?.viewMode || 'INDIVIDUAL';
 
   const allowedSortFields = ["name", "mobile", "priority", "createdAt", "updatedAt"];
   const orderBy = parseSorting(query, allowedSortFields, { createdAt: "desc" });
@@ -549,9 +550,11 @@ export const getLeadsService = async (query, actor) => {
       if (membership) activeTeamId = membership.teamId;
     }
 
-    const viewMode = query?.viewMode || 'INDIVIDUAL';
+    const isTeamLeader = Boolean(ledTeam);
     
-    if (viewMode === 'TEAM' && activeTeamId) {
+    // Only the Team Leader (BDE) gets the expanded team scope when viewMode === 'TEAM'.
+    // Regular team members (e.g. ISE) can ONLY view leads assigned to them or created by them.
+    if (viewMode === 'TEAM' && activeTeamId && isTeamLeader) {
       const teamMembers = await prisma.teamMember.findMany({
         where: { teamId: activeTeamId, removedAt: null },
         select: { userId: true }
@@ -579,7 +582,7 @@ export const getLeadsService = async (query, actor) => {
         { createdById: actor.id }
       ];
       
-      if (viewMode === 'TEAM' && activeTeamId) {
+      if (viewMode === 'TEAM' && activeTeamId && isTeamLeader) {
         orConditions.push({ teamId: activeTeamId });
       } else if (viewMode === 'INDIVIDUAL' && activeTeamId) {
         // If individual, we don't include unassigned team leads, so no action needed.
@@ -1274,7 +1277,7 @@ export const importLeadsFromExcelService = async (
     { key: "name",   aliases: ["lead name", "name"] },
     { key: "mobile", aliases: ["mobile number", "mobile", "phone number", "phone"] },
     { key: "source", aliases: ["lead source", "source"] },
-    { key: "course", aliases: ["interested course/product", "interested course", "course", "product", "interested for"] }
+    { key: "course", aliases: ["interested service", "service", "interested services", "services", "interested course/product", "interested course", "course", "product", "interested for"] }
   ];
 
   const OPTIONAL_HEADERS = [
@@ -1539,10 +1542,10 @@ export const importLeadsFromExcelService = async (
       }
     }
 
-    // ── 5. Validate Course under resolved company scope ──
+    // ── 5. Validate Course/Service under resolved company scope ──
     let matchedCourse = null;
     if (!courseStr) {
-      rowErrors.push("Interested Course/Product is required");
+      rowErrors.push("Interested Service is required");
       fieldsInError.push("course");
     } else if (rowCompanyId) {
       const normalizeCompare = (str) => String(str).toLowerCase().replace(/\s+/g, "");
@@ -1551,12 +1554,12 @@ export const importLeadsFromExcelService = async (
         (c) => normalizeCompare(c.name) === normalizedCourseStr || String(c.id) === courseStr
       );
       if (!matchedCourse) {
-        rowErrors.push("Course was not recognized as a valid course for this company.");
+        rowErrors.push("Service was not recognized as a valid service for this company.");
         fieldsInError.push("course");
         const closest = findClosestMatch(courseStr, courseNames);
         if (closest) suggestions.course = closest;
       } else if (matchedCourse.status !== "ACTIVE") {
-        rowErrors.push("Course exists but is currently inactive");
+        rowErrors.push("Service exists but is currently inactive");
         fieldsInError.push("course");
       }
     }
@@ -2423,8 +2426,27 @@ export const assignLeadsService = async (data, actor, req = null) => {
 
   // 1. Authorized role/permission check
   const hasAssignmentPerm = actor.permissions?.LEAD_ASSIGNMENT?.canCreate || actor.permissions?.LEAD_ASSIGNMENT?.canEdit;
-  if (!hasAssignmentPerm) {
+  let isTeamLeader = false;
+  if (teamId) {
+    const leaderTeam = await prisma.team.findFirst({
+      where: { id: Number(teamId), bdeId: actor.id, isDeleted: false, status: "ACTIVE" }
+    });
+    if (leaderTeam) isTeamLeader = true;
+  }
+
+  if (!hasAssignmentPerm && !isTeamLeader) {
     throw new ForbiddenError("You do not have permission to assign leads");
+  }
+
+  // If Team Leader assigning within their team, verify that all leads belong to this team
+  if (!hasAssignmentPerm && isTeamLeader) {
+    const numericLeadIds = (leadIds || []).map(Number);
+    const teamLeadsCount = await prisma.lead.count({
+      where: { id: { in: numericLeadIds }, teamId: Number(teamId), isDeleted: false }
+    });
+    if (teamLeadsCount !== numericLeadIds.length) {
+      throw new ForbiddenError("Team leaders can only assign leads belonging to their own team");
+    }
   }
 
   // 2. Validate assignee team if provided
@@ -2467,12 +2489,12 @@ export const assignLeadsService = async (data, actor, req = null) => {
       throw new ValidationError("Selected user is inactive");
     }
 
-    // Ensure target user has a BDE or ISE role
+    // Ensure target user has a BDE, ISE, or eligible team member role (rank <= 20)
     const hasSalesRole = targetUser.userRoles.some(
-      (ur) => ur.role.name === "BDE" || ur.role.name === "ISE"
+      (ur) => ur.role.name === "BDE" || ur.role.name === "ISE" || (ur.role.rank != null && ur.role.rank <= 20)
     );
     if (!hasSalesRole) {
-      throw new ValidationError("Selected user must hold a BDE or ISE role");
+      throw new ValidationError("Selected user must hold a BDE, ISE, or eligible sales role");
     }
 
     // Role Hierarchy & scoping check for user

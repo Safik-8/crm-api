@@ -42,7 +42,12 @@ export const calculateLiveAchievement = async (target) => {
   const leadScope = employeeId
     ? { assignedToId: employeeId }
     : teamId
-    ? { teamId }
+    ? {
+        OR: [
+          { teamId },
+          { assignedToId: { in: teamMemberIds.length > 0 ? teamMemberIds : [-1] } },
+        ],
+      }
     : branchId
     ? { branchId }
     : companyId
@@ -75,6 +80,7 @@ export const calculateLiveAchievement = async (target) => {
         const count = await prisma.lead.count({
           where: {
             ...leadScope,
+            isDeleted: false,
             createdAt: dateFilter,
           },
         });
@@ -88,7 +94,7 @@ export const calculateLiveAchievement = async (target) => {
           where: {
             ...dealScope,
             outcome: "WON",
-            createdAt: dateFilter,
+            closingDate: dateFilter,
           },
         });
         const dealRevenue = Number(dealAggregate._sum.finalAmount || 0);
@@ -100,6 +106,7 @@ export const calculateLiveAchievement = async (target) => {
           where: {
             ...oppScope,
             status: "WON",
+            isDeleted: false,
             createdAt: dateFilter,
           },
         });
@@ -110,6 +117,7 @@ export const calculateLiveAchievement = async (target) => {
         const count = await prisma.opportunity.count({
           where: {
             ...oppScope,
+            isDeleted: false,
             createdAt: dateFilter,
           },
         });
@@ -120,7 +128,12 @@ export const calculateLiveAchievement = async (target) => {
         const customerScope = employeeId
           ? { assignedOwnerId: employeeId }
           : teamId
-          ? { ownerTeamId: teamId }
+          ? {
+              OR: [
+                { ownerTeamId: teamId },
+                { assignedOwnerId: { in: teamMemberIds.length > 0 ? teamMemberIds : [-1] } },
+              ],
+            }
           : branchId
           ? { branchId }
           : companyId
@@ -130,6 +143,7 @@ export const calculateLiveAchievement = async (target) => {
         const count = await prisma.customer.count({
           where: {
             ...customerScope,
+            isDeleted: false,
             createdAt: dateFilter,
           },
         });
@@ -140,6 +154,7 @@ export const calculateLiveAchievement = async (target) => {
         const totalLeads = await prisma.lead.count({
           where: {
             ...leadScope,
+            isDeleted: false,
             createdAt: dateFilter,
           },
         });
@@ -149,7 +164,7 @@ export const calculateLiveAchievement = async (target) => {
           where: {
             ...dealScope,
             outcome: "WON",
-            createdAt: dateFilter,
+            closingDate: dateFilter,
           },
         });
         return Number(((wonDeals / totalLeads) * 100).toFixed(2));
@@ -292,6 +307,18 @@ export const getKpiDashboardData = async (user, queryTab = "my", filters = {}) =
   // Merge API-level filter parameters safely
   if (filters.kpiType && filters.kpiType !== "ALL") {
     whereClause.kpiType = filters.kpiType.toUpperCase();
+  }
+
+  if (filters.scopeType && filters.scopeType !== "ALL") {
+    const scopeUpper = filters.scopeType.toUpperCase();
+    if (scopeUpper === "TEAM") {
+      whereClause.teamId = { not: null };
+      whereClause.employeeId = null;
+    } else if (scopeUpper === "INDIVIDUAL") {
+      whereClause.employeeId = { not: null };
+    } else {
+      whereClause.scopeType = scopeUpper;
+    }
   }
 
   if (filters.teamId && filters.teamId !== "ALL" && (isBranchManager || isCompanyAdmin || isSuperAdmin || isTeamLeader)) {
@@ -597,8 +624,9 @@ export const createKpiTarget = async (user, data) => {
   const isBranchManager = isCompanyAdmin || actorRole === "BRANCH_MANAGER" || actorRank >= 41;
 
   // 1. Strict Scope Validation for Individual Employee Assignment
-  if (targetEmployeeId && !isSuperAdmin) {
-    const targetUser = await prisma.user.findUnique({
+  let targetUser = null;
+  if (targetEmployeeId) {
+    targetUser = await prisma.user.findUnique({
       where: { id: targetEmployeeId },
       include: {
         userRoles: {
@@ -612,36 +640,38 @@ export const createKpiTarget = async (user, data) => {
       throw new NotFoundError("Selected employee");
     }
 
-    const targetRoleName = targetUser.userRoles?.[0]?.role?.name || "";
-    const targetRank = targetUser.userRoles?.[0]?.role?.rank ?? 0;
+    if (!isSuperAdmin) {
+      const targetRoleName = targetUser.userRoles?.[0]?.role?.name || "";
+      const targetRank = targetUser.userRoles?.[0]?.role?.rank ?? 0;
 
-    // Multitenancy Company Boundary
-    if (user.companyId && targetUser.companyId !== user.companyId) {
-      throw new ForbiddenError("Unauthorized KPI assignment: Target employee is outside your company.");
-    }
+      // Multitenancy Company Boundary
+      if (user.companyId && targetUser.companyId !== user.companyId) {
+        throw new ForbiddenError("Unauthorized KPI assignment: Target employee is outside your company.");
+      }
 
-    if (!isCompanyAdmin) {
-      if (isBranchManager) {
-        // Branch Manager Scope
-        if (user.branchId && targetUser.branchId !== user.branchId) {
-          throw new ForbiddenError("Unauthorized KPI assignment: Target employee is outside your branch.");
-        }
-        if (targetRoleName === "SUPER_ADMIN" || targetRoleName === "COMPANY_ADMIN" || (actorRank > 0 && targetRank > actorRank)) {
-          throw new ForbiddenError("Unauthorized KPI assignment: You cannot assign targets to a user with higher rank than yourself.");
-        }
-      } else {
-        // Team Leader / BDE Scope: Must be a member of user's led teams or self
-        const ledTeamIds = await getUserLedTeamIds(user.id);
-        if (targetUser.id !== user.id) {
-          const isMember = await prisma.teamMember.findFirst({
-            where: {
-              userId: targetUser.id,
-              teamId: { in: ledTeamIds.length > 0 ? ledTeamIds : [-1] },
-              removedAt: null,
-            },
-          });
-          if (!isMember) {
-            throw new ForbiddenError("Unauthorized KPI assignment: Target employee is not in any team under your leadership.");
+      if (!isCompanyAdmin) {
+        if (isBranchManager) {
+          // Branch Manager Scope
+          if (user.branchId && targetUser.branchId !== user.branchId) {
+            throw new ForbiddenError("Unauthorized KPI assignment: Target employee is outside your branch.");
+          }
+          if (targetRoleName === "SUPER_ADMIN" || targetRoleName === "COMPANY_ADMIN" || (actorRank > 0 && targetRank > actorRank)) {
+            throw new ForbiddenError("Unauthorized KPI assignment: You cannot assign targets to a user with higher rank than yourself.");
+          }
+        } else {
+          // Team Leader / BDE Scope: Must be a member of user's led teams or self
+          const ledTeamIds = await getUserLedTeamIds(user.id);
+          if (targetUser.id !== user.id) {
+            const isMember = await prisma.teamMember.findFirst({
+              where: {
+                userId: targetUser.id,
+                teamId: { in: ledTeamIds.length > 0 ? ledTeamIds : [-1] },
+                removedAt: null,
+              },
+            });
+            if (!isMember) {
+              throw new ForbiddenError("Unauthorized KPI assignment: Target employee is not in any team under your leadership.");
+            }
           }
         }
       }
@@ -649,8 +679,9 @@ export const createKpiTarget = async (user, data) => {
   }
 
   // 2. Strict Scope Validation for Sales Team Assignment
-  if (targetTeamId && !isSuperAdmin) {
-    const targetTeam = await prisma.team.findUnique({
+  let targetTeam = null;
+  if (targetTeamId) {
+    targetTeam = await prisma.team.findUnique({
       where: { id: targetTeamId, isDeleted: false },
     });
 
@@ -658,39 +689,34 @@ export const createKpiTarget = async (user, data) => {
       throw new NotFoundError("Selected sales team");
     }
 
-    if (user.companyId && targetTeam.companyId !== user.companyId) {
-      throw new ForbiddenError("Unauthorized KPI assignment: Target team is outside your company.");
-    }
+    if (!isSuperAdmin) {
+      if (user.companyId && targetTeam.companyId !== user.companyId) {
+        throw new ForbiddenError("Unauthorized KPI assignment: Target team is outside your company.");
+      }
 
-    if (!isCompanyAdmin) {
-      if (isBranchManager) {
-        if (user.branchId && targetTeam.branchId !== user.branchId) {
-          throw new ForbiddenError("Unauthorized KPI assignment: Target team is outside your branch.");
-        }
-      } else {
-        // Team Leader Scope: Must be a team led by user
-        const ledTeamIds = await getUserLedTeamIds(user.id);
-        if (!ledTeamIds.includes(targetTeam.id)) {
-          throw new ForbiddenError("Unauthorized KPI assignment: You are not authorized to assign targets to this team.");
+      if (!isCompanyAdmin) {
+        if (isBranchManager) {
+          if (user.branchId && targetTeam.branchId !== user.branchId) {
+            throw new ForbiddenError("Unauthorized KPI assignment: Target team is outside your branch.");
+          }
+        } else {
+          // Team Leader Scope: Must be a team led by user
+          const ledTeamIds = await getUserLedTeamIds(user.id);
+          if (!ledTeamIds.includes(targetTeam.id)) {
+            throw new ForbiddenError("Unauthorized KPI assignment: You are not authorized to assign targets to this team.");
+          }
         }
       }
     }
   }
-  const targetCompanyId = user.companyId || 1;
+
+  const targetCompanyId = targetUser?.companyId || targetTeam?.companyId || user.companyId || 1;
   let targetBranchId = user.branchId || null;
   if (!targetBranchId) {
-    if (targetEmployeeId) {
-      const emp = await prisma.user.findUnique({
-        where: { id: targetEmployeeId },
-        select: { branchId: true },
-      });
-      if (emp?.branchId) targetBranchId = emp.branchId;
-    } else if (targetTeamId) {
-      const t = await prisma.team.findUnique({
-        where: { id: targetTeamId },
-        select: { branchId: true },
-      });
-      if (t?.branchId) targetBranchId = t.branchId;
+    if (targetUser?.branchId) {
+      targetBranchId = targetUser.branchId;
+    } else if (targetTeam?.branchId) {
+      targetBranchId = targetTeam.branchId;
     }
   }
   const parsedStartDate = new Date(startDate);
@@ -777,12 +803,6 @@ export const getKpiDetail = async (user, targetId) => {
   const isCompanyAdmin = primaryRole === "COMPANY_ADMIN" || (rank >= 61 && rank < 100);
   const isBranchManager = primaryRole === "BRANCH_MANAGER" || (rank >= 41 && rank <= 60);
 
-  // Req 9: ISE / Personal-tier users strictly blocked from detail drilldown (includes custom roles rank 1-19)
-  const isPersonalTier = primaryRole === "ISE" || (rank > 0 && rank <= 20 && !isSuperAdmin && !isCompanyAdmin && !isBranchManager);
-  if (isPersonalTier) {
-    throw new ForbiddenError("Individual-level role users are restricted from viewing KPI target details.");
-  }
-
   const target = await prisma.kpiTarget.findUnique({
     where: { id },
     include: {
@@ -805,6 +825,14 @@ export const getKpiDetail = async (user, targetId) => {
     throw new NotFoundError("KPI Target");
   }
 
+  const isAssignedToSelf = target.employeeId === user.id;
+
+  // Individual-level role users (ISE or rank <= 20) can inspect their own targets, but are restricted from viewing other users' or teams' targets
+  const isPersonalTier = primaryRole === "ISE" || (rank > 0 && rank <= 20 && !isSuperAdmin && !isCompanyAdmin && !isBranchManager);
+  if (isPersonalTier && !isAssignedToSelf) {
+    throw new ForbiddenError("Individual-level role users are restricted from viewing KPI target details of other users or teams.");
+  }
+
   // Req 9: Security Access Verification
   if (!isSuperAdmin) {
     if (user.companyId && target.companyId !== user.companyId) {
@@ -816,8 +844,6 @@ export const getKpiDetail = async (user, targetId) => {
     }
 
     if (!isCompanyAdmin && !isBranchManager) {
-      const isAssignedToSelf = target.employeeId === user.id;
-
       let isTeamMemberTarget = false;
       if (target.teamId) {
         const userTeamLeaderOf = await prisma.team.findFirst({

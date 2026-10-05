@@ -156,6 +156,58 @@ export const findLeadFormData = async (companyId, branchId, tx = prisma, maxRank
     branchId ? findBranchUsers(branchId, tx, maxRank) : Promise.resolve([])
   ]);
 
+  // If company has no courses, ensure default "Other" course exists and is included
+  if (companyId && (!courses || courses.length === 0)) {
+    try {
+      const company = await tx.company.findUnique({
+        where: { id: Number(companyId) },
+        select: { name: true, code: true }
+      });
+      if (company) {
+        const prefix = company.code || company.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "CRS";
+        const otherCode = `${prefix}-OTHER`.toUpperCase();
+
+        const existingCodeCourse = await tx.course.findFirst({
+          where: { companyId: Number(companyId), code: otherCode },
+          select: { id: true, name: true, isDeleted: true, status: true }
+        });
+
+        let otherCourse = null;
+        if (existingCodeCourse) {
+          otherCourse = await tx.course.update({
+            where: { id: existingCodeCourse.id },
+            data: { name: "Other", status: "ACTIVE", isDeleted: false },
+            select: { id: true, name: true }
+          });
+        } else {
+          const creator = await tx.user.findFirst({
+            where: { companyId: Number(companyId) },
+            select: { id: true }
+          }) || await tx.user.findFirst({ select: { id: true } });
+
+          if (creator) {
+            otherCourse = await tx.course.create({
+              data: {
+                companyId: Number(companyId),
+                name: "Other",
+                code: otherCode,
+                category: "General",
+                price: 0,
+                createdById: creator.id
+              },
+              select: { id: true, name: true }
+            });
+          }
+        }
+        if (otherCourse) {
+          courses.push(otherCourse);
+        }
+      }
+    } catch (err) {
+      // Non-blocking fallback
+    }
+  }
+
   return { sources, courses, statuses, users };
 };
 
@@ -341,19 +393,40 @@ export const findPipelineById = async (pipelineId, tx = prisma) => {
  * @param {object} tx
  */
 export const findProspectStageForPipeline = async (pipelineId, tx = prisma) => {
-  // GAP-9 FIX: Use stageType-based lookup instead of name — rename-safe
-  const prospectStage = await tx.stage.findFirst({
-    where: { stageType: "PROSPECT", isDeleted: false },
-    select: { id: true }
-  });
-  if (!prospectStage) return null;
+  if (!pipelineId) return null;
+  const pId = Number(pipelineId);
 
-  const mapping = await tx.pipelineStage.findUnique({
-    where: { pipelineId_stageId: { pipelineId, stageId: prospectStage.id } },
-    select: { id: true }
+  // 1. Find PROSPECT stage mapped to this specific pipeline
+  const prospectMapping = await tx.pipelineStage.findFirst({
+    where: {
+      pipelineId: pId,
+      stage: { isDeleted: false, stageType: "PROSPECT" }
+    },
+    select: { stageId: true }
+  });
+  if (prospectMapping) return prospectMapping.stageId;
+
+  // 2. Fallback to default stage mapped to this pipeline
+  const defaultMapping = await tx.pipelineStage.findFirst({
+    where: {
+      pipelineId: pId,
+      stage: { isDeleted: false, isDefault: true }
+    },
+    select: { stageId: true }
+  });
+  if (defaultMapping) return defaultMapping.stageId;
+
+  // 3. Fallback to the first ordered stage mapped to this pipeline
+  const firstStageMapping = await tx.pipelineStage.findFirst({
+    where: {
+      pipelineId: pId,
+      stage: { isDeleted: false }
+    },
+    orderBy: { orderNo: "asc" },
+    select: { stageId: true }
   });
 
-  return mapping ? prospectStage.id : null;
+  return firstStageMapping ? firstStageMapping.stageId : null;
 };
 
 /**

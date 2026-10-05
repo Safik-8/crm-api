@@ -56,27 +56,34 @@ export const createCourseService = async (data, actor) => {
   // Auto-generate course code: Prefix from company name (first 4 uppercase letters/numbers) + sequential count
   const prefix = company.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "CRS";
   
-  // Query highest current code using this prefix
-  const lastCourse = await prisma.course.findFirst({
+  // Query all existing codes for this company with this prefix (including soft-deleted records to prevent DB unique constraint collisions)
+  const existingCourses = await prisma.course.findMany({
     where: {
       companyId,
-      code: { startsWith: `${prefix}-` },
-      isDeleted: false
+      code: { startsWith: `${prefix}-` }
     },
-    orderBy: { code: "desc" },
     select: { code: true }
   });
 
-  let nextNumber = 1001;
-  if (lastCourse) {
-    const parts = lastCourse.code.split("-");
-    const lastNum = parseInt(parts[parts.length - 1]);
-    if (!isNaN(lastNum)) {
-      nextNumber = lastNum + 1;
+  let maxNum = 1000;
+  for (const c of existingCourses) {
+    const parts = (c.code || "").split("-");
+    const lastPart = parts[parts.length - 1];
+    const num = parseInt(lastPart, 10);
+    if (!isNaN(num) && num > maxNum) {
+      maxNum = num;
     }
   }
 
-  const generatedCode = `${prefix}-${nextNumber}`;
+  let nextNumber = maxNum + 1;
+  let generatedCode = `${prefix}-${nextNumber}`;
+
+  // Extra loop failsafe to guarantee no collision with any soft-deleted or existing code
+  while (await prisma.course.findFirst({ where: { companyId, code: generatedCode }, select: { id: true } })) {
+    nextNumber++;
+    generatedCode = `${prefix}-${nextNumber}`;
+  }
+
   data.code = generatedCode;
 
   // 3. Double-check code duplicate (failsafe check)
