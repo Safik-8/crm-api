@@ -111,8 +111,8 @@ export function applyRoleScopingGuard(actor, queryFilters) {
     }
   }
 
-  // 3. BDE & Team Pod Scoping: Enforced for BDE tier (Rank <= 40)
-  if (actor.primaryRole === 'BDE' || (roleRank >= 21 && roleRank <= ROLE_RANKS.BDE)) {
+  // 3. Sales Contributor Scoping: Enforced for BDE, ISE, and all sales rep roles (Rank <= 40)
+  if (roleRank <= ROLE_RANKS.BDE || actor.primaryRole === 'BDE' || actor.primaryRole === 'ISE') {
     scopedFilters.closedById = actor.id;
   }
 

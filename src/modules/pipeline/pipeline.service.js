@@ -367,7 +367,8 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     const searchConditions = [
       { name: { contains: options.search, mode: "insensitive" } },
       { mobile: { contains: options.search, mode: "insensitive" } },
-      { interestedFor: { contains: options.search, mode: "insensitive" } }
+      { interestedFor: { contains: options.search, mode: "insensitive" } },
+      { leadNumber: { contains: options.search, mode: "insensitive" } }
     ];
 
     if (leadWhere.OR) {
@@ -422,7 +423,12 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     leads: leadsByStageId.get(stage.id) || []
   }))
 
-  const assignableUsers = await fetchBranchUsers(pipeline.branchId)
+  let assignableUsers = await fetchBranchUsers(pipeline.branchId)
+  if (actor && actor.primaryRoleRank < 60) {
+    const subordinates = await getSubordinateIds(actor.id, actor.companyId);
+    const allowedIds = new Set([actor.id, ...subordinates]);
+    assignableUsers = assignableUsers.filter(u => allowedIds.has(u.id));
+  }
 
   return {
     id: pipeline.id,

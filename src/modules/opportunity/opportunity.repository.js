@@ -252,7 +252,21 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
  */
 export const createOpportunityTx = async (companyId, branchId, data, ownerId, createdById, req = null) => {
   return prisma.$transaction(async (tx) => {
-    // 0. Resolve target OpportunityStage and default probability from payload or SystemSettings
+    // 0a. Concurrency guard: ensure lead has not been converted in a parallel transaction
+    if (data.leadId) {
+      const existingLead = await tx.lead.findUnique({
+        where: { id: Number(data.leadId) },
+        select: { id: true, qualificationStatus: true, isDeleted: true }
+      });
+      if (!existingLead || existingLead.isDeleted) {
+        throw new NotFoundError('Lead');
+      }
+      if (existingLead.qualificationStatus === 'CONVERTED') {
+        throw new ValidationError('This lead has already been converted to an opportunity.');
+      }
+    }
+
+    // 0b. Resolve target OpportunityStage and default probability from payload or SystemSettings
     let stageId = data.stageId ? Number(data.stageId) : null;
     let targetStage = null;
     let sysSettings = null;
@@ -313,6 +327,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         probabilityPercentage: probability,
         closingDate: new Date(data.closingDate),
         notes: data.notes || null,
+        linkedinUrl: data.linkedinUrl || null,
         createdById: createdById,
         status: 'OPEN',
       },
@@ -320,7 +335,19 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         stage: true,
         product: true,
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            email: true,
+            qualificationScore: true,
+            linkedinUrl: true,
+            pipelineId: true,
+            pipeline: { select: { id: true, name: true } },
+          },
+        },
       },
     });
 
@@ -336,7 +363,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
       },
     });
 
-    // 2c. Update Lead qualificationStatus to CONVERTED
+    // 2c. Update Lead qualificationStatus to CONVERTED and stage to CLOSURE
     if (data.leadId) {
       // Find the CLOSED or CONVERTED status ID
       const closedStatus = await tx.leadStatus.findFirst({
@@ -351,14 +378,53 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         },
       });
 
-      await tx.lead.update({
+      const leadRecord = await tx.lead.findUnique({
         where: { id: Number(data.leadId) },
-        data: {
-          qualificationStatus: 'CONVERTED',
-          ...(closedStatus ? { statusId: closedStatus.id } : {}),
-        },
+        select: { id: true, stageId: true, pipelineId: true, companyId: true, branchId: true },
       });
 
+      let targetClosureStageId = data.leadStageId ? Number(data.leadStageId) : null;
+      if (!targetClosureStageId && leadRecord?.pipelineId) {
+        const ps = await tx.pipelineStage.findFirst({
+          where: {
+            pipelineId: leadRecord.pipelineId,
+            stage: { stageType: 'CLOSURE' },
+          },
+          select: { stageId: true },
+        });
+        if (ps) targetClosureStageId = ps.stageId;
+      }
+
+      const updateData = {
+        qualificationStatus: 'CONVERTED',
+        ...(closedStatus ? { statusId: closedStatus.id } : {}),
+      };
+
+      if (targetClosureStageId) {
+        updateData.stageId = targetClosureStageId;
+        updateData.previousStageId = leadRecord?.stageId || null;
+        updateData.stageChangedById = createdById;
+        updateData.stageChangedAt = new Date();
+
+        if (leadRecord?.companyId) {
+          await tx.pipelineHistory.create({
+            data: {
+              leadId: Number(data.leadId),
+              companyId: leadRecord.companyId || companyId,
+              branchId: leadRecord.branchId || branchId || null,
+              previousStageId: leadRecord.stageId || null,
+              newStageId: targetClosureStageId,
+              changedById: createdById,
+              reason: 'Moved to Closure & Converted to Opportunity',
+            },
+          });
+        }
+      }
+
+      await tx.lead.update({
+        where: { id: Number(data.leadId) },
+        data: updateData,
+      });
     }
 
     // 3. Create Activity Log on the Lead
@@ -451,7 +517,7 @@ export const updateOpportunityTx = async (id, companyId, data, updatedById, req 
         stage: true,
         product: true,
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true } },
+        lead: { select: { id: true, name: true, mobile: true, email: true, linkedinUrl: true } },
         proposals: {
           where: { isDeleted: false },
           orderBy: { createdAt: 'desc' },
@@ -548,7 +614,18 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
         stage: true,
         product: true,
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            email: true,
+            qualificationScore: true,
+            pipelineId: true,
+            pipeline: { select: { id: true, name: true } },
+          },
+        },
       },
     });
 
@@ -606,7 +683,20 @@ export const findOpportunityById = async (id, companyId) => {
       stage: true,
       product: { select: { id: true, name: true, code: true } },
       owner: { select: { id: true, name: true, email: true } },
-      lead: { select: { id: true, name: true, mobile: true, email: true } },
+      createdBy: { select: { id: true, name: true, email: true } },
+      updatedBy: { select: { id: true, name: true, email: true } },
+      lead: {
+        select: {
+          id: true,
+          name: true,
+          mobile: true,
+          email: true,
+          qualificationScore: true,
+          linkedinUrl: true,
+          pipelineId: true,
+          pipeline: { select: { id: true, name: true } },
+        },
+      },
       proposals: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
@@ -648,7 +738,18 @@ export const findOpportunitiesList = async ({ where, skip = 0, take = 10, orderB
         stage: true,
         product: { select: { id: true, name: true, code: true } },
         owner: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            email: true,
+            qualificationScore: true,
+            pipelineId: true,
+            pipeline: { select: { id: true, name: true } },
+          },
+        },
       },
     }),
   ]);

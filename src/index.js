@@ -1,7 +1,7 @@
 // src/index.js
 
 import http from "http"
-import express from "express" // Trigger nodemon restart
+import express from "express" // Reload Prisma client with linkedinUrl
 import dotenv from "dotenv"
 import cors from "cors"
 import helmet from "helmet"
@@ -45,6 +45,7 @@ import kpiRoutes from "./modules/kpi/kpi.routes.js"
 import dashboardRoutes from "./modules/dashboard/dashboard.routes.js"
 import auditLogRoutes from "./modules/auditLog/auditLog.routes.js"
 import settingsRoutes from "./modules/settings/settings.routes.js"
+import feedbackRoutes from "./modules/feedback/feedback.routes.js"
 import { startReminderJob } from "./jobs/reminderJob.js"
 
 // ── LOAD ENV ──────────────────────────────────────────────
@@ -139,6 +140,7 @@ app.use("/api/kpi", kpiRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/v1/settings", settingsRoutes);
+app.use("/api/feedback", feedbackRoutes);
 
 // ══════════════════════════════════════════════════════════
 // 404 + GLOBAL ERROR HANDLER

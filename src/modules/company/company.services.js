@@ -237,10 +237,10 @@ export const getCompaniesWithPaginationService = async (query, actor) => {
   const orderBy = sort === "oldest"
     ? { createdAt: "asc" }
     : sort === "name_asc"
-    ? { name: "asc" }
-    : sort === "name_desc"
-    ? { name: "desc" }
-    : { createdAt: "desc" } // default newest
+      ? { name: "asc" }
+      : sort === "name_desc"
+        ? { name: "desc" }
+        : { createdAt: "desc" } // default newest
 
   // 3. Compute offset pagination bounds
   const parsedPage = Math.max(1, Number(page))

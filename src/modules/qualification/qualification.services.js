@@ -26,12 +26,13 @@ export const evaluateLeadService = async (leadId, data, actor) => {
 
   const actorRank = actor.primaryRoleRank || 0;
 
-  if (actorRank === 40) {
-    // BDE
+  if (actorRank <= 40) {
+    // Sales rep / BDE / ISE
     if (lead.assignedToId !== actor.id) {
-      throw new AppError('BDEs can only qualify their own assigned leads', 403);
+      const roleName = actor.primaryRole === 'ISE' ? 'Inside Sales Executives' : actor.primaryRole === 'BDE' ? 'Business Development Executives' : 'Sales representatives';
+      throw new AppError(`${roleName} can only qualify their own assigned leads`, 403);
     }
-  } else if (actorRank === 60) {
+  } else if (actorRank <= 60) {
     // Branch Manager
     if (lead.branchId !== actor.branchId) {
       throw new AppError('Branch Managers can only qualify leads in their branch', 403);

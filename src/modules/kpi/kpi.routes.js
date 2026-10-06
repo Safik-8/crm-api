@@ -19,13 +19,13 @@ router.get("/analytics", hasPermission("KPI", "canView"), kpiController.getKpiDa
 router.get("/targets/:id", hasPermission("KPI", "canView"), kpiController.getKpiDetail);
 
 // Create KPI Target (requires manage/create permissions)
-router.post("/targets", hasPermission("KPI", "canManage"), kpiController.createKpiTarget);
+router.post("/targets", hasPermission("KPI", "canCreate"), kpiController.createKpiTarget);
 
 // Update KPI Target
-router.put("/targets/:id", hasPermission("KPI", "canManage"), kpiController.updateKpiTarget);
+router.put("/targets/:id", hasPermission("KPI", "canEdit"), kpiController.updateKpiTarget);
 
 // Soft Delete KPI Target
-router.delete("/targets/:id", hasPermission("KPI", "canManage"), kpiController.deleteKpiTarget);
+router.delete("/targets/:id", hasPermission("KPI", "canDelete"), kpiController.deleteKpiTarget);
 
 // Export KPI Report Data
 router.get("/export", hasPermission("KPI", "canView"), kpiController.exportKpiData);

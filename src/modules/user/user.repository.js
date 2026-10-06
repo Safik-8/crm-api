@@ -322,7 +322,7 @@ export const createAuditLog = async (data, tx = prisma, req = null) => {
  * and company scope (global system roles + actor's own company roles).
  */
 export const findAssignableRoles = async (actorRank, companyId) => {
-  return prisma.role.findMany({
+  const roles = await prisma.role.findMany({
     where: {
       status: "ACTIVE",
       rank: { lt: actorRank },
@@ -331,9 +331,23 @@ export const findAssignableRoles = async (actorRank, companyId) => {
         { companyId: null }
       ]
     },
-    orderBy: { rank: "desc" },
-    select: { id: true, name: true, rank: true, isSystem: true, status: true }
+    orderBy: [
+      { rank: "desc" },
+      { companyId: "desc" }
+    ],
+    select: { id: true, name: true, rank: true, isSystem: true, status: true, companyId: true }
   })
+
+  // Deduplicate by name: company-specific role overrides global template role
+  const seenNames = new Set()
+  const uniqueRoles = []
+  for (const r of roles) {
+    if (!seenNames.has(r.name)) {
+      seenNames.add(r.name)
+      uniqueRoles.push(r)
+    }
+  }
+  return uniqueRoles
 }
 
 /**
@@ -397,22 +411,41 @@ export const deleteUserTransaction = async (targetUserId, replacementUserId, act
   return prisma.$transaction(async (tx) => {
     let leadsReassignedCount = 0
     let subordinatesReassignedCount = 0
+    const fallbackUserId = replacementUserId ? Number(replacementUserId) : actorId
 
-    // 1. Reassign Leads if replacementUserId is provided
+    // 1. Reassign or unassign active leads
     if (replacementUserId) {
-      const leadUpdate = await tx.lead.updateMany({
-        where: { assignedToId: replacementUserId ? Number(replacementUserId) : null },
-        data: { assignedToId: Number(replacementUserId) }
-      })
-      // Correct query filter
       const actualLeadUpdate = await tx.lead.updateMany({
         where: { assignedToId: targetUserId },
         data: { assignedToId: Number(replacementUserId) }
       })
       leadsReassignedCount = actualLeadUpdate.count
+    } else {
+      await tx.lead.updateMany({
+        where: { assignedToId: targetUserId },
+        data: { assignedToId: null }
+      })
     }
 
-    // 2. Reassign Direct Reports (Subordinates) if replacementUserId is provided
+    // Lead authorship / audit foreign keys
+    await tx.lead.updateMany({
+      where: { createdById: targetUserId },
+      data: { createdById: fallbackUserId }
+    })
+    await tx.lead.updateMany({
+      where: { updatedById: targetUserId },
+      data: { updatedById: null }
+    })
+    await tx.lead.updateMany({
+      where: { deletedById: targetUserId },
+      data: { deletedById: null }
+    })
+    await tx.lead.updateMany({
+      where: { stageChangedById: targetUserId },
+      data: { stageChangedById: null }
+    })
+
+    // 2. Reassign or unlink direct reports (subordinates)
     if (replacementUserId) {
       const subUpdate = await tx.user.updateMany({
         where: { reportingManagerId: targetUserId },
@@ -420,25 +453,167 @@ export const deleteUserTransaction = async (targetUserId, replacementUserId, act
       })
       subordinatesReassignedCount = subUpdate.count
     } else {
-      // Unlink manager if no replacement provided
       await tx.user.updateMany({
         where: { reportingManagerId: targetUserId },
         data: { reportingManagerId: null }
       })
     }
 
-    // 3. Remove team memberships
+    // 3. Teams & Team Memberships
     await tx.teamMember.deleteMany({
       where: { userId: targetUserId }
     })
+    await tx.teamMember.updateMany({
+      where: { assignedById: targetUserId },
+      data: { assignedById: null }
+    })
+    await tx.team.updateMany({
+      where: { bdeId: targetUserId },
+      data: { bdeId: fallbackUserId }
+    })
+    await tx.team.updateMany({
+      where: { createdById: targetUserId },
+      data: { createdById: fallbackUserId }
+    })
+    await tx.team.updateMany({
+      where: { updatedById: targetUserId },
+      data: { updatedById: null }
+    })
 
-    // 4. Remove User relations
+    // 4. Notifications & Communications
+    await tx.notification.deleteMany({ where: { userId: targetUserId } })
+    await tx.notification.updateMany({ where: { senderId: targetUserId }, data: { senderId: null } })
+
+    // 5. Auth, Tokens, Sessions & Security logs
     await tx.refreshToken.deleteMany({ where: { userId: targetUserId } })
+    await tx.passwordReset.deleteMany({ where: { userId: targetUserId } })
+    await tx.passwordHistory.deleteMany({ where: { userId: targetUserId } })
+    await tx.loginAttemptLog.updateMany({ where: { userId: targetUserId }, data: { userId: null } })
+
+    // 6. User Roles & Profiles
     await tx.userRole.deleteMany({ where: { userId: targetUserId } })
+    await tx.userRole.updateMany({ where: { assignedBy: targetUserId }, data: { assignedBy: null } })
     await tx.userProfile.deleteMany({ where: { userId: targetUserId } })
     await tx.userSettings.deleteMany({ where: { userId: targetUserId } })
 
-    // 5. Hard delete User record
+    // 7. Followups & Lead Activities/Notes/Comments/Assignments
+    await tx.followup.updateMany({
+      where: { assignedToId: targetUserId },
+      data: { assignedToId: fallbackUserId }
+    })
+    await tx.followup.updateMany({
+      where: { createdById: targetUserId },
+      data: { createdById: fallbackUserId }
+    })
+    await tx.followup.updateMany({
+      where: { completedById: targetUserId },
+      data: { completedById: null }
+    })
+    await tx.followup.updateMany({
+      where: { updatedById: targetUserId },
+      data: { updatedById: null }
+    })
+
+    await tx.leadComment.deleteMany({ where: { userId: targetUserId } })
+    await tx.leadNote.updateMany({
+      where: { createdById: targetUserId },
+      data: { createdById: fallbackUserId }
+    })
+    await tx.leadNote.updateMany({
+      where: { updatedById: targetUserId },
+      data: { updatedById: null }
+    })
+    await tx.leadImportLog.updateMany({
+      where: { createdById: targetUserId },
+      data: { createdById: fallbackUserId }
+    })
+    await tx.leadAssignment.updateMany({
+      where: { assignedToUserId: targetUserId },
+      data: { assignedToUserId: replacementUserId ? Number(replacementUserId) : null }
+    })
+    await tx.leadAssignment.updateMany({
+      where: { previousUserId: targetUserId },
+      data: { previousUserId: null }
+    })
+    await tx.leadAssignment.updateMany({
+      where: { assignedById: targetUserId },
+      data: { assignedById: fallbackUserId }
+    })
+    await tx.pipelineHistory.updateMany({
+      where: { changedById: targetUserId },
+      data: { changedById: fallbackUserId }
+    })
+    await tx.leadActivity.updateMany({
+      where: { performedById: targetUserId },
+      data: { performedById: null }
+    })
+    await tx.communicationLog.updateMany({
+      where: { createdById: targetUserId },
+      data: { createdById: fallbackUserId }
+    })
+    await tx.communicationLog.updateMany({
+      where: { deletedById: targetUserId },
+      data: { deletedById: null }
+    })
+    await tx.dailyBranchReport.updateMany({
+      where: { createdById: targetUserId },
+      data: { createdById: fallbackUserId }
+    })
+
+    // 8. Audits & Feedback
+    await tx.auditLog.updateMany({
+      where: { performedById: targetUserId },
+      data: { performedById: null }
+    })
+    await tx.feedback.deleteMany({ where: { userId: targetUserId } })
+
+    // 9. Qualifications, Opportunities, Proposals, Deals & Customers
+    await tx.leadQualification.updateMany({ where: { evaluatedById: targetUserId }, data: { evaluatedById: null } })
+    await tx.leadQualificationHistory.updateMany({ where: { changedById: targetUserId }, data: { changedById: fallbackUserId } })
+
+    await tx.opportunity.updateMany({ where: { ownerId: targetUserId }, data: { ownerId: fallbackUserId } })
+    await tx.opportunity.updateMany({ where: { createdById: targetUserId }, data: { createdById: fallbackUserId } })
+    await tx.opportunity.updateMany({ where: { updatedById: targetUserId }, data: { updatedById: null } })
+    await tx.opportunityStageHistory.updateMany({ where: { changedById: targetUserId }, data: { changedById: fallbackUserId } })
+
+    await tx.proposal.updateMany({ where: { createdById: targetUserId }, data: { createdById: fallbackUserId } })
+    await tx.proposal.updateMany({ where: { updatedById: targetUserId }, data: { updatedById: null } })
+    await tx.proposal.updateMany({ where: { deletedById: targetUserId }, data: { deletedById: null } })
+    await tx.proposalVersion.updateMany({ where: { modifiedById: targetUserId }, data: { modifiedById: fallbackUserId } })
+
+    await tx.deal.updateMany({ where: { closedById: targetUserId }, data: { closedById: fallbackUserId } })
+    await tx.deal.updateMany({ where: { createdById: targetUserId }, data: { createdById: fallbackUserId } })
+    await tx.deal.updateMany({ where: { updatedById: targetUserId }, data: { updatedById: null } })
+    await tx.dealHistory.updateMany({ where: { createdById: targetUserId }, data: { createdById: fallbackUserId } })
+
+    await tx.customer.updateMany({ where: { assignedOwnerId: targetUserId }, data: { assignedOwnerId: fallbackUserId } })
+    await tx.customer.updateMany({ where: { createdById: targetUserId }, data: { createdById: fallbackUserId } })
+    await tx.customer.updateMany({ where: { updatedById: targetUserId }, data: { updatedById: null } })
+    await tx.customer.updateMany({ where: { deletedById: targetUserId }, data: { deletedById: null } })
+
+    // 10. Reports, KPIs, System Settings & Courses
+    await tx.userFavoriteReport.deleteMany({ where: { userId: targetUserId } })
+    await tx.reportViewLog.deleteMany({ where: { userId: targetUserId } })
+    await tx.reportFilter.deleteMany({ where: { userId: targetUserId } })
+    await tx.userDashboardConfig.deleteMany({ where: { userId: targetUserId } })
+    await tx.exportLog.deleteMany({ where: { exportedById: targetUserId } })
+    await tx.kpiTarget.deleteMany({ where: { employeeId: targetUserId } })
+    await tx.kpiTarget.updateMany({ where: { createdById: targetUserId }, data: { createdById: fallbackUserId } })
+    await tx.kpiTarget.updateMany({ where: { updatedById: targetUserId }, data: { updatedById: null } })
+
+    await tx.course.updateMany({ where: { createdById: targetUserId }, data: { createdById: fallbackUserId } })
+    await tx.course.updateMany({ where: { updatedById: targetUserId }, data: { updatedById: null } })
+    await tx.role.updateMany({ where: { createdBy: targetUserId }, data: { createdBy: null } })
+    await tx.opportunityStage.updateMany({ where: { createdById: targetUserId }, data: { createdById: null } })
+    await tx.opportunityStage.updateMany({ where: { updatedById: targetUserId }, data: { updatedById: null } })
+    await tx.winLossReason.updateMany({ where: { createdById: targetUserId }, data: { createdById: null } })
+    await tx.revenueLog.updateMany({ where: { createdById: targetUserId }, data: { createdById: fallbackUserId } })
+    await tx.report.updateMany({ where: { createdById: targetUserId }, data: { createdById: null } })
+    await tx.report.updateMany({ where: { updatedById: targetUserId }, data: { updatedById: null } })
+    await tx.backupLog.updateMany({ where: { triggeredById: targetUserId }, data: { triggeredById: null } })
+    await tx.restoreLog.updateMany({ where: { restoredById: targetUserId }, data: { restoredById: fallbackUserId } })
+
+    // 11. Hard delete User record cleanly
     const deletedUser = await tx.user.delete({
       where: { id: targetUserId }
     })
@@ -449,6 +624,6 @@ export const deleteUserTransaction = async (targetUserId, replacementUserId, act
       subordinatesReassignedCount
     }
   }, {
-    timeout: 15000
+    timeout: 20000
   })
 }

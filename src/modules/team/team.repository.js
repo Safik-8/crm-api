@@ -172,7 +172,12 @@ export const findTeamById = async (id) => {
               name: true,
               email: true,
               employeeId: true,
-              status: true
+              status: true,
+              userRoles: {
+                include: {
+                  role: { select: { name: true, rank: true, isSystem: true } }
+                }
+              }
             }
           }
         }
@@ -270,8 +275,20 @@ export const softDeleteTeamAndLog = async (teamId, companyId, actorId, req = nul
       data: {
         name: archivedName,
         code: archivedCode,
+        status: "INACTIVE",
         isDeleted: true,
         updatedById: actorId
+      }
+    });
+
+    // End active memberships for all team members
+    await tx.teamMember.updateMany({
+      where: {
+        teamId,
+        removedAt: null
+      },
+      data: {
+        removedAt: new Date()
       }
     });
 
@@ -341,15 +358,20 @@ export const countTeams = async (where) => {
 };
 
 /**
- * Updates team ISE members atomically.
+ * Updates team members atomically.
  */
 export const updateTeamMembersTransaction = async (teamId, companyId, newIseIds, actorId, req = null) => {
   return prisma.$transaction(async (tx) => {
-    // 1. Get currently active ISE members
+    // 1. Get currently active non-leader members
+    const team = await tx.team.findUnique({
+      where: { id: teamId },
+      select: { bdeId: true }
+    });
+
     const activeMembers = await tx.teamMember.findMany({
       where: {
         teamId,
-        memberRole: "ISE",
+        userId: { not: team?.bdeId },
         removedAt: null
       }
     });
@@ -423,7 +445,7 @@ export const updateTeamMembersTransaction = async (teamId, companyId, newIseIds,
 };
 
 /**
- * Removes a member (ISE) from a team atomically: marks the membership record ended (sets removedAt to current time)
+ * Removes a member from a team atomically: marks the membership record ended (sets removedAt to current time)
  * and creates an audit log entry.
  */
 export const removeTeamMemberTransaction = async (teamId, companyId, userId, actorId, req = null) => {
@@ -433,7 +455,6 @@ export const removeTeamMemberTransaction = async (teamId, companyId, userId, act
       where: {
         teamId,
         userId,
-        memberRole: "ISE",
         removedAt: null
       }
     });

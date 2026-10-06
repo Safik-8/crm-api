@@ -58,11 +58,30 @@ export const getRolesService = async (query, actor) => {
       where = {
         companyId: companyIdFilter
       }
+    } else {
+      // SUPER_ADMIN must select a specific company to view roles; otherwise return empty list
+      return {
+        roles: [],
+        pagination: {
+          total: 0,
+          page: parseInt(page, 10) || 1,
+          limit: take,
+          totalPages: 1
+        }
+      }
     }
   }
 
   if (status) {
     where.status = status
+  }
+
+  if (query.type) {
+    const t = String(query.type).toLowerCase()
+    if (t === 'system') where.isSystem = true
+    else if (t === 'custom') where.isSystem = false
+  } else if (query.isSystem !== undefined && query.isSystem !== '') {
+    where.isSystem = query.isSystem === 'true' || query.isSystem === true
   }
 
   if (search) {
