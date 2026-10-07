@@ -12,6 +12,28 @@ import {
 } from "../utils/AppError.js"
 import prisma from "../config/db.js"
 
+const COMPANY_AUTH_SELECT = {
+  id: true,
+  name: true,
+  code: true,
+  logo: true,
+  industry: true,
+  website: true,
+  address: true,
+  status: true,
+  settings: {
+    select: {
+      primaryColor: true,
+      secondaryColor: true,
+      accentColor: true,
+      themeMode: true,
+      companyLogo: true,
+      faviconUrl: true,
+      loginBackgroundUrl: true,
+    }
+  }
+}
+
 export const authenticate = async (req, res, next) => {
   try {
     // Extract token from Authorization header
@@ -38,7 +60,7 @@ export const authenticate = async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where  : { id: payload.userId },
       include: {
-        company: { select: { id: true, name: true, code: true, logo: true, industry: true, website: true, address: true, status: true } },
+        company: { select: COMPANY_AUTH_SELECT },
         userRoles: {
           include: {
             role: {
@@ -127,6 +149,7 @@ export const authenticate = async (req, res, next) => {
       companyId       : user.companyId,
       branchId        : user.branchId,
       company         : user.company,
+      companySettings : user.company?.settings ?? null,
       primaryRole     : primaryUserRole.role.name,        // ← role name used in all logic checks
       primaryRoleRank : primaryUserRole.role.rank ?? 0,   // ← authority level for rank comparisons
       allRoles        : user.userRoles.map(ur => ({
