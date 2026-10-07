@@ -358,6 +358,7 @@ ALTER TABLE "login_attempt_logs" ADD CONSTRAINT "login_attempt_logs_company_id_f
 ALTER TABLE "login_attempt_logs" ADD CONSTRAINT "login_attempt_logs_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "audit_logs" ADD COLUMN IF NOT EXISTS "branch_id" INTEGER;
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -367,6 +368,7 @@ ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_lead_id_fkey" FO
 ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "lead_assignments" ADD COLUMN IF NOT EXISTS "branch_id" INTEGER;
 ALTER TABLE "lead_assignments" ADD CONSTRAINT "lead_assignments_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -391,6 +393,7 @@ ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_lead_id_fkey
 ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "pipeline_histories" ADD COLUMN IF NOT EXISTS "branch_id" INTEGER;
 ALTER TABLE "pipeline_histories" ADD CONSTRAINT "pipeline_histories_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -409,6 +412,7 @@ ALTER TABLE "followups" ADD CONSTRAINT "followups_lead_id_fkey" FOREIGN KEY ("le
 ALTER TABLE "followups" ADD CONSTRAINT "followups_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "followups" ADD COLUMN IF NOT EXISTS "branch_id" INTEGER;
 ALTER TABLE "followups" ADD CONSTRAINT "followups_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -497,6 +501,7 @@ ALTER TABLE "report_view_logs" ADD CONSTRAINT "report_view_logs_report_id_fkey" 
 ALTER TABLE "report_filters" ADD CONSTRAINT "report_filters_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "report_filters" ADD COLUMN IF NOT EXISTS "branch_id" INTEGER;
 ALTER TABLE "report_filters" ADD CONSTRAINT "report_filters_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -518,6 +523,7 @@ ALTER TABLE "user_dashboard_configs" ADD CONSTRAINT "user_dashboard_configs_comp
 ALTER TABLE "kpi_targets" ADD CONSTRAINT "kpi_targets_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "kpi_targets" ADD COLUMN IF NOT EXISTS "branch_id" INTEGER;
 ALTER TABLE "kpi_targets" ADD CONSTRAINT "kpi_targets_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -542,6 +548,7 @@ ALTER TABLE "kpi_achievement_logs" ADD CONSTRAINT "kpi_achievement_logs_company_
 ALTER TABLE "export_logs" ADD CONSTRAINT "export_logs_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "export_logs" ADD COLUMN IF NOT EXISTS "branch_id" INTEGER;
 ALTER TABLE "export_logs" ADD CONSTRAINT "export_logs_branch_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "branches"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
