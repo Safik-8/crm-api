@@ -19,33 +19,29 @@ This guide provides the complete end-to-end instructions to build, push, deploy,
 
 ## 2. Build & Push Docker Images (From Local / CI)
 
-### Step 2.1: Log in to GitHub Container Registry (GHCR)
+### Step 2.1: Log in to Docker Hub
 Run this once on your machine:
 
 ```bash
-# Create a GitHub Personal Access Token (classic) with 'write:packages' scope
-echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+docker login -u safik8
 ```
 
 ### Step 2.2: Build and Tag Docker Images
 
-> [!IMPORTANT]
-> Docker repository names in GHCR **must be lowercase** (e.g. `ghcr.io/safik-8/...`).
-
 ```bash
 # 1. Build API image (from repository root)
-docker build -t ghcr.io/safik-8/crm-api:latest -f ./crm-api/Dockerfile ./crm-api
+docker build -t safik8/crm:api -f ./crm-api/Dockerfile ./crm-api
 
 # 2. Build Frontend Web image (from repository root)
-docker build -t ghcr.io/safik-8/crm-web:latest -f ./crm-web/Dockerfile ./crm-web
+docker build -t safik8/crm:web -f ./crm-web/Dockerfile ./crm-web
 ```
 
-### Step 2.3: Push Images to GHCR
+### Step 2.3: Push Images to Docker Hub
 
 ```bash
-# Push both images to GitHub Container Registry
-docker push ghcr.io/safik-8/crm-api:latest
-docker push ghcr.io/safik-8/crm-web:latest
+# Push both images to Docker Hub
+docker push safik8/crm:api
+docker push safik8/crm:web
 ```
 
 ---
@@ -68,10 +64,10 @@ cd /home/sddev/stackdot-crm
 
 ### Step 3.3: Authenticate Docker on Server
 
-If your repository/packages are private, log in to GHCR on the server:
+If your Docker Hub repository is private, log in on the server:
 
 ```bash
-echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+docker login -u safik8
 ```
 
 ### Step 3.4: Create the Production `.env` File
