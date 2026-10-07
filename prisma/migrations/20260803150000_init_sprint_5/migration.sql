@@ -444,8 +444,7 @@ CREATE INDEX "revenue_logs_company_id_product_id_idx" ON "revenue_logs"("company
 -- CreateIndex
 CREATE UNIQUE INDEX "revenue_logs_deal_id_key" ON "revenue_logs"("deal_id");
 
--- CreateIndex
-CREATE INDEX "lead_activities_related_entity_type_related_entity_id_idx" ON "lead_activities"("related_entity_type", "related_entity_id");
+-- CREATE INDEX "lead_activities_related_entity_type_related_entity_id_idx" ON "lead_activities"("related_entity_type", "related_entity_id");
 
 -- CreateIndex
 CREATE INDEX "leads_qualification_status_idx" ON "leads"("qualification_status");
