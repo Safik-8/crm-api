@@ -475,27 +475,10 @@ export const getOpportunityStagesService = async (actor, includeInactive = false
   });
 
   if (!stages || stages.length === 0) {
-    const defaultStages = [
-      { companyId, name: 'Qualification', code: 'QUALIFICATION', displayOrder: 1, colorCode: '#6366f1', defaultProbabilityPct: 10, stageType: 'QUALIFICATION', isSystem: true },
-      { companyId, name: 'Needs Analysis', code: 'NEEDS_ANALYSIS', displayOrder: 2, colorCode: '#3b82f6', defaultProbabilityPct: 25, stageType: 'REGULAR', isSystem: false },
-      { companyId, name: 'Proposal', code: 'PROPOSAL', displayOrder: 3, colorCode: '#8b5cf6', defaultProbabilityPct: 50, stageType: 'REGULAR', isSystem: false },
-      { companyId, name: 'Negotiation', code: 'NEGOTIATION', displayOrder: 4, colorCode: '#f59e0b', defaultProbabilityPct: 75, stageType: 'REGULAR', isSystem: false },
-      { companyId, name: 'Final Review', code: 'FINAL_REVIEW', displayOrder: 5, colorCode: '#10b981', defaultProbabilityPct: 90, stageType: 'REGULAR', isSystem: false },
-      { companyId, name: 'Won', code: 'WON', displayOrder: 6, colorCode: '#10b981', defaultProbabilityPct: 100, stageType: 'WON', isSystem: true },
-      { companyId, name: 'Lost', code: 'LOST', displayOrder: 7, colorCode: '#ef4444', defaultProbabilityPct: 0, stageType: 'LOST', isSystem: true },
-      { companyId, name: 'Cancelled', code: 'CANCELLED', displayOrder: 8, colorCode: '#6b7280', defaultProbabilityPct: 0, stageType: 'CANCELLED', isSystem: true },
-    ];
-    for (const st of defaultStages) {
-      await prisma.opportunityStage.upsert({
-        where: { companyId_code: { companyId: st.companyId, code: st.code } },
-        update: {},
-        create: st,
-      });
+    stages = await opportunityRepository.seedDefaultOpportunityStages(companyId);
+    if (!includeInactive) {
+      stages = stages.filter((s) => s.status === 'ACTIVE');
     }
-    stages = await prisma.opportunityStage.findMany({
-      where,
-      orderBy: { displayOrder: 'asc' },
-    });
   }
 
   return stages;

@@ -131,7 +131,7 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
         userRoles: { select: { role: { select: { name: true } } } },
         ownedTeams: { where: { isDeleted: false }, select: { name: true } },
         teamMemberships: { where: { removedAt: null, team: { isDeleted: false } }, select: { team: { select: { name: true } } } },
-        assignedLeads: { where: { isDeleted: false, ...(startDate && { createdAt: dateFilter }) }, select: { id: true } },
+        assignedLeads: { where: { isDeleted: false }, select: { id: true } },
         closedDeals: { where: { outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, select: { id: true, finalAmount: true } },
       },
     }),
@@ -161,18 +161,44 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
 
 // PERSONAL — BDE / ISE
 export async function findPersonalMetrics({ companyId, employeeId, startDate, endDate } = {}) {
-  const w = { companyId, assignedToId: employeeId };
   const dateFilter = makeDateFilter(startDate, endDate);
+
+  // Discover any team memberships or owned teams for accurate team-lead visibility
+  const [teamMemberships, ownedTeams] = await Promise.all([
+    prisma.teamMember.findMany({
+      where: { userId: employeeId, removedAt: null },
+      select: { teamId: true },
+    }),
+    prisma.team.findMany({
+      where: { bdeId: employeeId, isDeleted: false },
+      select: { id: true },
+    }),
+  ]);
+
+  const teamIds = [
+    ...teamMemberships.map((tm) => tm.teamId),
+    ...ownedTeams.map((t) => t.id),
+  ];
+
+  const leadWhere = {
+    ...(companyId && { companyId }),
+    isDeleted: false,
+    OR: [
+      { assignedToId: employeeId },
+      ...(teamIds.length > 0 ? [{ teamId: { in: teamIds }, assignedToId: null }] : []),
+    ],
+  };
+
   const [
     assignedLeads, qualifiedLeads, followupsToday, pendingFollowups,
     activeOpportunities, dealsWonAgg, callsCompletedToday,
   ] = await Promise.all([
-    prisma.lead.count({ where: { ...w, isDeleted: false, ...(startDate && { createdAt: dateFilter }) } }),
-    prisma.lead.count({ where: { ...w, isQualified: true, isDeleted: false } }),
+    prisma.lead.count({ where: leadWhere }),
+    prisma.lead.count({ where: { ...leadWhere, isQualified: true } }),
     prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING", scheduledAt: { gte: new Date(new Date().setHours(0,0,0,0)), lte: new Date(new Date().setHours(23,59,59,999)) } } }),
     prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING" } }),
-    prisma.opportunity.count({ where: { companyId, ownerId: employeeId, isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
-    prisma.deal.aggregate({ where: { companyId, closedById: employeeId, outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, _sum: { finalAmount: true }, _count: { id: true } }),
+    prisma.opportunity.count({ where: { ...(companyId && { companyId }), ownerId: employeeId, isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
+    prisma.deal.aggregate({ where: { ...(companyId && { companyId }), closedById: employeeId, outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, _sum: { finalAmount: true }, _count: { id: true } }),
     prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", isDeleted: false, interactionDate: { gte: new Date(new Date().setHours(0,0,0,0)) } } }),
   ]);
   return {
