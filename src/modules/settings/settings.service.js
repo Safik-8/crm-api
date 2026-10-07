@@ -301,7 +301,7 @@ export const sendTestEmailService = async (actor, testRecipient, req) => {
     subject: "CRM System Settings — SMTP Test Email",
     html: `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-        <h2 style="color: ${settings.primaryColor || "#F86F03"};">SMTP Test Email Successful</h2>
+        <h2 style="color: ${settings.primaryColor || "#474ce1"};">SMTP Test Email Successful</h2>
         <p>This email confirms that your CRM system SMTP settings are correctly configured and operating normally.</p>
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;"/>
         <p><strong>Configured Host:</strong> ${settings.smtpHost}</p>

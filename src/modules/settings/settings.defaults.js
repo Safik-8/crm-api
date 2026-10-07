@@ -74,15 +74,15 @@ export const DEFAULT_COMPANY_SETTINGS = {
   emailSignatureTemplate: "<p>Best regards,<br/><strong>Team</strong></p>",
 
   // 7. Branding Settings
-  primaryColor: "#F86F03",
-  secondaryColor: "#EA580C",
-  accentColor: "#10B981",
+  primaryColor: "#474ce1",
+  secondaryColor: "#3561f3",
+  accentColor: "#1bda9a",
   themeMode: "LIGHT",
   loginBackgroundUrl: null,
   customDomain: null,
   faviconUrl: null,
   emailTemplateBranding: {
-    headerColor: "#F86F03",
+    headerColor: "#474ce1",
     footerText: "Sent via CRM System",
   },
 }
