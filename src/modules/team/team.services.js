@@ -150,14 +150,14 @@ const validateIseUsers = async (iseIds, branchId, companyId, excludeTeamId) => {
     const roleName = primaryRole?.name || user.primaryRole || "";
     const roleRank = Number(primaryRole?.rank ?? user.primaryRoleRank ?? 0);
 
-    // Team members: ISE or any Custom Role with rank <= 40 (excluding BDE leader, Branch Manager, Company Admin, Super Admin)
+    // Team members: ISE or any Custom Role with rank <= 20 (excluding higher management/BDE)
     const isExcludedSystemRole = ["SUPER_ADMIN", "COMPANY_ADMIN", "BRANCH_MANAGER", "BDE"].includes(roleName);
     const isEligibleMember =
       roleName === "ISE" ||
-      (!isExcludedSystemRole && roleRank <= 40 && roleRank >= 0);
+      (!isExcludedSystemRole && roleRank <= 20 && roleRank >= 0);
 
     if (!isEligibleMember) {
-      throw new ValidationError(`User ${user.name} (${roleName}) is not eligible to be a team member. Only ISE and Custom Roles (Rank <= 40) are allowed.`);
+      throw new ValidationError(`User ${user.name} (${roleName}) is not eligible to be a team member. Only ISE and Roles with Rank <= 20 are allowed.`);
     }
   }
 

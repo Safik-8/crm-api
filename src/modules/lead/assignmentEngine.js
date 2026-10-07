@@ -35,7 +35,8 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
 
   // 1. Resolve limits and configuration
   const maxLimit = branch?.maxDailyLeadsPerUser ?? 50;
-  const algorithm = branch?.assignmentAlgorithm || sysSettings?.defaultAssignmentAlgorithm || "ROUND_ROBIN";
+  let algorithm = branch?.assignmentAlgorithm || sysSettings?.defaultAssignmentAlgorithm || "ROUND_ROBIN";
+  if (algorithm === "LOAD_BALANCED") algorithm = "LEAST_WORKLOAD";
   const resolutionLevel = branch?.assignmentResolutionLevel ?? "PERSON";
 
   // Date boundaries for today (local server timezone, consistent with spec)
@@ -259,6 +260,7 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
         }
       }
     } else {
+      let teamCounts = {};
       if (algorithm === "LEAST_WORKLOAD") {
         // Sum assignments of all members of the team made today
         const teamMembers = await tx.teamMember.findMany({
@@ -290,7 +292,6 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
           }
         });
 
-        const teamCounts = {};
         teams.forEach(t => { teamCounts[t.id] = 0; });
         
         // Add member workloads
@@ -327,15 +328,17 @@ export const autoAssignLead = async (leadId, tx = prisma) => {
 
       // 4. Find first team under limit
       for (const team of teams) {
-        const todayCount = await tx.leadAssignment.count({
-          where: {
-            assignedToTeamId: team.id,
-            assignedAt: {
-              gte: startOfToday,
-              lte: endOfToday
-            }
-          }
-        });
+        const todayCount = algorithm === "LEAST_WORKLOAD"
+          ? (teamCounts[team.id] ?? 0)
+          : await tx.leadAssignment.count({
+              where: {
+                assignedToTeamId: team.id,
+                assignedAt: {
+                  gte: startOfToday,
+                  lte: endOfToday
+                }
+              }
+            });
 
         if (todayCount < maxLimit) {
           selectedCandidate = { type: "TEAM", id: team.id, team };

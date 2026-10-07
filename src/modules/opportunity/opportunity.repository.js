@@ -252,7 +252,21 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
  */
 export const createOpportunityTx = async (companyId, branchId, data, ownerId, createdById, req = null) => {
   return prisma.$transaction(async (tx) => {
-    // 0. Resolve target OpportunityStage and default probability from payload or SystemSettings
+    // 0a. Concurrency guard: ensure lead has not been converted in a parallel transaction
+    if (data.leadId) {
+      const existingLead = await tx.lead.findUnique({
+        where: { id: Number(data.leadId) },
+        select: { id: true, qualificationStatus: true, isDeleted: true }
+      });
+      if (!existingLead || existingLead.isDeleted) {
+        throw new NotFoundError('Lead');
+      }
+      if (existingLead.qualificationStatus === 'CONVERTED') {
+        throw new ValidationError('This lead has already been converted to an opportunity.');
+      }
+    }
+
+    // 0b. Resolve target OpportunityStage and default probability from payload or SystemSettings
     let stageId = data.stageId ? Number(data.stageId) : null;
     let targetStage = null;
     let sysSettings = null;
@@ -322,7 +336,18 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         product: true,
         owner: { select: { id: true, name: true, email: true } },
         createdBy: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true, linkedinUrl: true } },
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            email: true,
+            qualificationScore: true,
+            linkedinUrl: true,
+            pipelineId: true,
+            pipeline: { select: { id: true, name: true } },
+          },
+        },
       },
     });
 
@@ -590,7 +615,17 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
         product: true,
         owner: { select: { id: true, name: true, email: true } },
         createdBy: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            email: true,
+            qualificationScore: true,
+            pipelineId: true,
+            pipeline: { select: { id: true, name: true } },
+          },
+        },
       },
     });
 
@@ -650,7 +685,18 @@ export const findOpportunityById = async (id, companyId) => {
       owner: { select: { id: true, name: true, email: true } },
       createdBy: { select: { id: true, name: true, email: true } },
       updatedBy: { select: { id: true, name: true, email: true } },
-      lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true, linkedinUrl: true } },
+      lead: {
+        select: {
+          id: true,
+          name: true,
+          mobile: true,
+          email: true,
+          qualificationScore: true,
+          linkedinUrl: true,
+          pipelineId: true,
+          pipeline: { select: { id: true, name: true } },
+        },
+      },
       proposals: {
         where: { isDeleted: false },
         orderBy: { createdAt: 'desc' },
@@ -693,7 +739,17 @@ export const findOpportunitiesList = async ({ where, skip = 0, take = 10, orderB
         product: { select: { id: true, name: true, code: true } },
         owner: { select: { id: true, name: true, email: true } },
         createdBy: { select: { id: true, name: true, email: true } },
-        lead: { select: { id: true, name: true, mobile: true, email: true, qualificationScore: true } },
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            email: true,
+            qualificationScore: true,
+            pipelineId: true,
+            pipeline: { select: { id: true, name: true } },
+          },
+        },
       },
     }),
   ]);

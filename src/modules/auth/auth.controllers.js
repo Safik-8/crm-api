@@ -133,7 +133,8 @@ export const logout = async (req, res, next) => {
 // ══════════════════════════════════════
 export const getMe = async (req, res, next) => {
     try {
-        return sendSuccess(res, { user: req.user }, "User fetched")
+        const accessToken = req.cookies?.accessToken || null
+        return sendSuccess(res, { user: req.user, accessToken }, "User fetched")
     } catch (err) {
         next(err)
     }

@@ -78,6 +78,7 @@ model Company {
   backupLogs          BackupLog[]
   restoreLogs         RestoreLog[]
   loginAttempts       LoginAttemptLog[]
+  feedbacks           Feedback[]
 
   @@map("companies")
 }
@@ -131,6 +132,7 @@ model Branch {
 
   // SPRINT 7 RELATIONS
   auditLogs          AuditLog[]
+  feedbacks          Feedback[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -247,6 +249,7 @@ model User {
   backupsTriggered  BackupLog[]          @relation("BackupTriggeredBy")
   restoresTriggered RestoreLog[]         @relation("RestoreTriggeredBy")
   loginAttempts     LoginAttemptLog[]
+  feedbacks         Feedback[]
 
   @@index([companyId])
   @@index([branchId])
@@ -2006,3 +2009,31 @@ model AnalyticsSnapshot {
   @@index([snapshotDate])
   @@map("analytics_snapshots")
 }
+
+model Feedback {
+  id            Int       @id @default(autoincrement())
+  title         String
+  description   String
+  category      String    @default("BUG")
+  priority      String    @default("NORMAL")
+  status        String    @default("NEW")
+
+  pageUrl       String?   @map("page_url")
+  attachmentUrl String?   @map("attachment_url")
+
+  userId        Int       @map("user_id")
+  companyId     Int?      @map("company_id")
+  branchId      Int?      @map("branch_id")
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company       Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  branch        Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([userId])
+  @@map("feedbacks")
+}
+
