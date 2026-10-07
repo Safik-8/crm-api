@@ -17,6 +17,7 @@ import {
 import { hashPassword } from "../../utils/passwordUtils.js"
 import prisma from "../../config/db.js"
 import { seedCompanySystemRoles } from "../../config/initSystem.js"
+import { seedDefaultOpportunityStages } from "../opportunity/opportunity.repository.js"
 
 /**
  * Onboards a new company and creates its default Company Admin user atomically within a transaction.
@@ -122,8 +123,9 @@ export const createCompanyService = async (data, actor) => {
       status
     }, tx)
 
-    // B. Seed company-scoped system roles for the new company
+    // B. Seed company-scoped system roles and default opportunity pipeline stages
     await seedCompanySystemRoles(company.id, tx)
+    await seedDefaultOpportunityStages(company.id, tx)
 
     const targetCompanyAdminRole = await tx.role.findFirst({
       where: { name: "COMPANY_ADMIN", companyId: company.id }
