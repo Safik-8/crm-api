@@ -4,7 +4,7 @@ ADD COLUMN     "qualification_score" INTEGER,
 ADD COLUMN     "qualification_status" TEXT NOT NULL DEFAULT 'UNQUALIFIED';
 
 -- AlterTable
-ALTER TABLE "notifications" ADD COLUMN     "opportunity_id" INTEGER;
+-- Removed notifications alter table since model is gone
 
 -- CreateTable
 CREATE TABLE "lead_qualifications" (
@@ -453,11 +453,9 @@ CREATE INDEX "leads_qualification_status_idx" ON "leads"("qualification_status")
 -- CreateIndex
 CREATE INDEX "leads_is_qualified_idx" ON "leads"("is_qualified");
 
--- CreateIndex
-CREATE INDEX "notifications_opportunity_id_idx" ON "notifications"("opportunity_id");
+-- CREATE INDEX "notifications_opportunity_id_idx" ON "notifications"("opportunity_id");
 
--- AddForeignKey
-ALTER TABLE "notifications" ADD CONSTRAINT "notifications_opportunity_id_fkey" FOREIGN KEY ("opportunity_id") REFERENCES "opportunities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- ALTER TABLE "notifications" ADD CONSTRAINT "notifications_opportunity_id_fkey" FOREIGN KEY ("opportunity_id") REFERENCES "opportunities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "lead_qualifications" ADD CONSTRAINT "lead_qualifications_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
