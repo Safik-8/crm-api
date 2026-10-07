@@ -34,6 +34,13 @@ export const createOpportunitySchema = z.object({
     .string({ required_error: 'Target closing date is required' })
     .refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid closing date format' }),
   notes: z.string().max(1000, 'Notes cannot exceed 1000 characters').nullable().optional(),
+  linkedinUrl: z
+    .string()
+    .trim()
+    .max(500, 'LinkedIn URL cannot exceed 500 characters')
+    .nullable()
+    .optional()
+    .or(z.literal('')),
 });
 
 /**
@@ -119,6 +126,27 @@ export const moveOpportunityStageSchema = z.object({
   remarks: z.string().max(1000, 'Remarks cannot exceed 1000 characters').optional(),
   reasonId: z.number().int().positive().optional(),
 });
+
+/**
+ * Validation schema for creating opportunity from pipeline closure popup.
+ * Note: leadId is passed via URL param (:leadId), not in body.
+ */
+export const closureOpportunitySchema = z.object({
+  expectedRevenue: z
+    .number({ required_error: 'Expected revenue is required' })
+    .positive('Expected revenue must be greater than 0'),
+  closingDate: z
+    .string({ required_error: 'Target closing date is required' })
+    .refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid closing date format' }),
+  productId: z.number().int().positive().nullable().optional(),
+  stageId: z.number().int().positive().nullable().optional(),
+});
+
+/**
+ * Validation schema for qualifying an Opportunity
+ * Accepts dynamic key-value pairs representing criteria evaluation answers
+ */
+export const qualifyOpportunitySchema = z.record(z.any());
 
 /**
  * Middleware factory for validating request body with Zod schema

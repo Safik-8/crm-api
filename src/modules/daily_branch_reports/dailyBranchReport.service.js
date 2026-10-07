@@ -38,7 +38,7 @@ const LABEL_MAP = {
 const SELF_SCOPED_ROLES = ["ISE", "BDE"]
 
 export const getDashboardReportsService = async (query, user) => {
-  const isSystemOrCompanyAdmin = user.primaryRole === "SUPER_ADMIN" || user.primaryRole === "COMPANY_ADMIN"
+  const isSystemOrCompanyAdmin = user.primaryRole === "SUPER_ADMIN" || user.primaryRole === "COMPANY_ADMIN" || (user.primaryRoleRank && user.primaryRoleRank >= 61)
   
   const branchIdVal = query?.branchId || query?.branch_id || user?.branchId
   const branchId = branchIdVal ? Number(branchIdVal) : null
@@ -50,7 +50,7 @@ export const getDashboardReportsService = async (query, user) => {
   }
 
   const role     = user.primaryRole                          // e.g. "ISE", "BRANCH_MANAGER"
-  const isSelf   = SELF_SCOPED_ROLES.includes(role)         // true → only own leads
+  const isSelf   = SELF_SCOPED_ROLES.includes(role) || (user.primaryRoleRank && user.primaryRoleRank <= 20)         // true → only own leads
   const viewMode = isSelf ? "self" : (isSystemOrCompanyAdmin ? "company" : "branch") // returned in response so frontend knows
 
   // ── Date range ────────────────────────────────────────────────

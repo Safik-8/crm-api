@@ -8,8 +8,8 @@ export const hasPermission = (module, action) => {
       return next(new PermissionDeniedError(module, action))
     }
 
-    // 1. Super Admin (System Owner) always has absolute global privileges
-    if (req.user.primaryRole === "SUPER_ADMIN") {
+    // 1. Super Admin (System Owner) and Company Admin have full administrative privileges
+    if (req.user.primaryRole === "SUPER_ADMIN" || req.user.primaryRole === "COMPANY_ADMIN") {
       return next()
     }
 
@@ -35,7 +35,7 @@ export const hasPermission = (module, action) => {
     if (module === "KPI" || (typeof module === "string" && module.includes("KPI"))) {
       const kpiPerms = req.user.permissions?.["KPI"]
       if (kpiPerms) {
-        if ((action === "canManage" || action === "canCreate") && (kpiPerms.canManage || kpiPerms.canCreate || kpiPerms.canEdit)) {
+        if ((action === "canCreate" || action === "canEdit") && (kpiPerms.canCreate || kpiPerms.canEdit)) {
           return next()
         }
         if (kpiPerms[action] !== undefined && kpiPerms[action]) {
@@ -43,9 +43,9 @@ export const hasPermission = (module, action) => {
         }
       }
       if (action === "canView") return next()
-      if (action === "canManage" || action === "canCreate" || action === "canEdit") {
+      if (action === "canCreate" || action === "canEdit" || action === "canDelete") {
         const rank = Number(req.user.primaryRoleRank || 0)
-        if (req.user.primaryRole === "SUPER_ADMIN" || req.user.primaryRole === "COMPANY_ADMIN" || req.user.primaryRole === "BRANCH_MANAGER" || rank >= 40) {
+        if (req.user.primaryRole === "SUPER_ADMIN" || req.user.primaryRole === "COMPANY_ADMIN" || req.user.primaryRole === "BRANCH_MANAGER" || rank >= 41) {
           return next()
         }
         return next(new PermissionDeniedError(module, action))

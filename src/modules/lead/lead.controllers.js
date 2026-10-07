@@ -9,7 +9,6 @@ import {
   getLeadByIdService,
   updateLeadService,
   deleteLeadService,
-  deleteAllLeadsService,
   updateLeadStageService,
   addLeadCommentService,
   getLeadCommentsService,
@@ -88,15 +87,6 @@ export const deleteLead = async (req, res, next) => {
   try {
     const lead = await deleteLeadService(req.params.id, req.user, req);
     return sendSuccess(res, { lead }, "Lead deleted successfully");
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const deleteAllLeads = async (req, res, next) => {
-  try {
-    const result = await deleteAllLeadsService(req.user, req);
-    return sendSuccess(res, result, `Successfully deleted ${result.count} leads`);
   } catch (err) {
     next(err);
   }

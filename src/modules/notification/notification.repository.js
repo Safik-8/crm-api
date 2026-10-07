@@ -130,7 +130,7 @@ export const fetchReminderSummary = async (actor) => {
     if (actor.companyId && actor.primaryRoleRank < 100) {
       baseWhere.companyId = actor.companyId;
     }
-    if (actor.branchId && actor.primaryRoleRank < 80) {
+    if (actor.branchId && actor.primaryRoleRank <= 60) {
       baseWhere.branchId = actor.branchId;
     }
     if (actor.primaryRoleRank < 60 && actor.primaryRole !== "BDE") {

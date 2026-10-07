@@ -237,10 +237,10 @@ export const getCompaniesWithPaginationService = async (query, actor) => {
   const orderBy = sort === "oldest"
     ? { createdAt: "asc" }
     : sort === "name_asc"
-    ? { name: "asc" }
-    : sort === "name_desc"
-    ? { name: "desc" }
-    : { createdAt: "desc" } // default newest
+      ? { name: "asc" }
+      : sort === "name_desc"
+        ? { name: "desc" }
+        : { createdAt: "desc" } // default newest
 
   // 3. Compute offset pagination bounds
   const parsedPage = Math.max(1, Number(page))
@@ -305,6 +305,11 @@ export const updateCompanyService = async (id, data, actor) => {
   const companyId = Number(id)
   if (actor?.primaryRole !== "SUPER_ADMIN" && actor?.companyId !== companyId) {
     throw new ForbiddenError("Access denied: You cannot update details for another company")
+  }
+
+  // Guard: Only SUPER_ADMIN can activate or deactivate a company tenant
+  if (data?.status !== undefined && actor?.primaryRole !== "SUPER_ADMIN") {
+    throw new ForbiddenError("Access denied: Only Super Admins can change company status")
   }
 
   // Verify existence first

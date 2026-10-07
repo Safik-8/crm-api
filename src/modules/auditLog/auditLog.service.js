@@ -79,6 +79,13 @@ export const recordAuditLog = async (payload) => {
  * Service: Fetches paginated audit logs with search, filtering, and role scoping.
  */
 export const getAuditLogsService = async (queryParams, actor) => {
+  const actorRole = (actor?.primaryRole || actor?.role || "").toUpperCase();
+  const actorRank = Number(actor?.primaryRoleRank ?? 0);
+  if (actorRole !== "SUPER_ADMIN" && actorRole !== "COMPANY_ADMIN" && actorRank < 80) {
+    const error = new Error("Access Denied: Audit log monitoring is restricted to Super Admin and Company Admin.");
+    error.statusCode = 403;
+    throw error;
+  }
   return await auditLogRepo.getAuditLogsPaginated(queryParams, actor);
 };
 
@@ -86,15 +93,21 @@ export const getAuditLogsService = async (queryParams, actor) => {
  * Service: Retrieves a single audit log entry by ID.
  */
 export const getAuditLogByIdService = async (id, actor) => {
+  const actorRole = (actor?.primaryRole || actor?.role || "").toUpperCase();
+  const actorRank = Number(actor?.primaryRoleRank ?? 0);
+  if (actorRole !== "SUPER_ADMIN" && actorRole !== "COMPANY_ADMIN" && actorRank < 80) {
+    const error = new Error("Access Denied: Audit log monitoring is restricted to Super Admin and Company Admin.");
+    error.statusCode = 403;
+    throw error;
+  }
   const log = await auditLogRepo.getAuditLogById(id, actor);
   if (!log) {
-    const error = new Error("Audit log record not found or access restricted.");
+    const error = new Error("Audit log record not found.");
     error.statusCode = 404;
     throw error;
   }
 
   // Scoping Guard: Non-Super-Admins can only view logs from their own company
-  const actorRole = (actor?.primaryRole || actor?.role || "").toUpperCase();
   if (actorRole !== "SUPER_ADMIN" && actor?.companyId && log.companyId !== actor.companyId) {
     const error = new Error("Forbidden: Access to this audit record is restricted");
     error.statusCode = 403;

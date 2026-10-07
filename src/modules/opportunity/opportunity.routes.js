@@ -7,10 +7,12 @@ import {
   createOpportunitySchema,
   updateOpportunitySchema,
   closeOpportunitySchema,
+  closureOpportunitySchema,
   createOpportunityStageSchema,
   updateOpportunityStageSchema,
   bulkOpportunityStagesSchema,
   moveOpportunityStageSchema,
+  qualifyOpportunitySchema,
   validateBody,
 } from './opportunity.validation.js';
 
@@ -34,6 +36,15 @@ router.patch('/:id/stage', hasPermission('LEAD', 'canEdit'), validateBody(moveOp
  * @access  Private (OPPORTUNITY:canView)
  */
 router.get('/', hasPermission('OPPORTUNITY', 'canView'), opportunityController.getOpportunitiesList);
+
+// Pipeline Closure → auto-create opportunity
+// Permission: LEAD:canEdit — ISE, BDE, BM, Admin all have this
+router.post(
+  '/from-pipeline-closure/:leadId',
+  hasPermission('LEAD', 'canEdit'),
+  validateBody(closureOpportunitySchema),
+  opportunityController.closePipelineLeadAndCreateOpportunity
+);
 
 /**
  * @route   POST /api/opportunities
@@ -70,6 +81,19 @@ router.patch(
 );
 
 /**
+ * @route   POST /api/opportunities/:id/qualify
+ * @desc    Qualify an opportunity — computes a priority score (0–100%) from company criteria.
+ *          Stores score on the opportunity record. Does NOT touch Lead qualification tables.
+ * @access  Private (OPPORTUNITY:canEdit)
+ */
+router.post(
+  '/:id/qualify',
+  hasPermission('OPPORTUNITY', 'canEdit'),
+  validateBody(qualifyOpportunitySchema),
+  opportunityController.qualifyOpportunity
+);
+
+/**
  * @route   POST /api/opportunities/:id/close
  * @desc    Close opportunity outcome (WON / LOST / CANCELLED)
  * @access  Private (OPPORTUNITY:canEdit)
@@ -82,3 +106,4 @@ router.post(
 );
 
 export default router;
+

@@ -87,6 +87,14 @@ export const createLeadSchema = z.object({
     .nullable()
     .or(z.literal("")),
 
+  linkedinUrl: z
+    .string()
+    .trim()
+    .max(500, "LinkedIn URL must be 500 characters or less")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+
   budget: z.preprocess(
     parseNullableNumber,
     z
@@ -157,6 +165,14 @@ export const updateLeadSchema = z
       .string()
       .trim()
       .regex(/^\d{10}$/, "Alternate mobile must be exactly 10 digits")
+      .optional()
+      .nullable()
+      .or(z.literal("")),
+
+    linkedinUrl: z
+      .string()
+      .trim()
+      .max(500, "LinkedIn URL must be 500 characters or less")
       .optional()
       .nullable()
       .or(z.literal("")),

@@ -270,7 +270,7 @@ export const getStagesForPipelineService = async (pipelineId, actor) => {
 
   // Tenant guard
   if (actor.companyId && pipeline.companyId !== actor.companyId) throw new BadRequestError("Invalid pipeline scope")
-  if (actor.branchId  && pipeline.branchId  !== actor.branchId)  throw new BadRequestError("Invalid pipeline scope")
+  if (actor.primaryRoleRank <= 60 && actor.branchId && pipeline.branchId !== actor.branchId) throw new BadRequestError("Invalid pipeline scope")
 
   const pipelineStages = await prisma.pipelineStage.findMany({
     where: { pipelineId: pid },

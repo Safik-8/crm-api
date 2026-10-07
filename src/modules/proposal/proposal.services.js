@@ -18,13 +18,13 @@ const validateScopeAndGetProposal = async (actor, id) => {
     throw new ForbiddenError('Access denied: different company scope');
   }
 
-  // Branch Scope
-  if (rank >= 60 && rank < 80 && actor.branchId && proposal.branchId !== actor.branchId) {
+  // Branch Scope (only applies to Branch Manager & below rank 41..60)
+  if (rank >= 41 && rank <= 60 && actor.branchId && proposal.branchId !== actor.branchId) {
     throw new ForbiddenError('Access denied: different branch scope');
   }
 
-  // BDE/ISE owner scope
-  if (rank < 60 && proposal.createdById !== actor.id && proposal.opportunity?.ownerId !== actor.id) {
+  // BDE/ISE/Custom Reps owner scope
+  if (rank <= 40 && proposal.createdById !== actor.id && proposal.opportunity?.ownerId !== actor.id) {
     throw new ForbiddenError('Access denied: own records only');
   }
 
@@ -50,13 +50,13 @@ export const createProposal = async (actor, payload, req = null) => {
     throw new ForbiddenError('Access denied: different company scope');
   }
 
-  // Branch scope check for managers
-  if (rank >= 60 && rank < 80 && actor.branchId && opportunity.branchId !== actor.branchId) {
+  // Branch scope check for managers (rank 41..60)
+  if (rank >= 41 && rank <= 60 && actor.branchId && opportunity.branchId !== actor.branchId) {
     throw new ForbiddenError('Access denied: different branch scope');
   }
 
-  // Sales rep assignment check
-  if (rank < 60 && opportunity.ownerId !== actor.id) {
+  // Sales rep assignment check (rank <= 40)
+  if (rank <= 40 && opportunity.ownerId !== actor.id) {
     throw new ForbiddenError('Access denied: can only create proposals for opportunities you own');
   }
 

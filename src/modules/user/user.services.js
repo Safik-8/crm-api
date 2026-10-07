@@ -78,8 +78,8 @@ export const createUserService = async (data, actor, req = null) => {
   // 1. Multitenancy guard: Company Admins and Branch Managers can only onboard in their own company
   assertCompanyScope(actor, Number(companyId))
 
-  // 2. Branch manager scope guard: Branch Managers can only onboard users within their own branch
-  if (actor.primaryRole === "BRANCH_MANAGER" && Number(branchId) !== actor.branchId) {
+  // 2. Branch scope guard: All branch-level actors (rank <= 60 or assigned to a branch) can only onboard within their own branch
+  if (actor.branchId && (actor.primaryRoleRank <= 60 || actor.primaryRole === "BRANCH_MANAGER" || actor.primaryRole === "BDE" || actor.primaryRole === "ISE") && Number(branchId) !== actor.branchId) {
     throw new ForbiddenError("You can only onboard users within your assigned branch")
   }
 
@@ -368,8 +368,9 @@ export const getUsersService = async (query, actor) => {
     where.companyId = scopedCompanyId
   }
 
-  // Branch Manager & BDE visibility lockdown: Lock views to their own branch
-  if (actor.primaryRole !== "SUPER_ADMIN" && actor.primaryRole !== "COMPANY_ADMIN") {
+  // Branch Manager & BDE visibility lockdown: Lock views to their own branch (rank <= 60)
+  const isCompanyWide = actor.primaryRole === "SUPER_ADMIN" || actor.primaryRole === "COMPANY_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 61);
+  if (!isCompanyWide) {
     where.branchId = actor.branchId
   } else if (branchId) {
     where.branchId = Number(branchId)
@@ -580,7 +581,10 @@ export const getEligibleReplacementsService = async (targetId, actor) => {
  */
 export const deleteUserService = async (targetId, replacementUserId, actor, req = null) => {
   const actorRank = actor.primaryRoleRank ?? 0
-  if (actorRank < 80) {
+  const isSuperAdmin = actor.primaryRole === "SUPER_ADMIN"
+  const isCompanyAdmin = actor.primaryRole === "COMPANY_ADMIN"
+
+  if (!isSuperAdmin && !isCompanyAdmin && actorRank < 80) {
     throw new ForbiddenError("Only Super Admins and Company Admins can hard delete users")
   }
 
@@ -599,7 +603,7 @@ export const deleteUserService = async (targetId, replacementUserId, actor, req 
 
   // Rank check: actor rank must be strictly higher than target user rank
   const targetRank = getUserRank(targetUser)
-  if (actor.primaryRole !== "SUPER_ADMIN" && targetRank >= actorRank) {
+  if (!isSuperAdmin && targetRank >= actorRank) {
     throw new ForbiddenError("You cannot delete a user with equal or higher rank than your own")
   }
 

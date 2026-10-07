@@ -45,8 +45,8 @@ export const getDealById = async (actor, id) => {
   if (actor.primaryRole !== 'SUPER_ADMIN' && actor.companyId) {
     extraWhere.companyId = actor.companyId;
   }
-  if (rank < 60) extraWhere.closedById = actor.id;
-  if (rank >= 60 && rank < 80 && actor.branchId) extraWhere.branchId = actor.branchId;
+  if (rank <= 40) extraWhere.closedById = actor.id;
+  if (rank >= 41 && rank <= 60 && actor.branchId) extraWhere.branchId = actor.branchId;
 
   const deal = await dealRepo.findDealById(id, extraWhere);
   if (!deal) throw new NotFoundError('Deal');

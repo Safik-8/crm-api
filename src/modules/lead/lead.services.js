@@ -23,6 +23,7 @@ import {
   findPipelineById,
   findProspectStageForPipeline,
   findPipelineStageMapping,
+  generateLeadNumber,
   createLead,
   updateLead,
   findLeads,
@@ -89,7 +90,8 @@ const actorScope = (actor) => {
     return scope;
   }
   if (actor.companyId) scope.companyId = actor.companyId;
-  if (actor.branchId && (!actor.primaryRoleRank || actor.primaryRoleRank < 80)) {
+  // Branch scoping only applies to Branch Manager & below (rank <= 60). Rank >= 61 is Company-Wide.
+  if (actor.branchId && (!actor.primaryRoleRank || actor.primaryRoleRank <= 60)) {
     scope.branchId = actor.branchId;
   }
   return scope;
@@ -109,7 +111,7 @@ const assertLeadScope = async (actor, lead) => {
   if (lead.companyId && actor.companyId && lead.companyId !== actor.companyId) {
     throw new ForbiddenError("Lead does not belong to your company");
   }
-  if (lead.branchId && actor.branchId && lead.branchId !== actor.branchId) {
+  if (actor.primaryRoleRank <= 60 && lead.branchId && actor.branchId && lead.branchId !== actor.branchId) {
     throw new ForbiddenError("Lead does not belong to your branch");
   }
 
@@ -118,7 +120,7 @@ const assertLeadScope = async (actor, lead) => {
     if (actor.companyId && lead.pipeline.companyId !== actor.companyId) {
       throw new ForbiddenError("Lead does not belong to your company");
     }
-    if (actor.branchId && lead.pipeline.branchId !== actor.branchId) {
+    if (actor.primaryRoleRank <= 60 && actor.branchId && lead.pipeline.branchId !== actor.branchId) {
       throw new ForbiddenError("Lead does not belong to your branch");
     }
   }
@@ -176,7 +178,19 @@ const assertLeadScope = async (actor, lead) => {
 
 export const getBranchUsersForLeadService = async (actor) => {
   if (!actor.branchId) throw new BadRequestError("No branch associated with your account");
-  return findBranchUsers(actor.branchId);
+  const maxRank = (actor.primaryRole === "SUPER_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 100))
+    ? null
+    : (actor.primaryRoleRank != null ? Number(actor.primaryRoleRank) : null);
+  let users = await findBranchUsers(actor.branchId, prisma, maxRank);
+
+  // If rep (BDE / ISE rank < 60), restrict assignable list to self + subordinates
+  if (actor.primaryRoleRank < 60) {
+    const subordinates = await getSubordinateIds(actor.id, actor.companyId);
+    const allowedIds = new Set([actor.id, ...subordinates]);
+    users = users.filter(u => allowedIds.has(u.id));
+  }
+
+  return users;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -186,7 +200,19 @@ export const getBranchUsersForLeadService = async (actor) => {
 export const getLeadFormDataService = async (actor, query = {}) => {
   const companyId = actor.companyId ?? (query.companyId ? Number(query.companyId) : null);
   const branchId  = actor.branchId  ?? (query.branchId ? Number(query.branchId) : null);
-  return findLeadFormData(companyId, branchId);
+  const maxRank = (actor.primaryRole === "SUPER_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 100))
+    ? null
+    : (actor.primaryRoleRank != null ? Number(actor.primaryRoleRank) : null);
+  const data = await findLeadFormData(companyId, branchId, prisma, maxRank);
+
+  // If rep (BDE / ISE rank < 60), restrict assignable list to self + subordinates
+  if (actor.primaryRoleRank < 60 && Array.isArray(data.users)) {
+    const subordinates = await getSubordinateIds(actor.id, actor.companyId);
+    const allowedIds = new Set([actor.id, ...subordinates]);
+    data.users = data.users.filter(u => allowedIds.has(u.id));
+  }
+
+  return data;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -280,10 +306,10 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
     if (companyId && pipeline.companyId !== companyId) throw new ForbiddenError("Invalid pipeline scope");
     if (branchId  && pipeline.branchId  !== branchId)  throw new ForbiddenError("Invalid pipeline scope");
 
-    const stageId = await findProspectStageForPipeline(data.pipelineId);
+    const stageId = await findProspectStageForPipeline(data.pipelineId, txClient);
+    resolvedPipelineId = data.pipelineId;
     if (stageId) {
-      resolvedPipelineId = data.pipelineId;
-      resolvedStageId    = stageId;
+      resolvedStageId = stageId;
     }
   }
 
@@ -364,7 +390,9 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
 
   // 5. Build create payload
   const now = new Date();
+  const leadNumber = await generateLeadNumber(txClient, { companyId, branchId, date: now });
   const payload = {
+    leadNumber,
     companyId,
     branchId,
     pipelineId:       resolvedPipelineId,
@@ -376,6 +404,7 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
     mobile:           data.mobile,
     email:            data.email   || null,
     alternateMobile:  data.alternateMobile || null,
+    linkedinUrl:      data.linkedinUrl || null,
     sourceId:         data.sourceId,
     courseId:         resolvedCourseId,
     statusId:         resolvedStatusId,
@@ -398,10 +427,12 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
   const executeQueries = async (tx) => {
     let lead;
     if (softDeletedDuplicate) {
+      const restoredLeadNumber = softDeletedDuplicate.leadNumber || await generateLeadNumber(tx, { companyId, branchId, date: now });
       lead = await tx.lead.update({
         where: { id: softDeletedDuplicate.id },
         data: {
           ...payload,
+          leadNumber: restoredLeadNumber,
           isDeleted: false,
           deletedById: null,
           deletedAt: null
@@ -490,6 +521,7 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
 
 export const getLeadsService = async (query, actor) => {
   const { page, limit, skip } = parsePagination(query);
+  const viewMode = query?.viewMode || 'INDIVIDUAL';
 
   const allowedSortFields = ["name", "mobile", "priority", "createdAt", "updatedAt"];
   const orderBy = parseSorting(query, allowedSortFields, { createdAt: "desc" });
@@ -518,9 +550,11 @@ export const getLeadsService = async (query, actor) => {
       if (membership) activeTeamId = membership.teamId;
     }
 
-    const viewMode = query?.viewMode || 'INDIVIDUAL';
+    const isTeamLeader = Boolean(ledTeam);
     
-    if (viewMode === 'TEAM' && activeTeamId) {
+    // Only the Team Leader (BDE) gets the expanded team scope when viewMode === 'TEAM'.
+    // Regular team members (e.g. ISE) can ONLY view leads assigned to them or created by them.
+    if (viewMode === 'TEAM' && activeTeamId && isTeamLeader) {
       const teamMembers = await prisma.teamMember.findMany({
         where: { teamId: activeTeamId, removedAt: null },
         select: { userId: true }
@@ -548,7 +582,7 @@ export const getLeadsService = async (query, actor) => {
         { createdById: actor.id }
       ];
       
-      if (viewMode === 'TEAM' && activeTeamId) {
+      if (viewMode === 'TEAM' && activeTeamId && isTeamLeader) {
         orConditions.push({ teamId: activeTeamId });
       } else if (viewMode === 'INDIVIDUAL' && activeTeamId) {
         // If individual, we don't include unassigned team leads, so no action needed.
@@ -562,13 +596,45 @@ export const getLeadsService = async (query, actor) => {
     }
   }
 
-  // Kanban filters
+  // Pipeline & Stage filters
   if (query?.pipelineId) {
     where.pipelineId = Number(query.pipelineId);
-    // Exclude leads converted to opportunities from active prospecting Kanban board
-    where.opportunities = { none: { isDeleted: false } };
+    if (query?.excludeConvertedToOpportunity === 'true' || query?.isBoard === 'true') {
+      where.opportunities = { none: { isDeleted: false } };
+    }
   }
-  if (query?.stageId)    where.stageId    = Number(query.stageId);
+  if (query?.stageId) where.stageId = Number(query.stageId);
+
+  // Qualification filters
+  if (query?.isQualified !== undefined) {
+    const isQual = query.isQualified === 'true' || query.isQualified === true;
+    if (isQual) {
+      const qualOr = [
+        { isQualified: true },
+        { qualificationStatus: 'QUALIFIED' },
+        { qualification: { status: 'QUALIFIED' } }
+      ];
+      if (where.AND) {
+        where.AND.push({ OR: qualOr });
+      } else if (where.OR) {
+        where.AND = [{ OR: where.OR }, { OR: qualOr }];
+        delete where.OR;
+      } else {
+        where.OR = qualOr;
+      }
+    } else {
+      where.isQualified = false;
+      where.NOT = [
+        { qualificationStatus: 'QUALIFIED' },
+        { qualification: { status: 'QUALIFIED' } }
+      ];
+    }
+  }
+
+  // Opportunity exclusion filter (e.g. for opportunity creation)
+  if (query?.withoutOpenOpportunity === 'true' || query?.withoutOpenOpportunity === true) {
+    where.opportunities = { none: { status: 'OPEN', isDeleted: false } };
+  }
 
   // Scope filters
   if (query?.companyId) {
@@ -600,7 +666,7 @@ export const getLeadsService = async (query, actor) => {
   }
 
   // Search
-  const searchFilter = buildSearchFilter(query?.search, ["name", "mobile", "email"]);
+  const searchFilter = buildSearchFilter(query?.search, ["name", "mobile", "email", "leadNumber", "interestedFor"]);
   if (searchFilter) Object.assign(where, searchFilter);
 
   const [leads, total] = await Promise.all([
@@ -654,6 +720,7 @@ export const updateLeadService = async (leadId, data, actor, req = null) => {
   if (data.mobile        !== undefined) updateData.mobile         = data.mobile;
   if (data.email         !== undefined) updateData.email          = data.email          || null;
   if (data.alternateMobile !== undefined) updateData.alternateMobile = data.alternateMobile || null;
+  if (data.linkedinUrl   !== undefined) updateData.linkedinUrl   = data.linkedinUrl   || null;
   if (data.sourceId      !== undefined) updateData.sourceId       = data.sourceId       ?? null;
   if (data.courseId      !== undefined) updateData.courseId       = data.courseId       ?? null;
   if (data.statusId      !== undefined) updateData.statusId       = data.statusId       ?? null;
@@ -924,54 +991,6 @@ export const deleteLeadService = async (leadId, actor, req = null) => {
   });
 };
 
-export const deleteAllLeadsService = async (actor, req = null) => {
-  const scope = actorScope(actor);
-  if (!scope.companyId) {
-    throw new BadRequestError("Company scope could not be resolved.");
-  }
-
-  return prisma.$transaction(async (tx) => {
-    // 1. Get count of leads to be deleted
-    const count = await tx.lead.count({
-      where: {
-        isDeleted: false,
-        ...scope
-      }
-    });
-
-    if (count === 0) {
-      return { count: 0 };
-    }
-
-    // 2. Perform bulk soft-delete
-    await tx.lead.updateMany({
-      where: {
-        isDeleted: false,
-        ...scope
-      },
-      data: {
-        isDeleted: true,
-        deletedById: actor.id,
-        deletedAt: new Date(),
-        updatedById: actor.id
-      }
-    });
-
-    // 3. Create a single audit log for the bulk operation
-    await createAuditLog({
-      req,
-      companyId: scope.companyId,
-      entityId: 0,
-      action: "BULK_DELETE",
-      oldValue: JSON.stringify({ count, isDeleted: false }),
-      newValue: JSON.stringify({ count, isDeleted: true }),
-      performedById: actor.id
-    }, tx);
-
-    return { count };
-  });
-};
-
 
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -995,11 +1014,11 @@ export const updateLeadStageService = async (leadId, data, actor, req = null) =>
     throw new BadRequestError("Lead has no company scope — cannot record pipeline history");
   }
 
-  // TRANSITION RULE 1: WON and CLOSURE leads cannot be moved out
-  const LOCKED_STAGE_TYPES = ["WON", "CLOSURE"];
-  if (LOCKED_STAGE_TYPES.includes(lead.stage?.stageType)) {
+  // TRANSITION RULE 1: CLOSURE and CONVERTED leads cannot be moved out
+  const LOCKED_STAGE_TYPES = ["CLOSURE"];
+  if (lead.qualificationStatus === 'CONVERTED' || LOCKED_STAGE_TYPES.includes(lead.stage?.stageType)) {
     throw new ForbiddenError(
-      `This lead is in "${lead.stage.name}" stage and cannot be moved to another stage.`
+      `This lead is converted/closed and cannot be moved to another pipeline stage.`
     );
   }
 
@@ -1215,7 +1234,7 @@ export const importLeadsFromExcelService = async (
     if (!resolvedBranch) {
       throw new BadRequestError("Selected Branch does not belong to the selected Company or is inactive.");
     }
-  } else if (actor.primaryRole === "COMPANY_ADMIN") {
+  } else if (actor.primaryRole === "COMPANY_ADMIN" || (actor.primaryRoleRank && actor.primaryRoleRank >= 61)) {
     companyId = actor.companyId;
     if (!branchId) {
       throw new BadRequestError("Branch scope must be selected.");
@@ -1258,7 +1277,7 @@ export const importLeadsFromExcelService = async (
     { key: "name",   aliases: ["lead name", "name"] },
     { key: "mobile", aliases: ["mobile number", "mobile", "phone number", "phone"] },
     { key: "source", aliases: ["lead source", "source"] },
-    { key: "course", aliases: ["interested course/product", "interested course", "course", "product", "interested for"] }
+    { key: "course", aliases: ["interested service", "service", "interested services", "services", "interested course/product", "interested course", "course", "product", "interested for"] }
   ];
 
   const OPTIONAL_HEADERS = [
@@ -1523,10 +1542,10 @@ export const importLeadsFromExcelService = async (
       }
     }
 
-    // ── 5. Validate Course under resolved company scope ──
+    // ── 5. Validate Course/Service under resolved company scope ──
     let matchedCourse = null;
     if (!courseStr) {
-      rowErrors.push("Interested Course/Product is required");
+      rowErrors.push("Interested Service is required");
       fieldsInError.push("course");
     } else if (rowCompanyId) {
       const normalizeCompare = (str) => String(str).toLowerCase().replace(/\s+/g, "");
@@ -1535,12 +1554,12 @@ export const importLeadsFromExcelService = async (
         (c) => normalizeCompare(c.name) === normalizedCourseStr || String(c.id) === courseStr
       );
       if (!matchedCourse) {
-        rowErrors.push("Course was not recognized as a valid course for this company.");
+        rowErrors.push("Service was not recognized as a valid service for this company.");
         fieldsInError.push("course");
         const closest = findClosestMatch(courseStr, courseNames);
         if (closest) suggestions.course = closest;
       } else if (matchedCourse.status !== "ACTIVE") {
-        rowErrors.push("Course exists but is currently inactive");
+        rowErrors.push("Service exists but is currently inactive");
         fieldsInError.push("course");
       }
     }
@@ -2407,8 +2426,27 @@ export const assignLeadsService = async (data, actor, req = null) => {
 
   // 1. Authorized role/permission check
   const hasAssignmentPerm = actor.permissions?.LEAD_ASSIGNMENT?.canCreate || actor.permissions?.LEAD_ASSIGNMENT?.canEdit;
-  if (!hasAssignmentPerm) {
+  let isTeamLeader = false;
+  if (teamId) {
+    const leaderTeam = await prisma.team.findFirst({
+      where: { id: Number(teamId), bdeId: actor.id, isDeleted: false, status: "ACTIVE" }
+    });
+    if (leaderTeam) isTeamLeader = true;
+  }
+
+  if (!hasAssignmentPerm && !isTeamLeader) {
     throw new ForbiddenError("You do not have permission to assign leads");
+  }
+
+  // If Team Leader assigning within their team, verify that all leads belong to this team
+  if (!hasAssignmentPerm && isTeamLeader) {
+    const numericLeadIds = (leadIds || []).map(Number);
+    const teamLeadsCount = await prisma.lead.count({
+      where: { id: { in: numericLeadIds }, teamId: Number(teamId), isDeleted: false }
+    });
+    if (teamLeadsCount !== numericLeadIds.length) {
+      throw new ForbiddenError("Team leaders can only assign leads belonging to their own team");
+    }
   }
 
   // 2. Validate assignee team if provided
@@ -2451,12 +2489,12 @@ export const assignLeadsService = async (data, actor, req = null) => {
       throw new ValidationError("Selected user is inactive");
     }
 
-    // Ensure target user has a BDE or ISE role
+    // Ensure target user has a BDE, ISE, or eligible team member role (rank <= 20)
     const hasSalesRole = targetUser.userRoles.some(
-      (ur) => ur.role.name === "BDE" || ur.role.name === "ISE"
+      (ur) => ur.role.name === "BDE" || ur.role.name === "ISE" || (ur.role.rank != null && ur.role.rank <= 20)
     );
     if (!hasSalesRole) {
-      throw new ValidationError("Selected user must hold a BDE or ISE role");
+      throw new ValidationError("Selected user must hold a BDE, ISE, or eligible sales role");
     }
 
     // Role Hierarchy & scoping check for user
@@ -2687,4 +2725,35 @@ export const getLeadPipelineHistoryService = async (leadId, actor) => {
     }
   });
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// AUTO-BACKFILL LEAD NUMBERS FOR PRE-EXISTING LEADS
+// ──────────────────────────────────────────────────────────────────────────────
+export const backfillMissingLeadNumbers = async () => {
+  try {
+    const unnumberedLeads = await prisma.lead.findMany({
+      where: { leadNumber: null },
+      select: { id: true, companyId: true, branchId: true, createdAt: true },
+      take: 5000
+    });
+    for (const lead of unnumberedLeads) {
+      try {
+        const leadNumber = await generateLeadNumber(prisma, {
+          companyId: lead.companyId,
+          branchId: lead.branchId,
+          date: lead.createdAt || new Date()
+        });
+        await prisma.lead.update({
+          where: { id: lead.id },
+          data: { leadNumber }
+        });
+      } catch (_) {}
+    }
+  } catch (_) {}
+};
+
+// Trigger safe backfill on startup
+setTimeout(() => {
+  backfillMissingLeadNumbers().catch(() => {});
+}, 1000);
 

@@ -11,6 +11,6 @@ router.get('/', hasPermission('OPPORTUNITY', 'canView'), ctrl.getProposalsList);
 router.get('/:id', hasPermission('OPPORTUNITY', 'canView'), ctrl.getProposalById);
 router.put('/:id', hasPermission('OPPORTUNITY', 'canEdit'), ctrl.updateProposal);
 router.patch('/:id/status', hasPermission('OPPORTUNITY', 'canEdit'), ctrl.updateProposalStatus);
-router.delete('/:id', hasPermission('OPPORTUNITY', 'canEdit'), ctrl.deleteProposal);
+router.delete('/:id', hasPermission('OPPORTUNITY', 'canDelete'), ctrl.deleteProposal);
 
 export default router;

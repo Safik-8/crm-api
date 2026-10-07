@@ -160,6 +160,7 @@ const ROLE_PERMISSIONS = {
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
         QUALIFICATION: { canView: true, canCreate: true, canEdit: true, canDelete: false },
         OPPORTUNITY: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+        KPI: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
     },
 
     ISE: {
@@ -191,6 +192,7 @@ const ROLE_PERMISSIONS = {
         LEAD_STATUS: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
         QUALIFICATION: { canView: true, canCreate: true, canEdit: false, canDelete: false },
         OPPORTUNITY: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+        KPI: { canView: true, canCreate: false, canEdit: false, canDelete: false, canArchive: false },
     },
 }
 
@@ -641,7 +643,7 @@ export const initializeSystem = async () => {
         // ── STEP 6: BATCH SEED QUALIFICATION CRITERIA & ROLES FOR ALL COMPANIES ──
         const allCompanies = await prisma.company.findMany({
             where: { status: 'ACTIVE' },
-            select: { id: true, name: true }
+            select: { id: true, name: true, code: true }
         })
 
         if (allCompanies.length > 0) {
@@ -731,6 +733,47 @@ export const initializeSystem = async () => {
                     skipDuplicates: true
                 })
                 console.log(`✅ Seeded ${missingConfigs.length} missing notification configs`)
+            }
+
+            // Ensure default services exist for each company if they have none
+            for (const company of allCompanies) {
+                const courseCount = await prisma.course.count({
+                    where: { companyId: company.id, isDeleted: false }
+                });
+                if (courseCount === 0) {
+                    const adminUser = await prisma.user.findFirst({
+                        where: { companyId: company.id },
+                        select: { id: true }
+                    }) || await prisma.user.findFirst({ select: { id: true } });
+
+                    if (adminUser) {
+                        const prefix = (company.code || company.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4)) || "CRS";
+                        await prisma.course.createMany({
+                            data: [
+                                {
+                                    companyId: company.id,
+                                    name: "Other",
+                                    code: `${prefix}-OTHER`.toUpperCase(),
+                                    category: "General",
+                                    price: 0,
+                                    createdById: adminUser.id,
+                                    status: "ACTIVE"
+                                },
+                                {
+                                    companyId: company.id,
+                                    name: "Custom Software Development",
+                                    code: `${prefix}-1001`.toUpperCase(),
+                                    category: "Software Development",
+                                    price: 25000,
+                                    createdById: adminUser.id,
+                                    status: "ACTIVE"
+                                }
+                            ],
+                            skipDuplicates: true
+                        });
+                        console.log(`✅ Default services seeded for company: ${company.name}`);
+                    }
+                }
             }
         }
 

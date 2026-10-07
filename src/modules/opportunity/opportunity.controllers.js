@@ -1,5 +1,6 @@
 import * as opportunityService from './opportunity.services.js';
 import { sendSuccess } from '../../utils/response.js';
+import { ValidationError } from '../../utils/AppError.js';
 
 /**
  * Controller: Create Opportunity
@@ -217,4 +218,44 @@ export const moveOpportunityStage = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Controller: Close pipeline lead and auto-create opportunity
+ * Triggered when ISE (or authorized user) drags a lead to CLOSURE on Kanban board
+ */
+export const closePipelineLeadAndCreateOpportunity = async (req, res, next) => {
+  try {
+    const leadId = Number(req.params.leadId);
+    if (!leadId || isNaN(leadId)) {
+      return res.status(400).json({ success: false, message: 'Invalid lead ID' });
+    }
+    const result = await opportunityService.createOpportunityFromClosure(
+      req.user,
+      { ...req.body, leadId },
+      req
+    );
+    return sendSuccess(res, result, 'Lead closed and opportunity created successfully', 201);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Controller: Qualify Opportunity
+ * Computes a priority score (0-100%) from company criteria and saves it on the opportunity.
+ * Does NOT touch the Lead qualification tables.
+ */
+export const qualifyOpportunity = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id || isNaN(id)) {
+      throw new ValidationError('Invalid opportunity ID');
+    }
+    const result = await opportunityService.qualifyOpportunityService(id, req.body, req.user, req);
+    return sendSuccess(res, result, `Opportunity qualification score saved: ${result.score}%`, 200);
+  } catch (error) {
+    next(error);
+  }
+};
+
 
