@@ -1345,6 +1345,7 @@ model CompanyQualificationCriteria {
 
   company Company @relation(fields: [companyId], references: [id])
 
+  @@unique([companyId, key])
   @@index([companyId])
   @@index([isActive])
   @@map("company_qualification_criteria")
@@ -1396,6 +1397,8 @@ model CommunicationLog {
   companyId         Int       @map("company_id")
   branchId          Int?      @map("branch_id")
   communicationType String    @map("communication_type")
+  callOutcome       String?   @map("call_outcome")
+  callNature        String?   @map("call_nature")
   summary           String?   @db.Text
   interactionDate   DateTime  @map("interaction_date")
   isDeleted         Boolean   @default(false) @map("is_deleted")

@@ -944,8 +944,11 @@ export const qualifyOpportunityService = async (opportunityId, data, actor, req 
     }
   }
 
-  // Normalize 0–100
-  const computedScore = Math.min(100, Math.max(0, rawScore));
+  // Normalize to 0–100 scale proportionally
+  const totalPossible = criteriaList.reduce((sum, c) => sum + (Number(c.maxPoints) || 0), 0);
+  const computedScore = totalPossible > 0 && totalPossible !== 100
+    ? Math.min(100, Math.max(0, Math.round((rawScore / totalPossible) * 100)))
+    : Math.min(100, Math.max(0, rawScore));
   const passThreshold = companySettings?.passThreshold ?? 60;
   const actorName =
     actor.name ||

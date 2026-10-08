@@ -18,6 +18,7 @@ import { hashPassword } from "../../utils/passwordUtils.js"
 import prisma from "../../config/db.js"
 import { seedCompanySystemRoles } from "../../config/initSystem.js"
 import { seedDefaultOpportunityStages } from "../opportunity/opportunity.repository.js"
+import { ensureCompanyCriteriaSeeded } from "../qualification/qualification-settings.service.js"
 
 /**
  * Onboards a new company and creates its default Company Admin user atomically within a transaction.
@@ -111,7 +112,7 @@ export const createCompanyService = async (data, actor) => {
   const hashedPassword = await hashPassword(adminPassword)
 
   // 6. Execute atomic transaction
-  return prisma.$transaction(async (tx) => {
+  const createdCompany = await prisma.$transaction(async (tx) => {
     // A. Create Company record
     const company = await createCompany({
       name: name.trim(),
@@ -184,7 +185,14 @@ export const createCompanyService = async (data, actor) => {
   }, {
     timeout: 30000 // 30 seconds to prevent Supabase connection timeout issues
   })
-}
+
+  // Eagerly initialize default qualification criteria and settings for the new company
+  await ensureCompanyCriteriaSeeded(createdCompany.id).catch((err) => {
+    console.error(`Failed to eagerly seed qualification criteria for company ${createdCompany.id}:`, err);
+  });
+
+  return createdCompany;
+};
 
 /**
  * Business logic to fetch all companies ordered by creation date.

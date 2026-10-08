@@ -2197,13 +2197,24 @@ export const createCommunicationLogService = async (leadId, data, actor) => {
     throw new ValidationError("Validation failed", [{ field: "interactionDate", message: "Interaction date is required" }]);
   }
 
+  if (communicationType.toUpperCase() === "CALL" && !data.callOutcome) {
+    throw new ValidationError("Validation failed", [{ field: "callOutcome", message: "Call outcome is required for calls" }]);
+  }
+
+  const effectiveCompanyId = lead.companyId ?? actor.companyId;
+  if (!effectiveCompanyId) {
+    throw new BadRequestError("Cannot determine company for this lead communication");
+  }
+
   return prisma.$transaction(async (tx) => {
     const log = await tx.communicationLog.create({
       data: {
         leadId: id,
-        companyId: lead.companyId ?? actor.companyId,
+        companyId: effectiveCompanyId,
         branchId: lead.branchId,
         communicationType: communicationType.toUpperCase(),
+        callOutcome: data.callOutcome || null,
+        callNature: data.callNature || null,
         summary: summary || null,
         interactionDate: new Date(interactionDate),
         createdById: actor.id
@@ -2216,7 +2227,7 @@ export const createCommunicationLogService = async (leadId, data, actor) => {
     await tx.leadActivity.create({
       data: {
         leadId: id,
-        companyId: lead.companyId ?? actor.companyId,
+        companyId: effectiveCompanyId,
         activityType: "COMMUNICATION_LOGGED",
         description: `Logged a ${communicationType.toLowerCase()} communication`,
         performedById: actor.id,

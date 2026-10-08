@@ -163,94 +163,128 @@ export const batchEnsureCompaniesCriteriaSeeded = async (companyIds) => {
   }
 };
 
+// In-flight seeding promise tracker to prevent concurrent initialization race conditions
+const inFlightSeedingPromises = new Map();
+
 /**
- * Seed default BANT qualification criteria for a company — only if none exist yet.
- * Called at startup (via initSystem.js) after the company is guaranteed to exist.
- * NEVER called from a read-request handler.
+ * Seed default BANT qualification criteria for a company — idempotent and concurrency-safe.
  */
 export const ensureCompanyCriteriaSeeded = async (companyId) => {
-  // Deduplicate any duplicate active criteria rows that may exist
-  const allCriteria = await prisma.companyQualificationCriteria.findMany({
-    where: { companyId, isActive: true },
-    orderBy: { id: 'asc' },
-  });
+  const numericCompanyId = Number(companyId);
+  if (!numericCompanyId) return;
 
-  const seenKeys = new Set();
-  const duplicateIds = [];
-  allCriteria.forEach((c) => {
-    if (seenKeys.has(c.key)) {
-      duplicateIds.push(c.id);
-    } else {
-      seenKeys.add(c.key);
+  if (inFlightSeedingPromises.has(numericCompanyId)) {
+    return inFlightSeedingPromises.get(numericCompanyId);
+  }
+
+  const seedingPromise = (async () => {
+    // 1. Deduplicate any duplicate criteria rows that may exist
+    const allCriteria = await prisma.companyQualificationCriteria.findMany({
+      where: { companyId: numericCompanyId, isActive: true },
+      orderBy: { id: 'asc' },
+    });
+
+    const seenKeys = new Set();
+    const duplicateIds = [];
+    allCriteria.forEach((c) => {
+      if (seenKeys.has(c.key)) {
+        duplicateIds.push(c.id);
+      } else {
+        seenKeys.add(c.key);
+      }
+    });
+
+    if (duplicateIds.length > 0) {
+      await prisma.companyQualificationCriteria.deleteMany({
+        where: { id: { in: duplicateIds } },
+      });
     }
-  });
 
-  if (duplicateIds.length > 0) {
-    await prisma.companyQualificationCriteria.deleteMany({
-      where: { id: { in: duplicateIds } },
-    });
-  }
+    // 2. Seed default BANT criteria only if none exist for this company
+    if (seenKeys.size === 0) {
+      await prisma.companyQualificationCriteria.createMany({
+        data: DEFAULT_QUALIFICATION_CRITERIA.map((item) => ({
+          ...item,
+          companyId: numericCompanyId,
+          isActive: true,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
-  // Seed default BANT criteria only if none exist for this company
-  if (seenKeys.size === 0) {
-    await prisma.companyQualificationCriteria.createMany({
-      data: DEFAULT_QUALIFICATION_CRITERIA.map((item) => ({
-        ...item,
-        companyId,
-        isActive: true,
-      })),
-    });
-  }
-
-  // Seed company qualification pass/hold threshold settings if missing
-  const settings = await prisma.companyQualificationSettings.findUnique({
-    where: { companyId },
-  });
-
-  if (!settings) {
-    await prisma.companyQualificationSettings.create({
-      data: {
-        companyId,
+    // 3. Atomically upsert company qualification threshold settings to prevent P2002 conflicts
+    await prisma.companyQualificationSettings.upsert({
+      where: { companyId: numericCompanyId },
+      update: {},
+      create: {
+        companyId: numericCompanyId,
         passThreshold: DEFAULT_SETTINGS.passThreshold,
         holdThreshold: DEFAULT_SETTINGS.holdThreshold,
         validStatuses: DEFAULT_SETTINGS.validStatuses,
       },
     });
-  }
+  })().finally(() => {
+    inFlightSeedingPromises.delete(numericCompanyId);
+  });
+
+  inFlightSeedingPromises.set(numericCompanyId, seedingPromise);
+  return seedingPromise;
 };
 
 /**
- * Get active criteria for a company (Fast direct read with self-healing lazy fallback)
+ * Get active criteria for a company (Fast direct read with self-healing lazy fallback and automatic deduplication)
  */
 export const getCompanyCriteriaService = async (companyId) => {
+  const numericCompanyId = Number(companyId);
   let criteria = await prisma.companyQualificationCriteria.findMany({
-    where: { companyId, isActive: true },
+    where: { companyId: numericCompanyId, isActive: true },
     orderBy: { displayOrder: 'asc' },
   });
 
   if (!criteria || criteria.length === 0) {
-    await ensureCompanyCriteriaSeeded(companyId);
+    await ensureCompanyCriteriaSeeded(numericCompanyId);
     criteria = await prisma.companyQualificationCriteria.findMany({
-      where: { companyId, isActive: true },
+      where: { companyId: numericCompanyId, isActive: true },
       orderBy: { displayOrder: 'asc' },
     });
   }
 
-  return criteria;
+  // Defensive self-healing deduplication by key
+  const seenKeys = new Set();
+  const uniqueCriteria = [];
+  const duplicateIdsToDelete = [];
+
+  for (const c of criteria) {
+    if (seenKeys.has(c.key)) {
+      duplicateIdsToDelete.push(c.id);
+    } else {
+      seenKeys.add(c.key);
+      uniqueCriteria.push(c);
+    }
+  }
+
+  if (duplicateIdsToDelete.length > 0) {
+    prisma.companyQualificationCriteria.deleteMany({
+      where: { id: { in: duplicateIdsToDelete } },
+    }).catch((err) => console.error('Background cleanup of duplicate criteria failed:', err));
+  }
+
+  return uniqueCriteria;
 };
 
 /**
  * Get company threshold settings (Fast direct read with self-healing lazy fallback)
  */
 export const getCompanySettingsService = async (companyId) => {
+  const numericCompanyId = Number(companyId);
   let settings = await prisma.companyQualificationSettings.findUnique({
-    where: { companyId },
+    where: { companyId: numericCompanyId },
   });
 
   if (!settings) {
-    await ensureCompanyCriteriaSeeded(companyId);
+    await ensureCompanyCriteriaSeeded(numericCompanyId);
     settings = await prisma.companyQualificationSettings.findUnique({
-      where: { companyId },
+      where: { companyId: numericCompanyId },
     });
   }
 
@@ -330,11 +364,12 @@ export const calculateBalancedWeights = (criteria) => {
 };
 
 /**
- * Create a new criterion field
+ * Create a new criterion field and atomically rebalance active criteria to 100 points
  */
 export const createCriterionService = async (companyId, data) => {
+  const numericCompanyId = Number(companyId);
   const existingKey = await prisma.companyQualificationCriteria.findFirst({
-    where: { companyId, key: data.key, isActive: true },
+    where: { companyId: numericCompanyId, key: data.key, isActive: true },
   });
 
   if (existingKey) {
@@ -351,27 +386,48 @@ export const createCriterionService = async (companyId, data) => {
   }
 
   const maxOrder = await prisma.companyQualificationCriteria.findFirst({
-    where: { companyId, isActive: true },
+    where: { companyId: numericCompanyId, isActive: true },
     orderBy: { displayOrder: 'desc' },
     select: { displayOrder: true },
   });
 
   const displayOrder = (maxOrder?.displayOrder || 0) + 1;
 
-  return prisma.companyQualificationCriteria.create({
-    data: {
-      companyId,
-      key: data.key,
-      label: data.label,
-      description: data.description || null,
-      fieldType: data.fieldType,
-      maxPoints: Number(data.maxPoints) || 0,
-      options: data.options || null,
-      defaultValue: data.defaultValue !== undefined ? String(data.defaultValue) : null,
-      isRequired: Boolean(data.isRequired),
-      isActive: true,
-      displayOrder,
-    },
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.companyQualificationCriteria.create({
+      data: {
+        companyId: numericCompanyId,
+        key: data.key,
+        label: data.label,
+        description: data.description || null,
+        fieldType: data.fieldType,
+        maxPoints: Number(data.maxPoints) || 0,
+        options: data.options || null,
+        defaultValue: data.defaultValue !== undefined ? String(data.defaultValue) : null,
+        isRequired: Boolean(data.isRequired),
+        isActive: true,
+        displayOrder,
+      },
+    });
+
+    // Auto-balance all active criteria so the matrix remains at exactly 100 points
+    const activeList = await tx.companyQualificationCriteria.findMany({
+      where: { companyId: numericCompanyId, isActive: true },
+      orderBy: { displayOrder: 'asc' },
+    });
+
+    const balanced = calculateBalancedWeights(activeList);
+    for (const item of balanced) {
+      await tx.companyQualificationCriteria.update({
+        where: { id: item.id },
+        data: {
+          maxPoints: item.maxPoints,
+          options: item.options || undefined,
+        },
+      });
+    }
+
+    return created;
   });
 };
 
@@ -379,8 +435,9 @@ export const createCriterionService = async (companyId, data) => {
  * Update an existing criterion field
  */
 export const updateCriterionService = async (companyId, id, data) => {
+  const numericCompanyId = Number(companyId);
   const existing = await prisma.companyQualificationCriteria.findFirst({
-    where: { id: Number(id), companyId, isActive: true },
+    where: { id: Number(id), companyId: numericCompanyId, isActive: true },
   });
 
   if (!existing) {
@@ -414,20 +471,42 @@ export const updateCriterionService = async (companyId, id, data) => {
 };
 
 /**
- * Soft-delete a criterion field (Edge Case 5)
+ * Soft-delete a criterion field and atomically rebalance remaining criteria to 100 points
  */
 export const softDeleteCriterionService = async (companyId, id) => {
+  const numericCompanyId = Number(companyId);
   const existing = await prisma.companyQualificationCriteria.findFirst({
-    where: { id: Number(id), companyId, isActive: true },
+    where: { id: Number(id), companyId: numericCompanyId, isActive: true },
   });
 
   if (!existing) {
     throw new AppError('Criterion not found', 404);
   }
 
-  return prisma.companyQualificationCriteria.update({
-    where: { id: Number(id) },
-    data: { isActive: false },
+  return prisma.$transaction(async (tx) => {
+    await tx.companyQualificationCriteria.update({
+      where: { id: Number(id) },
+      data: { isActive: false },
+    });
+
+    // Auto-balance remaining active criteria so total weights equal exactly 100 points
+    const remainingActive = await tx.companyQualificationCriteria.findMany({
+      where: { companyId: numericCompanyId, isActive: true },
+      orderBy: { displayOrder: 'asc' },
+    });
+
+    if (remainingActive.length > 0) {
+      const balanced = calculateBalancedWeights(remainingActive);
+      for (const item of balanced) {
+        await tx.companyQualificationCriteria.update({
+          where: { id: item.id },
+          data: {
+            maxPoints: item.maxPoints,
+            options: item.options || undefined,
+          },
+        });
+      }
+    }
   });
 };
 
