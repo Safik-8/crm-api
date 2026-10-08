@@ -77,7 +77,17 @@ const assertFollowupScope = (actor, followup, bdeTeamMemberIds = null) => {
  * Log a LeadActivity. Non-blocking — errors are swallowed.
  * metadata is a PLAIN JS OBJECT. Prisma Json? handles serialization natively.
  */
-const logFollowupActivity = async (leadId, companyId, activityType, description, metadata, performedById, req = null) => {
+const logFollowupActivity = async ({
+  leadId,
+  companyId,
+  activityType,
+  description,
+  metadata,
+  performedById,
+  actionType = "UPDATE",
+  oldValue = null,
+  req = null
+}) => {
   try {
     await prisma.leadActivity.create({
       data: {
@@ -97,10 +107,11 @@ const logFollowupActivity = async (leadId, companyId, activityType, description,
     req,
     companyId: companyId ?? null,
     moduleName: "FOLLOWUP",
-    actionType: "CREATE",
+    actionType,
     entityType: "LEAD",
     entityId: leadId,
     action: activityType,
+    oldValue: oldValue ? (typeof oldValue === 'string' ? oldValue : JSON.stringify(oldValue)) : null,
     newValue: typeof metadata === 'string' ? metadata : JSON.stringify(metadata ?? {}),
     performedById,
   });
@@ -230,12 +241,16 @@ export const createFollowupService = async (data, actor) => {
     createdById:  actor.id,
   });
 
-  await logFollowupActivity(
-    leadId, lead.companyId, "FOLLOWUP_CREATED",
-    `Follow-up scheduled: ${data.followupType} on ${scheduledAt.toLocaleDateString("en-IN")}`,
-    { followupId: followup.id, followupType: data.followupType, scheduledAt: data.scheduledAt, assignedToId },
-    actor.id
-  );
+  await logFollowupActivity({
+    leadId,
+    companyId: lead.companyId,
+    activityType: "FOLLOWUP_CREATED",
+    description: `Follow-up scheduled: ${data.followupType} on ${scheduledAt.toLocaleDateString("en-IN")}`,
+    metadata: { followupId: followup.id, followupType: data.followupType, scheduledAt: data.scheduledAt, assignedToId },
+    performedById: actor.id,
+    actionType: "CREATE",
+    oldValue: null
+  });
 
   // Fan-out SCHEDULED notification to: assigned user + creator + BM + CA + SA
   fanOutFollowupNotification(
@@ -374,12 +389,16 @@ export const updateFollowupService = async (id, data, actor) => {
   if (data.notes !== undefined) updateData.notes = data.notes?.trim() || null;
 
   const updated = await updateFollowupDb(followupId, updateData);
-  await logFollowupActivity(
-    followup.leadId, followup.companyId, "FOLLOWUP_UPDATED",
-    `Follow-up rescheduled: ${updated.followupType}`,
-    { followupId, followupType: updated.followupType, scheduledAt: updated.scheduledAt },
-    actor.id
-  );
+  await logFollowupActivity({
+    leadId: followup.leadId,
+    companyId: followup.companyId,
+    activityType: "FOLLOWUP_UPDATED",
+    description: `Follow-up rescheduled: ${updated.followupType}`,
+    metadata: { followupId, followupType: updated.followupType, scheduledAt: updated.scheduledAt, notes: updated.notes },
+    performedById: actor.id,
+    actionType: "UPDATE",
+    oldValue: { followupId, followupType: followup.followupType, scheduledAt: followup.scheduledAt, notes: followup.notes }
+  });
   return updated;
 };
 
@@ -411,12 +430,27 @@ export const completeFollowupService = async (id, data, actor) => {
     completionNotes: data.completionNotes?.trim() || null,
     updatedById:     actor.id,
   });
-  await logFollowupActivity(
-    followup.leadId, followup.companyId, "FOLLOWUP_COMPLETED",
-    `Follow-up completed: ${followup.followupType}`,
-    { followupId, followupType: followup.followupType, completedAt: updated.completedAt },
-    actor.id
-  );
+  await logFollowupActivity({
+    leadId: followup.leadId,
+    companyId: followup.companyId,
+    activityType: "FOLLOWUP_COMPLETED",
+    description: `Follow-up completed: ${followup.followupType}`,
+    metadata: {
+      followupId,
+      followupType: followup.followupType,
+      status: "COMPLETED",
+      completedAt: updated.completedAt,
+      completionNotes: updated.completionNotes
+    },
+    performedById: actor.id,
+    actionType: "UPDATE",
+    oldValue: {
+      followupId,
+      followupType: followup.followupType,
+      status: followup.status,
+      scheduledAt: followup.scheduledAt
+    }
+  });
 
   // Fan-out COMPLETED notification to: assigned user + creator + BM + CA + SA
   fanOutFollowupNotification(
@@ -445,12 +479,16 @@ export const cancelFollowupService = async (id, actor) => {
   assertFollowupScope(actor, followup, bdeTeamMemberIds);
 
   const updated = await updateFollowupDb(followupId, { status: "CANCELLED", updatedById: actor.id });
-  await logFollowupActivity(
-    followup.leadId, followup.companyId, "FOLLOWUP_CANCELLED",
-    `Follow-up cancelled: ${followup.followupType}`,
-    { followupId, followupType: followup.followupType },
-    actor.id
-  );
+  await logFollowupActivity({
+    leadId: followup.leadId,
+    companyId: followup.companyId,
+    activityType: "FOLLOWUP_CANCELLED",
+    description: `Follow-up cancelled: ${followup.followupType}`,
+    metadata: { followupId, followupType: followup.followupType, status: "CANCELLED" },
+    performedById: actor.id,
+    actionType: "UPDATE",
+    oldValue: { followupId, followupType: followup.followupType, status: followup.status }
+  });
 
   // Fan-out CANCELLED notification to: assigned user + creator + BM + CA + SA
   fanOutFollowupNotification(
@@ -477,11 +515,15 @@ export const deleteFollowupService = async (id, actor) => {
   assertFollowupScope(actor, followup, bdeTeamMemberIds);
 
   await deleteFollowupDb(followupId);
-  await logFollowupActivity(
-    followup.leadId, followup.companyId, "FOLLOWUP_DELETED",
-    `Follow-up deleted: ${followup.followupType}`,
-    { followupId, followupType: followup.followupType },
-    actor.id
-  );
+  await logFollowupActivity({
+    leadId: followup.leadId,
+    companyId: followup.companyId,
+    activityType: "FOLLOWUP_DELETED",
+    description: `Follow-up deleted: ${followup.followupType}`,
+    metadata: { followupId, followupType: followup.followupType },
+    performedById: actor.id,
+    actionType: "DELETE",
+    oldValue: { followupId, followupType: followup.followupType, scheduledAt: followup.scheduledAt, status: followup.status }
+  });
   return { success: true, message: "Follow-up deleted successfully" };
 };

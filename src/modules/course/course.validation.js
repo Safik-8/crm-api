@@ -8,8 +8,8 @@ import { ValidationError } from "../../utils/AppError.js";
  */
 export const createCourseSchema = z.object({
   name: z.string({
-    required_error: "Course name is required"
-  }).trim().min(1, "Course name cannot be empty"),
+    required_error: "Service name is required"
+  }).trim().min(1, "Service name cannot be empty"),
   
   code: z.string().trim().toUpperCase().nullable().optional(), // Normalize course codes to uppercase
   
@@ -47,11 +47,11 @@ export const createCourseSchema = z.object({
  * All fields are optional but must meet rules if provided.
  */
 export const updateCourseSchema = z.object({
-  name: z.string().trim().min(1, "Course name cannot be empty").optional(),
+  name: z.string().trim().min(1, "Service name cannot be empty").optional(),
   
   // Note: code is typically immutable to prevent integrity issues.
   // We keep it optional here in case admins are allowed to correct typo during creation.
-  code: z.string().trim().min(1, "Course code cannot be empty").toUpperCase().nullable().optional(),
+  code: z.string().trim().min(1, "Service code cannot be empty").toUpperCase().nullable().optional(),
   
   description: z.string().trim().optional().nullable(),
   
