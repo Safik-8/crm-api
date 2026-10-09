@@ -20,7 +20,7 @@ export async function findGlobalMetrics({ startDate, endDate } = {}) {
     prisma.lead.count({ where: { isQualified: true, isDeleted: false } }),
     prisma.opportunity.count({ where: { isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
     prisma.deal.aggregate({ where: { outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, _sum: { finalAmount: true }, _count: { id: true } }),
-    prisma.customer.count({ where: { isDeleted: false } }),
+    prisma.customer.count({ where: { isDeleted: false, status: "ACTIVE" } }),
     prisma.followup.count({ where: { status: "PENDING", scheduledAt: { gte: new Date(new Date().setHours(0,0,0,0)), lte: new Date(new Date().setHours(23,59,59,999)) } } }),
   ]);
 
@@ -70,7 +70,7 @@ export async function findCompanyMetrics({ companyId, startDate, endDate } = {})
     prisma.lead.count({ where: { ...w, isQualified: true, isDeleted: false } }),
     prisma.opportunity.count({ where: { ...w, isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
     prisma.deal.aggregate({ where: { ...w, outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, _sum: { finalAmount: true }, _count: { id: true } }),
-    prisma.customer.count({ where: { ...w, isDeleted: false } }),
+    prisma.customer.count({ where: { ...w, isDeleted: false, status: "ACTIVE" } }),
     prisma.followup.count({ where: { ...w, status: "PENDING", scheduledAt: { gte: new Date(new Date().setHours(0,0,0,0)), lte: new Date(new Date().setHours(23,59,59,999)) } } }),
   ]);
 
@@ -118,7 +118,7 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
     prisma.lead.count({ where: { ...w, isQualified: true, isDeleted: false } }),
     prisma.opportunity.count({ where: { ...w, isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
     prisma.deal.aggregate({ where: { ...w, outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, _sum: { finalAmount: true }, _count: { id: true } }),
-    prisma.customer.count({ where: { ...w, isDeleted: false } }),
+    prisma.customer.count({ where: { ...w, isDeleted: false, status: "ACTIVE" } }),
     prisma.followup.count({ where: { ...w, status: "PENDING", scheduledAt: { gte: new Date(new Date().setHours(0,0,0,0)), lte: new Date(new Date().setHours(23,59,59,999)) } } }),
     prisma.user.count({ where: { ...w, status: "ACTIVE", userRoles: { some: { role: { name: "BDE" } } } } }),
     prisma.user.count({ where: { ...w, status: "ACTIVE", userRoles: { some: { role: { name: "ISE" } } } } }),

@@ -85,8 +85,11 @@ export const evaluateLeadService = async (leadId, data, actor) => {
     }
   }
 
-  // Normalize score between 0 and 100 (Edge Case 2)
-  const computedScore = Math.min(100, Math.max(0, rawScore));
+  // Normalize score between 0 and 100 proportionally (Edge Case 2)
+  const totalPossible = criteriaList.reduce((sum, c) => sum + (Number(c.maxPoints) || 0), 0);
+  const computedScore = totalPossible > 0 && totalPossible !== 100
+    ? Math.min(100, Math.max(0, Math.round((rawScore / totalPossible) * 100)))
+    : Math.min(100, Math.max(0, rawScore));
 
   // Determine outcome status
   let status = 'UNQUALIFIED';

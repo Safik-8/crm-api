@@ -108,24 +108,56 @@ export const getRolesService = async (query, actor) => {
 
   let filteredRoles = roles
   if (companyIdFilter !== null) {
-    const counts = await prisma.userRole.groupBy({
-      by: ["roleId"],
+    // Reconcile role assignments for users within the company scope:
+    // 1. Fetch user role mappings for active users belonging to this company (matching companyId on User or UserRole)
+    const userRoleMappings = await prisma.userRole.findMany({
       where: {
-        companyId: companyIdFilter
+        OR: [
+          { companyId: companyIdFilter },
+          { user: { companyId: companyIdFilter } }
+        ],
+        user: {
+          status: "ACTIVE"
+        }
       },
-      _count: {
-        id: true
+      select: {
+        userId: true,
+        roleId: true,
+        role: {
+          select: {
+            id: true,
+            name: true,
+            companyId: true
+          }
+        }
       }
     })
 
-    const countMap = {}
-    counts.forEach(c => {
-      countMap[c.roleId] = c._count.id
+    // 2. Count distinct active users for each role, reconciling both exact roleId
+    // and matching role name (e.g., built-in template vs company-specific instance)
+    const roleUserCounts = new Map()
+
+    filteredRoles.forEach(role => {
+      const usersForRole = new Set()
+      const roleNameNormalized = role.name ? role.name.trim().toUpperCase() : ""
+
+      userRoleMappings.forEach(ur => {
+        // Direct roleId match
+        if (ur.roleId === role.id) {
+          usersForRole.add(ur.userId)
+        }
+        // Match by role name to reconcile built-in template vs company role copies
+        else if (ur.role?.name && ur.role.name.trim().toUpperCase() === roleNameNormalized) {
+          usersForRole.add(ur.userId)
+        }
+      })
+
+      roleUserCounts.set(role.id, usersForRole.size)
     })
 
     filteredRoles.forEach(role => {
       role._count = {
-        userRoles: countMap[role.id] || 0
+        userRoles: roleUserCounts.get(role.id) || 0
       }
     })
   }
