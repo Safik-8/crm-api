@@ -1,6 +1,33 @@
 import prisma from "../../config/db.js";
 
 /**
+ * Grouped UI module mapping to canonical database module identifiers.
+ */
+export const MODULE_GROUP_MAP = {
+  SALES: ["SALES", "OPPORTUNITY", "DEAL", "PROPOSAL"],
+  LEAD: ["LEAD", "PIPELINE"],
+  SECURITY: ["SECURITY", "ROLE_PERMISSION", "ROLE_MANAGEMENT", "ROLE", "PERMISSION", "RBAC"],
+  ORGANIZATION: ["ORGANIZATION", "COMPANY_BRANCH", "COMPANY", "BRANCH"],
+  TEAM: ["TEAM", "TEAM_MANAGEMENT"],
+  USER: ["USER", "USER_MANAGEMENT"],
+  SETTINGS: ["SETTINGS", "SYSTEM_SETTINGS"],
+  FOLLOWUP: ["FOLLOWUP", "ACTIVITY", "COMMUNICATION"],
+  REPORT: ["REPORT", "REPORTS", "EXPORT"],
+  AUTH: ["AUTH", "AUTHENTICATION"],
+  KPI: ["KPI"],
+  SYSTEM: ["SYSTEM"],
+};
+
+export const resolveModuleFilter = (moduleName) => {
+  if (!moduleName || typeof moduleName !== "string" || !moduleName.trim()) return undefined;
+  const key = moduleName.trim().toUpperCase();
+  if (MODULE_GROUP_MAP[key]) {
+    return { in: MODULE_GROUP_MAP[key] };
+  }
+  return { in: [key, moduleName.trim()] };
+};
+
+/**
  * Persists an enterprise audit log record into the database safely.
  * Non-blocking error isolation — executed within or after DB transactions.
  * @param {Object} data - Audit log payload
@@ -101,9 +128,10 @@ export const getAuditLogsPaginated = async (filters, actor) => {
     where.performedById = Number(performedById);
   }
 
-  // 4. Module filter
-  if (moduleName) {
-    where.moduleName = moduleName;
+  // 4. Module filter (Supports grouped canonical module mappings)
+  if (moduleName && moduleName.trim()) {
+    const modFilter = resolveModuleFilter(moduleName);
+    if (modFilter) where.moduleName = modFilter;
   }
 
   // 5. Action Type Filter (Supports legacy AUTH mapping to LOGIN/LOGOUT)
@@ -359,9 +387,10 @@ export const getAuditLogsForExport = async (filters = {}, actor) => {
     lte: end,
   };
 
-  // Optional moduleName filter
+  // Optional moduleName filter (Supports grouped canonical module mappings)
   if (moduleName && moduleName.trim()) {
-    where.moduleName = moduleName.trim();
+    const modFilter = resolveModuleFilter(moduleName);
+    if (modFilter) where.moduleName = modFilter;
   }
 
   // Optional actionType filter

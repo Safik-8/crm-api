@@ -7,11 +7,33 @@ import prisma from "../../config/db.js"
  * @param {string} email
  * @returns {Promise<object|null>}
  */
+const COMPANY_AUTH_SELECT = {
+  id: true,
+  name: true,
+  code: true,
+  logo: true,
+  industry: true,
+  website: true,
+  address: true,
+  status: true,
+  settings: {
+    select: {
+      primaryColor: true,
+      secondaryColor: true,
+      accentColor: true,
+      themeMode: true,
+      companyLogo: true,
+      faviconUrl: true,
+      loginBackgroundUrl: true,
+    }
+  }
+}
+
 export const findUserByEmail = async (email) => {
   return prisma.user.findUnique({
     where: { email },
     include: {
-      company: { select: { id: true, name: true, code: true, logo: true, industry: true, website: true, address: true, status: true } },
+      company: { select: COMPANY_AUTH_SELECT },
       branch: { select: { id: true, name: true, code: true, status: true } },
       userRoles: {
         include: {
@@ -28,13 +50,12 @@ export const findUserByEmail = async (email) => {
  * Find a user by their ID, including associated company, branch, and roles/permissions.
  * @param {number} id
  * @returns {Promise<object|null>}
- * @returns {Promise<object|null>}
  */
 export const findUserById = async (id) => {
   return prisma.user.findUnique({
     where: { id },
     include: {
-      company: { select: { id: true, name: true, code: true, logo: true, industry: true, website: true, address: true, status: true } },
+      company: { select: COMPANY_AUTH_SELECT },
       branch: { select: { id: true, name: true, code: true, status: true } },
       userRoles: {
         include: {

@@ -11,6 +11,7 @@ import {
     ensureCompanyCriteriaSeeded,
     batchEnsureCompaniesCriteriaSeeded
 } from "../modules/qualification/qualification-settings.service.js"
+import { seedDefaultOpportunityStages } from "../modules/opportunity/opportunity.repository.js"
 
 // ══════════════════════════════════════
 // SYSTEM ROLES — seeds on every startup
@@ -774,6 +775,9 @@ export const initializeSystem = async () => {
                         console.log(`✅ Default services seeded for company: ${company.name}`);
                     }
                 }
+
+                // Ensure default opportunity stages exist for each company
+                await seedDefaultOpportunityStages(company.id);
             }
         }
 

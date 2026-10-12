@@ -247,6 +247,39 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
 };
 
 /**
+ * Ensures a company has default Opportunity stages seeded.
+ * Upserts 8 system stages: Qualification, Needs Analysis, Proposal, Negotiation, Final Review, Won, Lost, Cancelled.
+ */
+export const seedDefaultOpportunityStages = async (companyId, tx = prisma) => {
+  if (!companyId) return [];
+  const cId = Number(companyId);
+
+  const defaultStages = [
+    { companyId: cId, name: 'Qualification', code: 'QUALIFICATION', displayOrder: 1, colorCode: '#6366f1', defaultProbabilityPct: 10, stageType: 'QUALIFICATION', isSystem: true },
+    { companyId: cId, name: 'Needs Analysis', code: 'NEEDS_ANALYSIS', displayOrder: 2, colorCode: '#3b82f6', defaultProbabilityPct: 25, stageType: 'REGULAR', isSystem: false },
+    { companyId: cId, name: 'Proposal', code: 'PROPOSAL', displayOrder: 3, colorCode: '#8b5cf6', defaultProbabilityPct: 50, stageType: 'REGULAR', isSystem: false },
+    { companyId: cId, name: 'Negotiation', code: 'NEGOTIATION', displayOrder: 4, colorCode: '#f59e0b', defaultProbabilityPct: 75, stageType: 'REGULAR', isSystem: false },
+    { companyId: cId, name: 'Final Review', code: 'FINAL_REVIEW', displayOrder: 5, colorCode: '#10b981', defaultProbabilityPct: 90, stageType: 'REGULAR', isSystem: false },
+    { companyId: cId, name: 'Won', code: 'WON', displayOrder: 6, colorCode: '#10b981', defaultProbabilityPct: 100, stageType: 'WON', isSystem: true },
+    { companyId: cId, name: 'Lost', code: 'LOST', displayOrder: 7, colorCode: '#ef4444', defaultProbabilityPct: 0, stageType: 'LOST', isSystem: true },
+    { companyId: cId, name: 'Cancelled', code: 'CANCELLED', displayOrder: 8, colorCode: '#6b7280', defaultProbabilityPct: 0, stageType: 'CANCELLED', isSystem: true },
+  ];
+
+  for (const st of defaultStages) {
+    await tx.opportunityStage.upsert({
+      where: { companyId_code: { companyId: st.companyId, code: st.code } },
+      update: {},
+      create: st,
+    });
+  }
+
+  return tx.opportunityStage.findMany({
+    where: { companyId: cId, status: 'ACTIVE' },
+    orderBy: { displayOrder: 'asc' },
+  });
+};
+
+/**
  * Creates an Opportunity record atomically inside a Prisma Transaction
  * Writes to Opportunity, LeadActivity, and AuditLog tables
  */
@@ -266,38 +299,45 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
       }
     }
 
-    // 0b. Resolve target OpportunityStage and default probability from payload or SystemSettings
+    // 0b. Resolve target OpportunityStage and default probability from payload or CompanySettings
     let stageId = data.stageId ? Number(data.stageId) : null;
     let targetStage = null;
     let sysSettings = null;
 
     if (companyId) {
       try {
-        sysSettings = await tx.systemSettings.findUnique({
+        sysSettings = await tx.companySettings.findUnique({
           where: { companyId: Number(companyId) },
           select: { defaultOpportunityStageId: true, defaultOpportunityWinProb: true }
         });
       } catch (_) {}
     }
 
-    if (stageId) {
+    if (stageId && companyId) {
       targetStage = await tx.opportunityStage.findFirst({
-        where: { id: stageId, companyId },
+        where: { id: stageId, companyId, status: 'ACTIVE' },
       });
     }
 
-    if (!targetStage && sysSettings?.defaultOpportunityStageId) {
+    if (!targetStage && sysSettings?.defaultOpportunityStageId && companyId) {
       targetStage = await tx.opportunityStage.findFirst({
         where: { id: sysSettings.defaultOpportunityStageId, companyId, status: 'ACTIVE' },
       });
     }
 
-    if (!targetStage) {
+    if (!targetStage && companyId) {
       targetStage = await tx.opportunityStage.findFirst({
-        where: { companyId, status: 'ACTIVE' },
+        where: { companyId: Number(companyId), status: 'ACTIVE' },
         orderBy: { displayOrder: 'asc' },
       });
     }
+
+    // Defensive Auto-Seed: If company still has no OpportunityStage seeded, auto-seed default stages on the fly
+    if (!targetStage && companyId) {
+      const seededStages = await seedDefaultOpportunityStages(companyId, tx);
+      targetStage = seededStages.find(s => s.code === 'QUALIFICATION') || seededStages[0] || null;
+    }
+
     if (!targetStage) {
       targetStage = await tx.opportunityStage.findFirst({
         where: { status: 'ACTIVE' },
@@ -305,11 +345,24 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
       });
     }
 
-    stageId = targetStage ? targetStage.id : 1;
+    if (!targetStage) {
+      throw new ValidationError('No active opportunity stage found. Please configure opportunity stages in Settings.');
+    }
+
+    stageId = targetStage.id;
 
     let probability = data.probabilityPercentage;
     if (probability === undefined || probability === null || probability === '') {
       probability = sysSettings?.defaultOpportunityWinProb || targetStage?.defaultProbabilityPct || 50;
+    }
+
+    let validProductId = null;
+    if (data.productId) {
+      const course = await tx.course.findUnique({
+        where: { id: Number(data.productId) },
+        select: { id: true },
+      });
+      if (course) validProductId = course.id;
     }
 
     // 2. Create Opportunity
@@ -319,7 +372,7 @@ export const createOpportunityTx = async (companyId, branchId, data, ownerId, cr
         branchId: branchId || null,
         opportunityName: data.opportunityName,
         leadId: data.leadId,
-        productId: data.productId || null,
+        productId: validProductId,
         teamId: data.teamId || null,
         stageId: stageId,
         ownerId: ownerId,

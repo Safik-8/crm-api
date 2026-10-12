@@ -8,7 +8,8 @@ import { rateLimit } from "express-rate-limit"
  */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 5,
+  limit: process.env.NODE_ENV === "development" ? 50 : 10,
+  skipSuccessfulRequests: true, // Only count failed logins (brute-force defense)
   standardHeaders: "draft-7",
   legacyHeaders: false,
   statusCode: 429,
@@ -16,7 +17,7 @@ export const loginLimiter = rateLimit({
     success: false,
     statusCode: 429,
     code: "TOO_MANY_REQUESTS",
-    message: "Too many login attempts. Please try again after 15 minutes."
+    message: "Too many failed login attempts. Please try again after 15 minutes."
   }
 })
 

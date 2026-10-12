@@ -2214,6 +2214,12 @@ export const createCommunicationLogService = async (leadId, data, actor) => {
     }
   }
 
+  const effectiveCompanyId = lead.companyId ?? actor.companyId;
+  if (!effectiveCompanyId) {
+    throw new BadRequestError("Cannot determine company for this lead communication");
+  }
+
+
   return prisma.$transaction(async (tx) => {
     if (normalizedType === "CALL") {
       // Intelligent Call Classification Engine:
@@ -2237,7 +2243,7 @@ export const createCommunicationLogService = async (leadId, data, actor) => {
     const log = await tx.communicationLog.create({
       data: {
         leadId: id,
-        companyId: lead.companyId ?? actor.companyId,
+        companyId: effectiveCompanyId,
         branchId: lead.branchId,
         communicationType: normalizedType,
         callOutcome: normalizedOutcome,
@@ -2257,7 +2263,7 @@ export const createCommunicationLogService = async (leadId, data, actor) => {
     await tx.leadActivity.create({
       data: {
         leadId: id,
-        companyId: lead.companyId ?? actor.companyId,
+        companyId: effectiveCompanyId,
         activityType: "COMMUNICATION_LOGGED",
         description: `Logged a ${natureLabel}${outcomeLabel}`,
         performedById: actor.id,

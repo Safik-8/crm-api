@@ -163,6 +163,7 @@ export const loginUserService = async (email, password, metadata = {}) => {
       companyName     : user.company?.name    ?? null,
       companyCode     : user.company?.code    ?? null,
       company         : user.company,
+      companySettings : user.company?.settings ?? null,
       branchId        : user.branchId,
       branchName      : user.branch?.name     ?? null,
       branchCode      : user.branch?.code     ?? null,
