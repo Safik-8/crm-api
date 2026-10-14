@@ -1,6 +1,7 @@
 import { NotFoundError, ForbiddenError, ValidationError } from '../../utils/AppError.js';
 import { ROLE_RANKS } from '../../config/roleConstants.js';
 import * as customerRepository from './customer.repository.js';
+import { createAuditLogRecord } from '../auditLog/auditLog.repository.js';
 
 /**
  * List customers — paginated, filtered, RBAC-scoped.
@@ -85,5 +86,25 @@ export const updateCustomerStatus = async (actor, id, status) => {
   const customer = await customerRepository.findCustomerById(id, scopedWhere);
   if (!customer) throw new NotFoundError('Customer');
 
-  return customerRepository.updateCustomerStatus(id, status, actor.id);
+  const oldStatus = customer.status;
+  const updatedCustomer = await customerRepository.updateCustomerStatus(id, status, actor.id);
+
+  try {
+    await createAuditLogRecord({
+      companyId: customer.companyId,
+      branchId: customer.branchId,
+      moduleName: 'SALES',
+      actionType: 'UPDATE',
+      entityType: 'CUSTOMER',
+      recordId: customer.id,
+      action: status === 'ACTIVE' ? 'CUSTOMER_ACTIVATED' : 'CUSTOMER_DEACTIVATED',
+      oldValue: { status: oldStatus },
+      newValue: { status },
+      performedById: actor.id,
+    });
+  } catch (err) {
+    console.error('[CustomerService] Failed to record customer status audit log:', err?.message || err);
+  }
+
+  return updatedCustomer;
 };

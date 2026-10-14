@@ -4,7 +4,7 @@ import prisma from "../../config/db.js";
  * Grouped UI module mapping to canonical database module identifiers.
  */
 export const MODULE_GROUP_MAP = {
-  SALES: ["SALES", "OPPORTUNITY", "DEAL", "PROPOSAL"],
+  SALES: ["SALES", "OPPORTUNITY", "DEAL", "PROPOSAL", "CUSTOMER"],
   LEAD: ["LEAD", "PIPELINE"],
   SECURITY: ["SECURITY", "ROLE_PERMISSION", "ROLE_MANAGEMENT", "ROLE", "PERMISSION", "RBAC"],
   ORGANIZATION: ["ORGANIZATION", "COMPANY_BRANCH", "COMPANY", "BRANCH"],
