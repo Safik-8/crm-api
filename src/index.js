@@ -164,6 +164,7 @@ const startServer = async () => {
     // Step 3 → Create HTTP server and initialize sockets
     const httpServer = http.createServer(app)
     initSockets(httpServer)
+    console.log("✅ WebSocket server initialized")
 
     // Step 4 → Start listening
     httpServer.listen(PORT, () => {

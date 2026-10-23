@@ -27,7 +27,7 @@ export const socketAuthMiddleware = async (socket, next) => {
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, companyId: true, branchId: true, status: true },
+      select: { id: true, name: true, email: true, companyId: true, branchId: true, status: true },
     });
 
     if (!user || user.status !== "ACTIVE") {
@@ -36,6 +36,8 @@ export const socketAuthMiddleware = async (socket, next) => {
 
     socket.user = {
       id: user.id,
+      name: user.name,
+      email: user.email,
       companyId: user.companyId,
       branchId: user.branchId,
     };

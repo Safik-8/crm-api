@@ -3,6 +3,8 @@
 import prisma from "../src/config/db.js";
 import { initializeSystem } from "../src/config/initSystem.js";
 
+import { hashPassword } from "../src/utils/passwordUtils.js";
+
 async function main() {
   console.log("🚀 Starting Complete Demo Data Seed...");
 
@@ -10,16 +12,144 @@ async function main() {
   await initializeSystem();
   console.log("✅ System initialization completed.");
 
-  // 2. Fetch Base Entities
-  const company = await prisma.company.findFirst({ where: { code: "STACKDOT" } });
-  const branch  = await prisma.branch.findFirst({ where: { code: "HQ-01" } });
-  const bdeUser = await prisma.user.findFirst({ where: { email: "bde@stackdot.in" } });
-  const iseUser = await prisma.user.findFirst({ where: { email: "ise@stackdot.in" } });
-  const adminUser = await prisma.user.findFirst({ where: { email: "admin@stackdot.in" } });
-
-  if (!company || !branch || !bdeUser || !iseUser || !adminUser) {
-    throw new Error("Base company, branch, or users missing after system init.");
+  // 2. Fetch or Create Base Entities
+  let company = await prisma.company.findFirst({ where: { code: "STACKDOT" } });
+  if (!company) {
+    company = await prisma.company.create({
+      data: { name: "StackDot", code: "STACKDOT", status: "ACTIVE" }
+    });
+    console.log("✅ Created Company: StackDot");
   }
+
+  let branch = await prisma.branch.findFirst({ where: { code: "HQ-01" } });
+  if (!branch) {
+    branch = await prisma.branch.create({
+      data: {
+        companyId: company.id,
+        name: "Headquarters",
+        code: "HQ-01",
+        address: "Main Office",
+        location: "Rajkot, Gujarat",
+        status: "ACTIVE"
+      }
+    });
+    console.log("✅ Created Branch: Headquarters (HQ-01)");
+  }
+
+  // Ensure Roles exist
+  const companyAdminRole =
+    (await prisma.role.findFirst({ where: { name: "COMPANY_ADMIN", companyId: company.id } })) ||
+    (await prisma.role.findFirst({ where: { name: "COMPANY_ADMIN", companyId: null } }));
+  const branchManagerRole =
+    (await prisma.role.findFirst({ where: { name: "BRANCH_MANAGER", companyId: company.id } })) ||
+    (await prisma.role.findFirst({ where: { name: "BRANCH_MANAGER", companyId: null } }));
+  const bdeRole =
+    (await prisma.role.findFirst({ where: { name: "BDE", companyId: company.id } })) ||
+    (await prisma.role.findFirst({ where: { name: "BDE", companyId: null } }));
+  const iseRole =
+    (await prisma.role.findFirst({ where: { name: "ISE", companyId: company.id } })) ||
+    (await prisma.role.findFirst({ where: { name: "ISE", companyId: null } }));
+
+  const defaultPasswordHash = await hashPassword("password123");
+
+  const ensureUserRole = async (userId, roleId, assignedBy = null) => {
+    if (!roleId) return;
+    const existing = await prisma.userRole.findFirst({ where: { userId, roleId } });
+    if (!existing) {
+      await prisma.userRole.create({
+        data: {
+          userId,
+          roleId,
+          companyId: company.id,
+          branchId: branch.id,
+          isPrimary: true,
+          assignedBy
+        }
+      });
+    }
+  };
+
+  // 1. Company Admin (Rank 80)
+  let adminUser = await prisma.user.findFirst({ where: { email: "admin@stackdot.in" } });
+  if (!adminUser) {
+    adminUser = await prisma.user.create({
+      data: {
+        name: "Dinesh Baraiya",
+        firstName: "Dinesh",
+        lastName: "Baraiya",
+        email: "admin@stackdot.in",
+        employeeId: "EMP-00001",
+        passwordHash: defaultPasswordHash,
+        status: "ACTIVE",
+        companyId: company.id,
+        branchId: branch.id,
+        reportingManagerId: null
+      }
+    });
+  }
+  await ensureUserRole(adminUser.id, companyAdminRole?.id);
+
+  // 2. Branch Manager (Rank 60)
+  let managerUser = await prisma.user.findFirst({ where: { email: "manager@stackdot.in" } });
+  if (!managerUser) {
+    managerUser = await prisma.user.create({
+      data: {
+        name: "Jeet Jagani",
+        firstName: "Jeet",
+        lastName: "Jagani",
+        email: "manager@stackdot.in",
+        employeeId: "EMP-00002",
+        passwordHash: defaultPasswordHash,
+        status: "ACTIVE",
+        companyId: company.id,
+        branchId: branch.id,
+        reportingManagerId: adminUser.id
+      }
+    });
+  }
+  await ensureUserRole(managerUser.id, branchManagerRole?.id, adminUser.id);
+
+  // 3. BDE (Rank 40)
+  let bdeUser = await prisma.user.findFirst({ where: { email: "bde@stackdot.in" } });
+  if (!bdeUser) {
+    bdeUser = await prisma.user.create({
+      data: {
+        name: "Vivek Godhani",
+        firstName: "Vivek",
+        lastName: "Godhani",
+        email: "bde@stackdot.in",
+        employeeId: "EMP-00003",
+        passwordHash: defaultPasswordHash,
+        status: "ACTIVE",
+        companyId: company.id,
+        branchId: branch.id,
+        reportingManagerId: managerUser.id
+      }
+    });
+  }
+  await ensureUserRole(bdeUser.id, bdeRole?.id, managerUser.id);
+
+  // 4. ISE (Rank 20)
+  let iseUser = await prisma.user.findFirst({ where: { email: "ise@stackdot.in" } });
+  if (!iseUser) {
+    iseUser = await prisma.user.create({
+      data: {
+        name: "Pratik Vaghela",
+        firstName: "Pratik",
+        lastName: "Vaghela",
+        email: "ise@stackdot.in",
+        employeeId: "EMP-00004",
+        passwordHash: defaultPasswordHash,
+        status: "ACTIVE",
+        companyId: company.id,
+        branchId: branch.id,
+        reportingManagerId: bdeUser.id
+      }
+    });
+  }
+  await ensureUserRole(iseUser.id, iseRole?.id, bdeUser.id);
+
+  console.log("✅ Verified 4 Base Users: Admin, Manager, BDE, ISE.");
 
   // 3. Create / Find Course
   let course = await prisma.course.findFirst({ where: { companyId: company.id, code: "FSWD-01" } });

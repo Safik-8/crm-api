@@ -129,7 +129,6 @@ export const loginUserService = async (email, password, metadata = {}) => {
     primaryRole: primaryUserRole.role.name,
     primaryRoleRank: primaryUserRole.role.rank ?? 0,
     roles: allRoles,
-    permissions: permissionsMap,
   })
   const refreshToken = generateRefreshToken({
     userId: user.id,
@@ -270,7 +269,6 @@ export const refreshTokenService = async (refreshToken, metadata = {}) => {
         primaryRole: primaryUserRole.role.name,
         primaryRoleRank: primaryUserRole.role.rank ?? 0,
         roles: allRoles,
-        permissions: permissionsMap,
       });
 
       return {
@@ -382,7 +380,6 @@ export const refreshTokenService = async (refreshToken, metadata = {}) => {
       primaryRole: primaryUserRole.role.name,
       primaryRoleRank: primaryUserRole.role.rank ?? 0,
       roles: allRoles,
-      permissions: permissionsMap,
     })
 
     const newRefreshToken = generateRefreshToken({

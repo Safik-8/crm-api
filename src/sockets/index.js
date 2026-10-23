@@ -8,15 +8,18 @@ export const initSockets = (httpServer) => {
   io.use(socketAuthMiddleware);
 
   io.on("connection", (socket) => {
-    const { id: userId, companyId, branchId } = socket.user;
+    const { id: userId, name, email, companyId, branchId } = socket.user;
 
     // Join isolated rooms
     if (userId) socket.join(getUserRoom(userId));
     if (companyId) socket.join(getCompanyRoom(companyId));
     if (branchId) socket.join(getBranchRoom(branchId));
 
-    socket.on("disconnect", () => {
-      // Clean up on disconnect if needed
+    const userLabel = name || email || `User #${userId}`;
+    console.log(`✅ Socket connected: ${userLabel} (User ID: ${userId}, Socket ID: ${socket.id})`);
+
+    socket.on("disconnect", (reason) => {
+      console.log(`🔌 Socket disconnected: ${userLabel} (Reason: ${reason})`);
     });
   });
 
