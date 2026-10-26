@@ -57,9 +57,8 @@ export const runReminderScan = async () => {
       try {
         const assignedUserId = followup.assignedToId;
 
-        // Dedup check: only skip if the ASSIGNED USER already got a reminder today.
-        // Supervisors may not have it yet (e.g. BM was added later) — we fan-out all.
-        const existing = await findExistingNotif(assignedUserId, followup.id, "REMINDER");
+        // Dedup check: only skip if a reminder has already been created for this followup today
+        const existing = await findExistingNotif(assignedUserId, followup.id, "FOLLOWUP_REMINDER");
         if (existing) continue;
 
         const expiresAt = new Date(followup.scheduledAt);
@@ -100,10 +99,8 @@ export const runReminderScan = async () => {
 
       for (const followup of overdue) {
         try {
-          const assignedUserId = followup.assignedToId;
-
-          // Dedup check against assigned user's row
-          const existing = await findExistingNotif(assignedUserId, followup.id, "OVERDUE_ALERT");
+          // Dedup check: skip if an overdue alert for this followup was already dispatched to the chain
+          const existing = await findExistingNotif(null, followup.id, "FOLLOWUP_MISSED");
           if (existing) continue;
 
           const message = buildReminderMessage("OVERDUE_ALERT", followup);

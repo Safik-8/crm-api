@@ -71,6 +71,10 @@ export function getDateRangeForPeriod({ rankingPeriod, year, quarter, startDate,
   const now = new Date();
   const currentYear = year || now.getFullYear();
 
+  if (rankingPeriod === 'ALL') {
+    return { startDate: undefined, endDate: undefined };
+  }
+
   if (rankingPeriod === 'CUSTOM') {
     if (startDate && endDate) {
       return {

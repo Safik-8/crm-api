@@ -5,7 +5,7 @@ import { ValidationError } from "../../utils/AppError.js";
 export const dashboardQuerySchema = z.object({
   companyId:     z.preprocess((v) => (v && v !== "" ? Number(v) : undefined), z.number().int().positive().optional()),
   branchId:      z.preprocess((v) => (v && v !== "" ? Number(v) : undefined), z.number().int().positive().optional()),
-  rankingPeriod: z.enum(["MONTHLY", "QUARTERLY", "YEARLY", "CUSTOM"]).default("MONTHLY"),
+  rankingPeriod: z.enum(["ALL", "MONTHLY", "QUARTERLY", "YEARLY", "CUSTOM"]).default("MONTHLY"),
   startDate:     z.string().optional(),
   endDate:       z.string().optional(),
   year:          z.preprocess((v) => (v && v !== "" ? Number(v) : undefined), z.number().int().min(2020).max(2100).optional()),

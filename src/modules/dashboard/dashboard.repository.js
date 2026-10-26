@@ -50,7 +50,9 @@ export async function findGlobalMetrics({ startDate, endDate } = {}) {
     totalCompanies, totalBranches, totalUsers, totalLeads,
     qualifiedLeads, activeOpportunities, activeCustomers, followupsToday,
     dealsWon: dealsWonAgg._count.id || 0,
+    wonDeals: dealsWonAgg._count.id || 0,
     monthlyRevenue: Number(dealsWonAgg._sum.finalAmount || 0),
+    revenue: Number(dealsWonAgg._sum.finalAmount || 0),
     conversionRate,
     topBranches,
   };
@@ -100,7 +102,9 @@ export async function findCompanyMetrics({ companyId, startDate, endDate } = {})
     totalBranches, totalUsers, totalLeads, qualifiedLeads,
     activeOpportunities, activeCustomers, followupsToday,
     dealsWon: dealsWonAgg._count.id || 0,
+    wonDeals: dealsWonAgg._count.id || 0,
     monthlyRevenue: Number(dealsWonAgg._sum.finalAmount || 0),
+    revenue: Number(dealsWonAgg._sum.finalAmount || 0),
     conversionRate,
     branchRankings,
   };
@@ -116,8 +120,24 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
   ] = await Promise.all([
     prisma.lead.count({ where: { ...w, isDeleted: false, ...(startDate && { createdAt: dateFilter }) } }),
     prisma.lead.count({ where: { ...w, isQualified: true, isDeleted: false } }),
-    prisma.opportunity.count({ where: { ...w, isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
-    prisma.deal.aggregate({ where: { ...w, outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, _sum: { finalAmount: true }, _count: { id: true } }),
+    prisma.opportunity.count({ where: { ...(companyId && { companyId }), ...(branchId && { branchId }), isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
+    prisma.deal.aggregate({
+      where: {
+        ...(companyId && { companyId }),
+        outcome: "WON",
+        ...(startDate && { closingDate: dateFilter }),
+        ...(branchId && {
+          OR: [
+            { branchId },
+            { opportunity: { branchId } },
+            { lead: { branchId } },
+            { closedBy: { branchId } },
+          ],
+        }),
+      },
+      _sum: { finalAmount: true },
+      _count: { id: true },
+    }),
     prisma.customer.count({ where: { ...w, isDeleted: false, status: "ACTIVE" } }),
     prisma.followup.count({ where: { ...w, status: "PENDING", scheduledAt: { gte: new Date(new Date().setHours(0,0,0,0)), lte: new Date(new Date().setHours(23,59,59,999)) } } }),
     prisma.user.count({ where: { ...w, status: "ACTIVE", userRoles: { some: { role: { name: "BDE" } } } } }),
@@ -152,8 +172,10 @@ export async function findBranchMetrics({ companyId, branchId, startDate, endDat
   return {
     totalLeads, qualifiedLeads, activeOpportunities, activeCustomers,
     followupsToday, bdeCount, iseCount,
+    dealsWon: dealsWonAgg._count.id || 0,
     wonDeals: dealsWonAgg._count.id || 0,
     revenue: Number(dealsWonAgg._sum.finalAmount || 0),
+    monthlyRevenue: Number(dealsWonAgg._sum.finalAmount || 0),
     conversionRate,
     teamPerformance,
   };
@@ -191,6 +213,34 @@ export async function findPersonalMetrics({ companyId, employeeId, startDate, en
     ],
   };
 
+  const dealWhere = {
+    ...(companyId && { companyId }),
+    outcome: "WON",
+    ...(startDate && { closingDate: dateFilter }),
+    OR: [
+      { closedById: employeeId },
+      { opportunity: { ownerId: employeeId } },
+      { lead: { assignedToId: employeeId } },
+      ...(teamIds.length > 0
+        ? [
+            { opportunity: { teamId: { in: teamIds } } },
+            { lead: { teamId: { in: teamIds } } },
+          ]
+        : []),
+    ],
+  };
+
+  const oppWhere = {
+    ...(companyId && { companyId }),
+    isDeleted: false,
+    status: { notIn: ["WON", "LOST", "CANCELLED"] },
+    OR: [
+      { ownerId: employeeId },
+      { lead: { assignedToId: employeeId } },
+      ...(teamIds.length > 0 ? [{ teamId: { in: teamIds } }] : []),
+    ],
+  };
+
   const [
     assignedLeads, qualifiedLeads, followupsToday, pendingFollowups,
     activeOpportunities, dealsWonAgg,
@@ -200,21 +250,23 @@ export async function findPersonalMetrics({ companyId, employeeId, startDate, en
     prisma.lead.count({ where: { ...leadWhere, isQualified: true } }),
     prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING", scheduledAt: { gte: todayStart, lte: todayEnd } } }),
     prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING" } }),
-    prisma.opportunity.count({ where: { ...(companyId && { companyId }), ownerId: employeeId, isDeleted: false, status: { notIn: ["WON","LOST","CANCELLED"] } } }),
-    prisma.deal.aggregate({ where: { ...(companyId && { companyId }), closedById: employeeId, outcome: "WON", ...(startDate && { closingDate: dateFilter }) }, _sum: { finalAmount: true }, _count: { id: true } }),
+    prisma.opportunity.count({ where: oppWhere }),
+    prisma.deal.aggregate({ where: dealWhere, _sum: { finalAmount: true }, _count: { id: true } }),
     prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", isDeleted: false, interactionDate: { gte: todayStart } } }),
     prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", callNature: "COLD_CALL", isDeleted: false, interactionDate: { gte: todayStart } } }),
     prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", callNature: "FOLLOW_UP", isDeleted: false, interactionDate: { gte: todayStart } } }),
     prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", callOutcome: "NOT_RECEIVED", isDeleted: false, interactionDate: { gte: todayStart } } }),
     prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", callOutcome: "RECEIVED", isDeleted: false, interactionDate: { gte: todayStart } } }),
-
   ]);
+
   return {
     assignedLeads, qualifiedLeads, followupsToday, pendingFollowups,
     activeOpportunities, callsCompletedToday,
     coldCallsToday, followupCallsToday, notReceivedCallsToday, receivedCallsToday,
     dealsWon: dealsWonAgg._count.id || 0,
+    wonDeals: dealsWonAgg._count.id || 0,
     revenue: Number(dealsWonAgg._sum.finalAmount || 0),
+    monthlyRevenue: Number(dealsWonAgg._sum.finalAmount || 0),
   };
 }
 

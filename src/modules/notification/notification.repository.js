@@ -57,18 +57,28 @@ export const updateNotificationConfigDb = (id, data) =>
 // ── SCANNER HELPERS ───────────────────────────────────────────────────────────
 
 /**
- * Deduplication: returns existing notification for this user + followup + type
- * created today. Prevents duplicate alerts on every scanner run.
+ * Deduplication: returns existing notification for this user + followup + type.
+ * Handles both job token names ("REMINDER", "OVERDUE_ALERT") and DB eventType names
+ * ("FOLLOWUP_REMINDER", "FOLLOWUP_MISSED") to prevent duplicate alerts on scanner runs.
  */
-export const findExistingNotif = (userId, followupId, notificationType) =>
-  prisma.notification.findFirst({
+export const findExistingNotif = (userId, followupId, notificationType) => {
+  const isReminder = notificationType === "REMINDER" || notificationType === "FOLLOWUP_REMINDER";
+  const isMissed   = notificationType === "OVERDUE_ALERT" || notificationType === "FOLLOWUP_MISSED";
+  const types      = isReminder
+    ? ["REMINDER", "FOLLOWUP_REMINDER"]
+    : isMissed
+    ? ["OVERDUE_ALERT", "FOLLOWUP_MISSED"]
+    : [notificationType];
+
+  return prisma.notification.findFirst({
     where: {
-      userId,
+      ...(userId ? { userId } : {}),
       followupId,
-      notificationType,
-      createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+      notificationType: { in: types },
+      ...(isReminder ? { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } } : {}),
     },
   });
+};
 
 /**
  * Fetch all PENDING followups due within the next `hoursAhead` hours.
