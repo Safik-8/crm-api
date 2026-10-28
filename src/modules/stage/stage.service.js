@@ -125,7 +125,7 @@ export const updateStageService = async (id, data, actor) => {
 
   const stage = await prisma.stage.findUnique({ where: { id: stageId } })
 
-    if (!stage || stage.isDeleted || stage.status !== "ACTIVE") throw new NotFoundError("Stage")
+  if (!stage || stage.isDeleted) throw new NotFoundError("Stage")
 
   // Build update payload — only include fields present in request
   const updateData = { updatedById: actor.id }
@@ -139,7 +139,7 @@ export const updateStageService = async (id, data, actor) => {
 
     // System stages (PROSPECT, CLOSURE) can be renamed, but the name check runs
     const duplicate = await prisma.stage.findFirst({
-      where: { name, id: { not: stageId }, isDeleted: false, status: "ACTIVE" },
+      where: { name, id: { not: stageId }, isDeleted: false },
       select: { id: true }
     })
     if (duplicate) throw new ConflictError("Stage name already exists", "name")
@@ -180,7 +180,7 @@ export const deleteStageService = async (id, actor) => {
   if (!Number.isInteger(stageId) || stageId < 1) throw new BadRequestError("Invalid stage id")
 
   const stage = await prisma.stage.findUnique({ where: { id: stageId } })
-  if (!stage || stage.isDeleted || stage.status !== "ACTIVE") throw new NotFoundError("Stage")
+  if (!stage || stage.isDeleted) throw new NotFoundError("Stage")
 
   // GAP-10: Guard by stageType first, then legacy isDefault check
   if (SYSTEM_STAGE_TYPES.includes(stage.stageType)) {
@@ -194,6 +194,11 @@ export const deleteStageService = async (id, actor) => {
   if (leadCount > 0) {
     throw new BadRequestError(`Stage cannot be deleted: ${leadCount} active lead(s) are in this stage. Move them first.`)
   }
+
+  // Remove associations from any pipelines first
+  await prisma.pipelineStage.deleteMany({
+    where: { stageId }
+  })
 
   return prisma.stage.update({
     where: { id: stageId },

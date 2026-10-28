@@ -401,7 +401,7 @@ export const createLeadService = async (data, actor, txClient = prisma, skipDeta
     stageChangedById: resolvedStageId ? actor.id : null,
     stageChangedAt:   resolvedStageId ? now : null,
     name:             data.name,
-    mobile:           data.mobile,
+    mobile:           data.mobile ? data.mobile.trim() : null,
     email:            data.email   || null,
     alternateMobile:  data.alternateMobile || null,
     linkedinUrl:      data.linkedinUrl || null,
@@ -717,7 +717,7 @@ export const updateLeadService = async (leadId, data, actor, req = null) => {
   const updateData = { updatedById: actor.id };
 
   if (data.name          !== undefined) updateData.name           = data.name;
-  if (data.mobile        !== undefined) updateData.mobile         = data.mobile;
+  if (data.mobile        !== undefined) updateData.mobile         = data.mobile ? data.mobile.trim() : null;
   if (data.email         !== undefined) updateData.email          = data.email          || null;
   if (data.alternateMobile !== undefined) updateData.alternateMobile = data.alternateMobile || null;
   if (data.linkedinUrl   !== undefined) updateData.linkedinUrl   = data.linkedinUrl   || null;
@@ -1275,14 +1275,15 @@ export const importLeadsFromExcelService = async (
   // ── Column headers mapping ────────────────────────────────────────────────
   const REQUIRED_HEADERS = [
     { key: "name",   aliases: ["lead name", "name"] },
-    { key: "mobile", aliases: ["mobile number", "mobile", "phone number", "phone"] },
     { key: "source", aliases: ["lead source", "source"] },
     { key: "course", aliases: ["interested service", "service", "interested services", "services", "interested course/product", "interested course", "course", "product", "interested for"] }
   ];
 
   const OPTIONAL_HEADERS = [
+    { key: "mobile",          aliases: ["mobile number", "mobile", "phone number", "phone", "contact number"] },
     { key: "email",           aliases: ["email", "email address"] },
     { key: "alternateMobile", aliases: ["alternate contact", "alternate mobile", "alternate contact number", "secondary mobile"] },
+    { key: "linkedinUrl",     aliases: ["linkedin url", "linkedin", "linkedin profile", "profile url", "linkedin link"] },
     { key: "budget",          aliases: ["budget"] },
     { key: "city",            aliases: ["city"] },
     { key: "state",           aliases: ["state"] },
@@ -1484,6 +1485,7 @@ export const importLeadsFromExcelService = async (
     const courseStr = getRowVal(row, "course");
     const email = getRowVal(row, "email").toLowerCase();
     const alternateMobile = getRowVal(row, "alternateMobile").replace(/[\s\-().+]/g, "");
+    const linkedinUrl = getRowVal(row, "linkedinUrl");
     const budgetStr = getRowVal(row, "budget");
     const city = getRowVal(row, "city");
     const state = getRowVal(row, "state");
@@ -1508,16 +1510,15 @@ export const importLeadsFromExcelService = async (
       fieldsInError.push("name");
     }
 
-    // ── 3. Validate Mobile Number ──
-    if (!mobile) {
-      rowErrors.push("Mobile Number is required");
-      fieldsInError.push("mobile");
-    } else if (!/^\d{10}$/.test(mobile)) {
-      rowErrors.push("Mobile Number must be exactly 10 digits");
-      fieldsInError.push("mobile");
-    } else if (/^(\d)\1{9}$/.test(mobile)) {
-      rowErrors.push("Mobile Number is not valid (all digits same)");
-      fieldsInError.push("mobile");
+    // ── 3. Validate Mobile Number (optional format check) ──
+    if (mobile) {
+      if (!/^\d{10}$/.test(mobile)) {
+        rowErrors.push("Mobile Number must be exactly 10 digits");
+        fieldsInError.push("mobile");
+      } else if (/^(\d)\1{9}$/.test(mobile)) {
+        rowErrors.push("Mobile Number is not valid (all digits same)");
+        fieldsInError.push("mobile");
+      }
     }
 
     // ── 4. Validate Source under resolved company scope ──
@@ -1586,6 +1587,17 @@ export const importLeadsFromExcelService = async (
       } else if (alternateMobile === mobile) {
         rowErrors.push("Alternate Contact must not be identical to primary Mobile Number");
         fieldsInError.push("alternateMobile");
+      }
+    }
+
+    // ── 7.1 Validate LinkedIn URL (optional, URL format check) ──
+    if (linkedinUrl) {
+      if (linkedinUrl.length > 500) {
+        rowErrors.push("LinkedIn URL must be 500 characters or less");
+        fieldsInError.push("linkedinUrl");
+      } else if (!/^(https?:\/\/)?([\w]+\.)?linkedin\.com\/.*$/i.test(linkedinUrl) && !/^https?:\/\/.+$/i.test(linkedinUrl)) {
+        rowErrors.push("LinkedIn URL is not in a valid format");
+        fieldsInError.push("linkedinUrl");
       }
     }
 
@@ -1736,9 +1748,10 @@ export const importLeadsFromExcelService = async (
           stageChangedById: resolvedStageId ? actor.id : null,
           stageChangedAt: resolvedStageId ? now : null,
           name,
-          mobile,
+          mobile: mobile || null,
           email: email || null,
           alternateMobile: alternateMobile || null,
+          linkedinUrl: linkedinUrl || null,
           sourceId: matchedSource.id,
           courseId: matchedCourse ? matchedCourse.id : null,
           statusId: resolvedStatusId,
@@ -1769,6 +1782,7 @@ export const importLeadsFromExcelService = async (
         course: courseStr,
         email,
         alternateMobile,
+        linkedinUrl,
         budget: budgetStr,
         city,
         state,

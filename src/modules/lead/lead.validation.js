@@ -6,9 +6,12 @@ import { ValidationError } from "../../utils/AppError.js";
 // ─── Reusable field definitions ───────────────────────────────────────────────
 
 const mobileField = z
-  .string({ required_error: "Mobile number is required" })
+  .string()
   .trim()
-  .regex(/^\d{10}$/, "Mobile number must be exactly 10 digits");
+  .regex(/^\d{10}$/, "Mobile number must be exactly 10 digits")
+  .optional()
+  .nullable()
+  .or(z.literal(""));
 
 const priorityField = z
   .enum(["HIGH", "MEDIUM", "LOW"], {
@@ -151,7 +154,9 @@ export const updateLeadSchema = z
       .string()
       .trim()
       .regex(/^\d{10}$/, "Mobile number must be exactly 10 digits")
-      .optional(),
+      .optional()
+      .nullable()
+      .or(z.literal("")),
 
     email: z
       .string()

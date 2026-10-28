@@ -505,7 +505,7 @@ model Lead {
   teamId       Int? @map("team_id")
 
   name            String
-  mobile          String
+  mobile          String?
   email           String?
   alternateMobile String? @map("alternate_mobile")
   linkedinUrl     String? @map("linkedin_url")
