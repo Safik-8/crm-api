@@ -294,10 +294,12 @@ export const updateOpportunity = async (actor, id, payload, req = null) => {
     throw new NotFoundError('Opportunity');
   }
 
-  // If moving a closed (WON/LOST) opportunity to an active pipeline stage, automatically re-open it
-  if ((opportunity.status === 'WON' || opportunity.status === 'LOST') && payload.stageId) {
+  // If moving a closed (LOST/CANCELLED) opportunity to an active pipeline stage, automatically re-open it
+  if (opportunity.status === 'WON') {
+    throw new ValidationError('Won opportunities are closed and cannot be modified.');
+  } else if ((opportunity.status === 'LOST' || opportunity.status === 'CANCELLED') && payload.stageId) {
     payload.status = 'OPEN';
-  } else if (opportunity.status === 'WON' || opportunity.status === 'LOST') {
+  } else if (opportunity.status === 'LOST' || opportunity.status === 'CANCELLED') {
     throw new ValidationError(`Closed opportunities (${opportunity.status}) are locked. Move to an active stage to re-open.`);
   }
 
@@ -316,8 +318,11 @@ export const closeOpportunity = async (actor, id, payload, req = null) => {
     throw new NotFoundError('Opportunity');
   }
 
-  if (opportunity.status === 'WON' || opportunity.status === 'LOST' || opportunity.status === 'CANCELLED') {
-    throw new ValidationError(`Opportunity is already closed as ${opportunity.status}.`);
+  if (opportunity.status === 'WON') {
+    throw new ValidationError('Won opportunities are closed and cannot be modified.');
+  }
+  if (opportunity.status === payload.outcome) {
+    throw new ValidationError(`Opportunity is already in ${payload.outcome} status.`);
   }
 
   // HRBAC Guard
@@ -750,7 +755,7 @@ export const bulkUpdateOpportunityStagesService = async (actor, payload) => {
   const isTerminalStage = (s) => {
     const type = (s.stageType || s.code || '').toUpperCase();
     const name = (s.name || '').toLowerCase();
-    return ['WON', 'LOST', 'CANCELLED'].includes(type) || ['won', 'lost', 'cancelled'].includes(name);
+    return ['WON', 'LOST', 'CANCELLED'].includes(type) || ['won', 'lost', 'cancelled', 'closure'].includes(name);
   };
 
   // 3. Re-assign order bounds to prevent dragging/reordering outside start & end stages
@@ -783,6 +788,9 @@ export const bulkUpdateOpportunityStagesService = async (actor, payload) => {
     const idx = terminalOrder.indexOf(type);
     if (idx !== -1) return idx;
     const name = (s.name || '').toLowerCase();
+    if (name === 'closure' || name === 'won') return 0;
+    if (name === 'lost') return 1;
+    if (name === 'cancelled') return 2;
     return terminalOrder.indexOf(name.toUpperCase());
   };
   terminalStages.sort((a, b) => getTerminalWeight(a) - getTerminalWeight(b));
@@ -847,9 +855,9 @@ export const moveOpportunityStage = async (actor, id, payload, req = null) => {
   // RBAC Permission Guard
   assertCanMutateOpportunity(actor, opportunity, 'move');
 
-  // 1. Opportunity must be OPEN
-  if (opportunity.status !== 'OPEN') {
-    throw new ValidationError('Closed opportunities (WON, LOST, CANCELLED) cannot be moved.');
+  // 1. Won opportunities cannot be moved
+  if (opportunity.status === 'WON') {
+    throw new ValidationError('Won opportunities are closed and cannot be moved.');
   }
 
   // 2. Fetch target stage
@@ -863,7 +871,7 @@ export const moveOpportunityStage = async (actor, id, payload, req = null) => {
 
   // Determine closure status based on stageType
   let targetStatus = 'OPEN';
-  if (newStage.stageType === 'WON') {
+  if (newStage.stageType === 'WON' || newStage.code === 'WON' || ['won', 'closure'].includes(newStage.name?.toLowerCase())) {
     targetStatus = 'WON';
   } else if (newStage.stageType === 'LOST') {
     targetStatus = 'LOST';
@@ -931,6 +939,13 @@ export const moveOpportunityStage = async (actor, id, payload, req = null) => {
     // If moved to a terminal stage, create deal/customer/revenue idempotently
     if (['WON', 'LOST', 'CANCELLED'].includes(targetStatus)) {
       await opportunityRepository.createDealCustomerRevenueIfNeeded(tx, updatedOpp, targetStatus, actor.id, payload.reasonId, null, req);
+    } else if (targetStatus === 'OPEN' && (opportunity.status === 'LOST' || opportunity.status === 'CANCELLED')) {
+      // If moving back to an open stage from LOST or CANCELLED, remove any incomplete non-won deal and its history
+      const deal = await tx.deal.findUnique({ where: { opportunityId: opportunity.id } });
+      if (deal && deal.outcome !== 'WON') {
+        await tx.dealHistory.deleteMany({ where: { dealId: deal.id } });
+        await tx.deal.delete({ where: { id: deal.id } });
+      }
     }
 
     return updatedOpp;

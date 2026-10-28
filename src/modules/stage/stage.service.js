@@ -134,9 +134,6 @@ export const updateStageService = async (id, data, actor) => {
     const name = normalizeName(data.name)
     if (!name) throw new ValidationError("Validation failed", [{ field: "name", message: "name cannot be empty" }])
     
-    // Default stage cannot be renamed
-    if (stage.isDefault) throw new BadRequestError("Default stage cannot be renamed")
-
     // System stages (PROSPECT, CLOSURE) can be renamed, but the name check runs
     const duplicate = await prisma.stage.findFirst({
       where: { name, id: { not: stageId }, isDeleted: false },

@@ -77,13 +77,25 @@ export const getDashboardReportsService = async (query, user) => {
 
   if (startDate > endDate) throw new BadRequestError("startDate cannot be after endDate")
 
-  // ── Dynamically resolve stage IDs by name ─────────────────────
+  // ── Dynamically resolve stage IDs by name or stageType ────────
   const stageNames = DASHBOARD_STAGE_MAP.map(m => m.stageName)
   const stages = await prisma.stage.findMany({
-    where: { name: { in: stageNames }, isDeleted: false, status: "ACTIVE" },
-    select: { id: true, name: true }
+    where: {
+      OR: [
+        { name: { in: stageNames } },
+        { stageType: "CLOSURE" }
+      ],
+      isDeleted: false,
+      status: "ACTIVE"
+    },
+    select: { id: true, name: true, stageType: true }
   })
   const stageIdByName = new Map(stages.map(s => [s.name, s.id]))
+  const closureStage = stages.find(s => s.stageType === "CLOSURE")
+  if (closureStage) {
+    if (!stageIdByName.has("Closure")) stageIdByName.set("Closure", closureStage.id)
+    if (!stageIdByName.has("Counselling Done")) stageIdByName.set("Counselling Done", closureStage.id)
+  }
 
   // ── Base lead filter ──────────────────────────────────────────
   // ISE / SALES_TEAM  → only leads they personally moved (stageChangedById = their id)

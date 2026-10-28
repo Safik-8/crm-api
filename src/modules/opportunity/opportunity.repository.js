@@ -16,52 +16,6 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
 
   // Idempotency: check existing deal for this opportunity
   const existingDeal = await tx.deal.findUnique({ where: { opportunityId: opportunity.id } }).catch(() => null);
-  if (existingDeal) return existingDeal;
-
-  // Validations
-  if (opportunity.expectedRevenue === null || opportunity.expectedRevenue === undefined) {
-    throw new ValidationError('Expected revenue is required to create a deal.');
-  }
-  if (Number(opportunity.expectedRevenue) <= 0) {
-    throw new ValidationError('Expected revenue must be greater than 0 to create a deal.');
-  }
-
-  // Ensure lead exists
-  const lead = await tx.lead.findUnique({ where: { id: opportunity.leadId } });
-  if (!lead) throw new ValidationError('Lead not found for opportunity');
-
-  // If WON require lead contact details for customer creation
-  if (status === 'WON') {
-    if (!lead.name) {
-      throw new ValidationError('Lead name is required to create a customer.');
-    }
-    if (!lead.mobile) {
-      throw new ValidationError('Lead mobile number is required to create a customer.');
-    }
-  }
-
-  // If LOST require valid reasonId or custom remarks if no active options exist
-  if (status === 'LOST') {
-    const activeReasonsCount = await tx.winLossReason.count({
-      where: { companyId: opportunity.companyId, status: 'ACTIVE' }
-    });
-
-    if (activeReasonsCount > 0) {
-      if (!reasonId) {
-        throw new ValidationError('reasonId is required when outcome is LOST');
-      }
-      const reason = await tx.winLossReason.findFirst({
-        where: { id: Number(reasonId), companyId: opportunity.companyId, status: 'ACTIVE' }
-      });
-      if (!reason) {
-        throw new ValidationError('Provided reasonId is invalid for this company');
-      }
-    } else {
-      if (!remarks || !remarks.trim()) {
-        throw new ValidationError('A custom remarks reason is required when no reason options are configured.');
-      }
-    }
-  }
 
   // Fetch company details to retrieve its code
   const company = await tx.company.findUnique({
@@ -71,66 +25,143 @@ export const createDealCustomerRevenueIfNeeded = async (tx, opportunity, status,
   const companyCode = company ? company.code.toUpperCase() : 'CO';
   const currentYear = new Date().getFullYear();
 
-  // Create Deal with collision-free dealNumber
-  const dealCount = await tx.deal.count({ where: { companyId: opportunity.companyId } });
-  const dealSeq = (dealCount + 1).toString().padStart(4, '0');
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  const dealNumber = `DEAL-${companyCode}-${currentYear}-${dealSeq}-${randomSuffix}`;
+  let deal = existingDeal;
 
-  const deal = await tx.deal.create({
-    data: {
+  if (existingDeal) {
+    if (existingDeal.outcome !== status) {
+      deal = await tx.deal.update({
+        where: { id: existingDeal.id },
+        data: {
+          outcome: status,
+          closingDate: new Date(),
+          reasonId: status === 'LOST' ? (reasonId ? Number(reasonId) : existingDeal.reasonId) : null,
+          remarks: remarks || existingDeal.remarks,
+          updatedById: performedById,
+        },
+      });
+      await tx.dealHistory.create({
+        data: {
+          dealId: existingDeal.id,
+          companyId: opportunity.companyId,
+          branchId: opportunity.branchId || null,
+          previousStatus: existingDeal.outcome,
+          newStatus: status,
+          remarks: remarks || null,
+          createdById: performedById,
+        },
+      });
+    } else if (status !== 'WON') {
+      return existingDeal;
+    }
+  } else {
+    // Validations
+    if (opportunity.expectedRevenue === null || opportunity.expectedRevenue === undefined) {
+      throw new ValidationError('Expected revenue is required to create a deal.');
+    }
+    if (Number(opportunity.expectedRevenue) <= 0) {
+      throw new ValidationError('Expected revenue must be greater than 0 to create a deal.');
+    }
+
+    // Ensure lead exists
+    const lead = await tx.lead.findUnique({ where: { id: opportunity.leadId } });
+    if (!lead) throw new ValidationError('Lead not found for opportunity');
+
+    // If WON require lead contact details for customer creation
+    if (status === 'WON') {
+      if (!lead.name) {
+        throw new ValidationError('Lead name is required to create a customer.');
+      }
+      if (!lead.mobile) {
+        throw new ValidationError('Lead mobile number is required to create a customer.');
+      }
+    }
+
+    // If LOST require valid reasonId or custom remarks if no active options exist
+    if (status === 'LOST') {
+      const activeReasonsCount = await tx.winLossReason.count({
+        where: { companyId: opportunity.companyId, status: 'ACTIVE' }
+      });
+
+      if (activeReasonsCount > 0) {
+        if (!reasonId) {
+          throw new ValidationError('reasonId is required when outcome is LOST');
+        }
+        const reason = await tx.winLossReason.findFirst({
+          where: { id: Number(reasonId), companyId: opportunity.companyId, status: 'ACTIVE' }
+        });
+        if (!reason) {
+          throw new ValidationError('Provided reasonId is invalid for this company');
+        }
+      } else {
+        if (!remarks || !remarks.trim()) {
+          throw new ValidationError('A custom remarks reason is required when no reason options are configured.');
+        }
+      }
+    }
+
+    // Create Deal with collision-free dealNumber
+    const dealCount = await tx.deal.count({ where: { companyId: opportunity.companyId } });
+    const dealSeq = (dealCount + 1).toString().padStart(4, '0');
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const dealNumber = `DEAL-${companyCode}-${currentYear}-${dealSeq}-${randomSuffix}`;
+
+    deal = await tx.deal.create({
+      data: {
+        companyId: opportunity.companyId,
+        branchId: opportunity.branchId || null,
+        dealNumber,
+        opportunityId: opportunity.id,
+        leadId: opportunity.leadId,
+        outcome: status,
+        closingDate: new Date(),
+        finalAmount: opportunity.expectedRevenue,
+        reasonId: reasonId || null,
+        remarks: remarks || null,
+        closedById: performedById,
+        createdById: performedById,
+      },
+    });
+
+    // Deal history
+    await tx.dealHistory.create({
+      data: {
+        dealId: deal.id,
+        companyId: opportunity.companyId,
+        branchId: opportunity.branchId || null,
+        previousStatus: null,
+        newStatus: status,
+        remarks: null,
+        createdById: performedById,
+      },
+    });
+
+    // Log lead activity and audit
+    await tx.leadActivity.create({
+      data: {
+        leadId: opportunity.leadId,
+        companyId: opportunity.companyId,
+        activityType: 'DEAL_CREATED',
+        description: `Deal ${deal.dealNumber} created for opportunity ${opportunity.opportunityName}`,
+        relatedEntityType: 'DEAL',
+        relatedEntityId: deal.id,
+        performedById: performedById,
+      },
+    });
+
+    await buildTxAuditData({
+      req,
       companyId: opportunity.companyId,
-      branchId: opportunity.branchId || null,
-      dealNumber,
-      opportunityId: opportunity.id,
-      leadId: opportunity.leadId,
-      outcome: status,
-      closingDate: new Date(),
-      finalAmount: opportunity.expectedRevenue,
-      reasonId: reasonId || null,
-      remarks: remarks || null,
-      closedById: performedById,
-      createdById: performedById,
-    },
-  });
+      moduleName: 'OPPORTUNITY',
+      actionType: 'CREATE',
+      entityType: 'DEAL',
+      entityId: deal.id,
+      action: 'DEAL_CREATED',
+      newValue: { dealNumber: deal.dealNumber, finalAmount: deal.finalAmount },
+      performedById,
+    });
+  }
 
-  // Deal history
-  await tx.dealHistory.create({
-    data: {
-      dealId: deal.id,
-      companyId: opportunity.companyId,
-      branchId: opportunity.branchId || null,
-      previousStatus: null,
-      newStatus: status,
-      remarks: null,
-      createdById: performedById,
-    },
-  });
-
-  // Log lead activity and audit
-  await tx.leadActivity.create({
-    data: {
-      leadId: opportunity.leadId,
-      companyId: opportunity.companyId,
-      activityType: 'DEAL_CREATED',
-      description: `Deal ${deal.dealNumber} created for opportunity ${opportunity.opportunityName}`,
-      relatedEntityType: 'DEAL',
-      relatedEntityId: deal.id,
-      performedById: performedById,
-    },
-  });
-
-  await buildTxAuditData({
-    req,
-    companyId: opportunity.companyId,
-    moduleName: 'OPPORTUNITY',
-    actionType: 'CREATE',
-    entityType: 'DEAL',
-    entityId: deal.id,
-    action: 'DEAL_CREATED',
-    newValue: { dealNumber: deal.dealNumber, finalAmount: deal.finalAmount },
-    performedById,
-  });
+  const lead = await tx.lead.findUnique({ where: { id: opportunity.leadId } });
 
   // For WON: create customer and revenue (idempotent)
   if (status === 'WON') {
@@ -260,7 +291,7 @@ export const seedDefaultOpportunityStages = async (companyId, tx = prisma) => {
     { companyId: cId, name: 'Proposal', code: 'PROPOSAL', displayOrder: 3, colorCode: '#8b5cf6', defaultProbabilityPct: 50, stageType: 'REGULAR', isSystem: false },
     { companyId: cId, name: 'Negotiation', code: 'NEGOTIATION', displayOrder: 4, colorCode: '#f59e0b', defaultProbabilityPct: 75, stageType: 'REGULAR', isSystem: false },
     { companyId: cId, name: 'Final Review', code: 'FINAL_REVIEW', displayOrder: 5, colorCode: '#10b981', defaultProbabilityPct: 90, stageType: 'REGULAR', isSystem: false },
-    { companyId: cId, name: 'Won', code: 'WON', displayOrder: 6, colorCode: '#10b981', defaultProbabilityPct: 100, stageType: 'WON', isSystem: true },
+    { companyId: cId, name: 'Closure', code: 'WON', displayOrder: 6, colorCode: '#10b981', defaultProbabilityPct: 100, stageType: 'WON', isSystem: true },
     { companyId: cId, name: 'Lost', code: 'LOST', displayOrder: 7, colorCode: '#ef4444', defaultProbabilityPct: 0, stageType: 'LOST', isSystem: true },
     { companyId: cId, name: 'Cancelled', code: 'CANCELLED', displayOrder: 8, colorCode: '#6b7280', defaultProbabilityPct: 0, stageType: 'CANCELLED', isSystem: true },
   ];
@@ -646,10 +677,11 @@ export const closeOpportunityTx = async (id, companyId, status, updatedById, rem
     }
 
     if (!targetStage) {
+      const fallbackNames = status === 'WON' ? ['Closure', 'Won'] : [status];
       targetStage = await tx.opportunityStage.findFirst({
         where: {
           companyId: targetCompanyId,
-          name: { equals: status, mode: 'insensitive' },
+          name: { in: fallbackNames, mode: 'insensitive' },
           status: 'ACTIVE',
         },
       });

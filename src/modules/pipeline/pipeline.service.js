@@ -295,7 +295,7 @@ export const getPipelineDetailsService = async (id, query, actor) => {
     let closure = await prisma.stage.findFirst({ where: { stageType: 'CLOSURE', isDeleted: false } });
     if (!closure) {
       closure = await prisma.stage.create({
-        data: { name: 'Closure', stageType: 'CLOSURE', colorCode: '#8b5cf6', code: 'CLOSURE', isDefault: true, isDeleted: false }
+        data: { name: 'Counselling Done', stageType: 'CLOSURE', colorCode: '#8b5cf6', code: 'CLOSURE', isDefault: true, isDeleted: false }
       });
     }
     await prisma.pipelineStage.createMany({
