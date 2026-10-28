@@ -351,10 +351,11 @@ export const getOpportunityById = async (actor, id) => {
  */
 export const getOpportunitiesList = async (actor, queryParams = {}) => {
   const page  = Math.max(1, parseInt(queryParams.page)  || 1);
-  const limit = Math.min(100, parseInt(queryParams.limit) || 20);
+  const limit = Math.min(500, parseInt(queryParams.limit) || 100);
   const skip  = (page - 1) * limit;
 
-  const where = {};
+  // Enforce soft-deletion check by default for enterprise pipeline integrity
+  const where = { isDeleted: false };
   const isSuperAdmin = (actor.primaryRoleRank && actor.primaryRoleRank >= 100) || actor.primaryRole === 'SUPER_ADMIN';
 
   // Company Scoping
@@ -374,12 +375,31 @@ export const getOpportunitiesList = async (actor, queryParams = {}) => {
     where.branchId = actor.branchId;
   }
 
+  // ── Dynamic HRBAC Authority & Tenancy Scoping ───────────────────────────
+  const actorRank = Number(actor.primaryRoleRank ?? 0);
+  const isSuperAdminActor = actorRank >= 100 || actor.primaryRole === 'SUPER_ADMIN';
+  const isManagementTier = actorRank >= 41 || isSuperAdminActor;
+
+  // Selected dynamic filters (sanitized against NaN / invalid input)
+  const rawOwnerId = queryParams.ownerId || queryParams.userId;
+  const parsedOwnerId = rawOwnerId ? parseInt(rawOwnerId, 10) : null;
+  const validOwnerId = parsedOwnerId && !isNaN(parsedOwnerId) && parsedOwnerId > 0 ? parsedOwnerId : null;
+
+  const rawRoleId = queryParams.roleId;
+  const parsedRoleId = rawRoleId ? parseInt(rawRoleId, 10) : null;
+  const validRoleId = parsedRoleId && !isNaN(parsedRoleId) && parsedRoleId > 0 ? parsedRoleId : null;
+
+  const selectedRoleName = (queryParams.ownerRole || queryParams.roleName || '').trim() || null;
+
   // Scope filter: "mine" vs "all"
-  const isMineScope = queryParams.scope === 'mine' || queryParams.mine === 'true' || queryParams.mine === true;
+  const hasExplicitOwnerFilter = Boolean(
+    (validOwnerId || validRoleId || selectedRoleName) && isManagementTier
+  );
+  const isMineScope = !hasExplicitOwnerFilter && (queryParams.scope === 'mine' || queryParams.mine === 'true' || queryParams.mine === true);
 
   if (isMineScope) {
     // When "mine" is selected, reps and managers see only what is assigned to them (ISE also sees what they created)
-    if (actor.primaryRoleRank <= ROLE_RANKS.ISE) {
+    if (actorRank <= ROLE_RANKS.ISE) {
       where.AND = where.AND || [];
       where.AND.push({
         OR: [
@@ -392,8 +412,8 @@ export const getOpportunitiesList = async (actor, queryParams = {}) => {
     }
   } else {
     // "all" scope:
-    // BDE (rank 40) / ISE (rank 20): see opportunities owned or created by them (and their team)
-    if (actor.primaryRoleRank <= ROLE_RANKS.BDE) {
+    // Rep pod tier (rank <= 40): see opportunities owned or created by them (and their team)
+    if (actorRank <= ROLE_RANKS.BDE) {
       where.AND = where.AND || [];
       where.AND.push({
         OR: [
@@ -402,12 +422,11 @@ export const getOpportunitiesList = async (actor, queryParams = {}) => {
         ]
       });
     }
-    // BM (rank 60): sees all in branch (via where.branchId above)
-    // Company Admin (rank 80): sees all in company (via where.companyId above)
+    // Management tier (rank >= 41): sees all within their scoped branch / company
   }
 
-  // SA and Company Admin can filter by branch
-  if ((isSuperAdmin || isCompanyAdmin) && queryParams.branchId) {
+  // SA and Company Admin (rank >= 61) can filter by branch
+  if ((isSuperAdminActor || actorRank >= 61) && queryParams.branchId) {
     where.branchId = parseInt(queryParams.branchId);
   }
 
@@ -432,8 +451,55 @@ export const getOpportunitiesList = async (actor, queryParams = {}) => {
   if (queryParams.stageId) {
     where.stageId = parseInt(queryParams.stageId);
   }
-  if (queryParams.ownerId && actor.primaryRoleRank >= ROLE_RANKS.BRANCH_MANAGER) {
-    where.ownerId = parseInt(queryParams.ownerId);
+
+  // Dynamic HRBAC User / Role Filtering (Management Tier: Rank >= 41)
+  if (isManagementTier) {
+    const ownerTenancyGuard = {};
+    if (!isSuperAdminActor) {
+      if (actor.companyId) {
+        ownerTenancyGuard.companyId = actor.companyId;
+      }
+      if (actorRank <= ROLE_RANKS.BRANCH_MANAGER && actor.branchId) {
+        ownerTenancyGuard.branchId = actor.branchId;
+      }
+    }
+
+    if (validOwnerId) {
+      where.ownerId = validOwnerId;
+      // Vertical rank guard & tenant boundary: Non-super admins cannot access opportunities owned by superior roles or cross-tenant/cross-branch
+      if (!isSuperAdminActor) {
+        where.owner = {
+          ...ownerTenancyGuard,
+          userRoles: {
+            some: {
+              role: { rank: { lte: actorRank } }
+            }
+          }
+        };
+      }
+    } else if (validRoleId) {
+      where.owner = {
+        ...ownerTenancyGuard,
+        userRoles: {
+          some: {
+            roleId: validRoleId,
+            ...(!isSuperAdminActor ? { role: { rank: { lte: actorRank } } } : {})
+          }
+        }
+      };
+    } else if (selectedRoleName) {
+      where.owner = {
+        ...ownerTenancyGuard,
+        userRoles: {
+          some: {
+            role: {
+              name: { equals: selectedRoleName, mode: 'insensitive' },
+              ...(!isSuperAdminActor ? { rank: { lte: actorRank } } : {})
+            }
+          }
+        }
+      };
+    }
   }
 
   const { total, opportunities } = await opportunityRepository.findOpportunitiesList({
