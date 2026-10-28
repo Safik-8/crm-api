@@ -190,7 +190,7 @@ async function main() {
     { name: "Negotiation",       code: "NEGOTIATION",stageType: "REGULAR",  colorCode: "#ec4899", displayOrder: 5 },
     { name: "Won",               code: "WON",        stageType: "WON",      colorCode: "#10b981", displayOrder: 6 },
     { name: "Lost",              code: "LOST",       stageType: "LOST",     colorCode: "#ef4444", displayOrder: 7 },
-    { name: "Closure",           code: "CLOSURE",    stageType: "CLOSURE",  colorCode: "#6366f1", displayOrder: 8 },
+    { name: "Counselling Done",  code: "CLOSURE",    stageType: "CLOSURE",  colorCode: "#6366f1", displayOrder: 8 },
   ];
 
   const stages = [];

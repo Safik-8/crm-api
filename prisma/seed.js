@@ -69,7 +69,7 @@ const PIPELINE_STAGES = [
   { name: 'Negotiation',       code: 'NEGOTIATION', stageType: 'REGULAR',  colorCode: '#ec4899', displayOrder: 5, isDefault: false },
   { name: 'Won',               code: 'WON',         stageType: 'WON',      colorCode: '#10b981', displayOrder: 6, isDefault: false },
   { name: 'Lost',              code: 'LOST',        stageType: 'LOST',     colorCode: '#ef4444', displayOrder: 7, isDefault: false },
-  { name: 'Closure',           code: 'CLOSURE',     stageType: 'CLOSURE',  colorCode: '#6366f1', displayOrder: 8, isDefault: true  },
+  { name: 'Counselling Done',  code: 'CLOSURE',     stageType: 'CLOSURE',  colorCode: '#6366f1', displayOrder: 8, isDefault: true  },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ const OPPORTUNITY_STAGES = [
   { name: 'Proposal',       code: 'PROPOSAL',       stageType: 'REGULAR',   displayOrder: 3, defaultProbabilityPct: 50,  colorCode: '#f59e0b' },
   { name: 'Negotiation',    code: 'NEGOTIATION',    stageType: 'REGULAR',   displayOrder: 4, defaultProbabilityPct: 75,  colorCode: '#ec4899' },
   { name: 'Final Review',   code: 'FINAL_REVIEW',   stageType: 'REGULAR',   displayOrder: 5, defaultProbabilityPct: 90,  colorCode: '#06b6d4' },
-  { name: 'Won',            code: 'WON',            stageType: 'WON',       displayOrder: 6, defaultProbabilityPct: 100, colorCode: '#10b981' },
+  { name: 'Closure',        code: 'WON',            stageType: 'WON',       displayOrder: 6, defaultProbabilityPct: 100, colorCode: '#10b981' },
   { name: 'Lost',           code: 'LOST',           stageType: 'LOST',      displayOrder: 7, defaultProbabilityPct: 0,   colorCode: '#ef4444' },
   { name: 'Cancelled',      code: 'CANCELLED',      stageType: 'CANCELLED', displayOrder: 8, defaultProbabilityPct: 0,   colorCode: '#6b7280' },
 ]

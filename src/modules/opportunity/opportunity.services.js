@@ -620,9 +620,6 @@ export const updateOpportunityStage = async (actor, id, payload) => {
 
   // System stage restrictions
   if (stage.isSystem) {
-    if (payload.name && payload.name.trim() !== stage.name) {
-      throw new ValidationError('System stages cannot be renamed.');
-    }
     if (payload.stageType && payload.stageType !== stage.stageType) {
       throw new ValidationError('System stage types cannot be altered.');
     }
