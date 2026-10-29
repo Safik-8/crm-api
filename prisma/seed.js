@@ -292,23 +292,35 @@ async function seedPipelineStages(createdById) {
   console.log('\n[7/10] Lead Pipeline Stages...')
   for (const stage of PIPELINE_STAGES) {
     const existing = await prisma.stage.findFirst({
-      where: { stageType: stage.stageType, isDeleted: false },
+      where: {
+        OR: [
+          { code: stage.code },
+          { name: stage.name },
+        ],
+      },
     })
-    if (!existing) {
-      await prisma.stage.create({
-        data: { ...stage, status: 'ACTIVE', isDeleted: false, createdById },
+    if (existing) {
+      await prisma.stage.update({
+        where: { id: existing.id },
+        data: {
+          isDeleted: false,
+          status: 'ACTIVE',
+          stageType: stage.stageType,
+          colorCode: existing.colorCode || stage.colorCode,
+          updatedById: createdById,
+        },
       })
-      log(`Created stage: ${stage.name} (${stage.stageType})`)
+      log(`Stage synchronized: ${existing.name}`)
     } else {
-      if (existing.isDeleted) {
-        await prisma.stage.update({
-          where: { id: existing.id },
-          data: { isDeleted: false, status: 'ACTIVE', updatedById: createdById },
-        })
-        log(`Restored stage: ${stage.name}`)
-      } else {
-        skip(`Stage exists: ${stage.name}`)
-      }
+      await prisma.stage.create({
+        data: {
+          ...stage,
+          status: 'ACTIVE',
+          isDeleted: false,
+          createdById,
+        },
+      })
+      log(`Stage created: ${stage.name}`)
     }
   }
 }
@@ -316,17 +328,26 @@ async function seedPipelineStages(createdById) {
 async function seedOpportunityStages(company, createdById) {
   console.log('\n[8/10] Opportunity Stages...')
   for (const stage of OPPORTUNITY_STAGES) {
-    const existing = await prisma.opportunityStage.findFirst({
-      where: { companyId: company.id, code: stage.code },
+    const isSystemFlag = stage.isSystem ?? false
+    await prisma.opportunityStage.upsert({
+      where: {
+        companyId_code: {
+          companyId: company.id,
+          code: stage.code,
+        },
+      },
+      update: {
+        isSystem: isSystemFlag,
+      },
+      create: {
+        ...stage,
+        companyId: company.id,
+        isSystem: isSystemFlag,
+        status: 'ACTIVE',
+        createdById,
+      },
     })
-    if (!existing) {
-      await prisma.opportunityStage.create({
-        data: { ...stage, companyId: company.id, isSystem: stage.isSystem ?? false, status: 'ACTIVE', createdById },
-      })
-      log(`Created opportunity stage: ${stage.name}`)
-    } else {
-      skip(`Opportunity stage exists: ${stage.name}`)
-    }
+    log(`Synchronized opportunity stage: ${stage.name}`)
   }
 }
 
