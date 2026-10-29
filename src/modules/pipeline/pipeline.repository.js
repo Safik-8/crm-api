@@ -1,5 +1,6 @@
 import prisma from "../../config/db.js"
 import { getBranchUsersByBranchId, leadStageLogInclude } from "../lead/lead.repository.js"
+import { ValidationError } from "../../utils/AppError.js"
 
 const SYSTEM_STAGE_DEFS = [
   { name: "Prospect", stageType: "PROSPECT", colorCode: "#3b82f6", code: "PROSPECT" },
@@ -162,6 +163,99 @@ export const softDeletePipelineDb = async (id, actorId) => {
   })
 }
 
+/**
+ * Enterprise Differential Sync for Pipeline Stages:
+ * 1. Active Lead Protection Guard: Prevents de-assigning stages containing active leads.
+ * 2. Prunes removed stages atomically.
+ * 3. Creates newly assigned stages.
+ * 4. Updates orderNo in-place for existing stages without table/ID churn.
+ */
+const syncPipelineStagesDifferentialTx = async (tx, pipelineId, finalOrderedStageIds) => {
+  const pid = Number(pipelineId)
+
+  // 1. Fetch current assignments
+  const currentAssignments = await tx.pipelineStage.findMany({
+    where: { pipelineId: pid },
+    select: { id: true, stageId: true, orderNo: true }
+  })
+  const currentMap = new Map(currentAssignments.map(a => [a.stageId, a]))
+  const targetStageIdsSet = new Set(finalOrderedStageIds)
+
+  // 2. Identify stages to remove
+  const stagesToRemove = currentAssignments.filter(a => !targetStageIdsSet.has(a.stageId))
+  if (stagesToRemove.length > 0) {
+    const removedStageIds = stagesToRemove.map(s => s.stageId)
+    // Active Lead Protection Guard: Block removal if active leads exist in these stages
+    const activeLeadsCount = await tx.lead.count({
+      where: {
+        pipelineId: pid,
+        stageId: { in: removedStageIds },
+        isDeleted: false
+      }
+    })
+    if (activeLeadsCount > 0) {
+      const affectedStages = await tx.stage.findMany({
+        where: { id: { in: removedStageIds } },
+        select: { name: true }
+      })
+      const stageNames = affectedStages.map(s => `"${s.name}"`).join(', ')
+      throw new ValidationError(
+        `Cannot remove stage(s) ${stageNames} from this pipeline because ${activeLeadsCount} active lead(s) are currently assigned. Please move or reassign the leads first.`
+      )
+    }
+
+    await tx.pipelineStage.deleteMany({
+      where: {
+        pipelineId: pid,
+        stageId: { in: removedStageIds }
+      }
+    })
+  }
+
+  // 3. Target order mapping (1-indexed sequence)
+  const targetOrders = finalOrderedStageIds.map((stageId, index) => ({
+    stageId,
+    orderNo: index + 1
+  }))
+
+  // 4. Create newly assigned stages
+  const stagesToCreate = targetOrders.filter(t => !currentMap.has(t.stageId))
+  if (stagesToCreate.length > 0) {
+    await tx.pipelineStage.createMany({
+      data: stagesToCreate.map(t => ({
+        pipelineId: pid,
+        stageId: t.stageId,
+        orderNo: t.orderNo
+      }))
+    })
+  }
+
+  // 5. In-place update of orderNo for existing stages whose order changed
+  const stagesToUpdate = targetOrders.filter(t => {
+    const existing = currentMap.get(t.stageId)
+    return existing && existing.orderNo !== t.orderNo
+  })
+
+  for (const t of stagesToUpdate) {
+    await tx.pipelineStage.update({
+      where: {
+        pipelineId_stageId: {
+          pipelineId: pid,
+          stageId: t.stageId
+        }
+      },
+      data: { orderNo: t.orderNo }
+    })
+  }
+
+  // 6. Return fresh assignments ordered by orderNo
+  return tx.pipelineStage.findMany({
+    where: { pipelineId: pid },
+    orderBy: { orderNo: "asc" },
+    include: { stage: true }
+  })
+}
+
 export const assignStagesToPipelineTx = async (pipelineId, incomingStageIds, newStages, orderedStageIds, actorId) => {
   return prisma.$transaction(async (tx) => {
     const { Prospect: prospect, Closure: closure } = await ensureDefaultStages(tx, actorId)
@@ -192,44 +286,50 @@ export const assignStagesToPipelineTx = async (pipelineId, incomingStageIds, new
       }
     }
 
-    const mergedStageIds = Array.from(new Set([prospect.id, ...incomingStageIds, ...createdStageIds, closure.id]))
+    // Determine the caller's requested order sequence
+    const preferredOrder = (Array.isArray(orderedStageIds) && orderedStageIds.length > 0)
+      ? orderedStageIds
+      : (Array.isArray(incomingStageIds) ? incomingStageIds : [])
 
-    const existingCustomStages = await tx.stage.findMany({
-      where: { id: { in: mergedStageIds }, isDeleted: false },
+    const candidateIds = Array.from(new Set([
+      prospect.id,
+      ...preferredOrder,
+      ...incomingStageIds,
+      ...createdStageIds,
+      closure.id
+    ]))
+
+    const existingStages = await tx.stage.findMany({
+      where: { id: { in: candidateIds }, isDeleted: false },
       select: { id: true, stageType: true }
     })
 
-    const customMiddleStages = existingCustomStages.filter(
-      s => s.stageType !== "PROSPECT" && s.stageType !== "CLOSURE"
+    const customMiddleStageIdsSet = new Set(
+      existingStages
+        .filter(s => s.stageType !== "PROSPECT" && s.stageType !== "CLOSURE")
+        .map(s => s.id)
     )
 
-    let finalOrderedStageIds = []
+    // Build the ordered middle stage list:
+    // 1. Maintain exact sequence from preferredOrder
+    const orderedMiddleIds = preferredOrder.filter(id => customMiddleStageIdsSet.has(id))
 
-    if (Array.isArray(orderedStageIds) && orderedStageIds.length > 0) {
-      const providedIdsSet = new Set(orderedStageIds)
-      const validMiddleIds = customMiddleStages.map(s => s.id).filter(id => providedIdsSet.has(id))
-      finalOrderedStageIds = [prospect.id, ...validMiddleIds, closure.id]
-    } else {
-      finalOrderedStageIds = [prospect.id, ...customMiddleStages.map(s => s.id), closure.id]
-    }
+    // 2. Append any newly created stages or valid middle stages not in preferredOrder
+    const includedMiddleSet = new Set(orderedMiddleIds)
+    const extraMiddleIds = [
+      ...createdStageIds.filter(id => customMiddleStageIdsSet.has(id)),
+      ...incomingStageIds.filter(id => customMiddleStageIdsSet.has(id))
+    ].filter(id => !includedMiddleSet.has(id))
 
-    await tx.pipelineStage.deleteMany({
-      where: { pipelineId: Number(pipelineId) }
-    })
+    // 3. Strict anchor enforcement: [Prospect, ...middleStages, Closure]
+    const finalOrderedStageIds = Array.from(new Set([
+      prospect.id,
+      ...orderedMiddleIds,
+      ...extraMiddleIds,
+      closure.id
+    ]))
 
-    await tx.pipelineStage.createMany({
-      data: finalOrderedStageIds.map((stageId, index) => ({
-        pipelineId: Number(pipelineId),
-        stageId,
-        orderNo: index + 1
-      }))
-    })
-
-    return tx.pipelineStage.findMany({
-      where: { pipelineId: Number(pipelineId) },
-      orderBy: { orderNo: "asc" },
-      include: { stage: true }
-    })
+    return syncPipelineStagesDifferentialTx(tx, pipelineId, finalOrderedStageIds)
   })
 }
 
@@ -249,17 +349,21 @@ export const updatePipelineStageOrderTx = async (pipelineId, orderedStageIds, ac
       return assignableStageIdsSet.has(id)
     })
 
-    const finalOrderedStageIds = [prospect.id, ...validRequestedMiddleStageIds, closure.id]
+    // Include any existing middle stages that weren't explicitly provided
+    const requestedSet = new Set(validRequestedMiddleStageIds)
+    const existingMiddleIds = existingAssignments
+      .filter(ps => ps.stageId !== prospect.id && ps.stageId !== closure.id)
+      .map(ps => ps.stageId)
+      .filter(id => !requestedSet.has(id))
 
-    await tx.pipelineStage.deleteMany({
-      where: { pipelineId: Number(pipelineId) }
-    })
+    const finalOrderedStageIds = Array.from(new Set([
+      prospect.id,
+      ...validRequestedMiddleStageIds,
+      ...existingMiddleIds,
+      closure.id
+    ]))
 
-    return tx.pipelineStage.findMany({
-      where: { pipelineId: Number(pipelineId) },
-      orderBy: { orderNo: "asc" },
-      include: { stage: true }
-    })
+    return syncPipelineStagesDifferentialTx(tx, pipelineId, finalOrderedStageIds)
   })
 }
 

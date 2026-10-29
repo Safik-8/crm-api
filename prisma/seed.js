@@ -97,14 +97,14 @@ const GLOBAL_LEAD_SOURCES = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 const OPPORTUNITY_STAGES = [
-  { name: 'Qualification',  code: 'QUALIFICATION',  stageType: 'REGULAR',   displayOrder: 1, defaultProbabilityPct: 10,  colorCode: '#3b82f6' },
-  { name: 'Needs Analysis', code: 'NEEDS_ANALYSIS', stageType: 'REGULAR',   displayOrder: 2, defaultProbabilityPct: 25,  colorCode: '#8b5cf6' },
-  { name: 'Proposal',       code: 'PROPOSAL',       stageType: 'REGULAR',   displayOrder: 3, defaultProbabilityPct: 50,  colorCode: '#f59e0b' },
-  { name: 'Negotiation',    code: 'NEGOTIATION',    stageType: 'REGULAR',   displayOrder: 4, defaultProbabilityPct: 75,  colorCode: '#ec4899' },
-  { name: 'Final Review',   code: 'FINAL_REVIEW',   stageType: 'REGULAR',   displayOrder: 5, defaultProbabilityPct: 90,  colorCode: '#06b6d4' },
-  { name: 'Closure',        code: 'WON',            stageType: 'WON',       displayOrder: 6, defaultProbabilityPct: 100, colorCode: '#10b981' },
-  { name: 'Lost',           code: 'LOST',           stageType: 'LOST',      displayOrder: 7, defaultProbabilityPct: 0,   colorCode: '#ef4444' },
-  { name: 'Cancelled',      code: 'CANCELLED',      stageType: 'CANCELLED', displayOrder: 8, defaultProbabilityPct: 0,   colorCode: '#6b7280' },
+  { name: 'Qualification',  code: 'QUALIFICATION',  stageType: 'REGULAR',   displayOrder: 1, defaultProbabilityPct: 10,  colorCode: '#3b82f6', isSystem: true },
+  { name: 'Needs Analysis', code: 'NEEDS_ANALYSIS', stageType: 'REGULAR',   displayOrder: 2, defaultProbabilityPct: 25,  colorCode: '#8b5cf6', isSystem: false },
+  { name: 'Proposal',       code: 'PROPOSAL',       stageType: 'REGULAR',   displayOrder: 3, defaultProbabilityPct: 50,  colorCode: '#f59e0b', isSystem: false },
+  { name: 'Negotiation',    code: 'NEGOTIATION',    stageType: 'REGULAR',   displayOrder: 4, defaultProbabilityPct: 75,  colorCode: '#ec4899', isSystem: false },
+  { name: 'Final Review',   code: 'FINAL_REVIEW',   stageType: 'REGULAR',   displayOrder: 5, defaultProbabilityPct: 90,  colorCode: '#06b6d4', isSystem: false },
+  { name: 'Closure',        code: 'WON',            stageType: 'WON',       displayOrder: 6, defaultProbabilityPct: 100, colorCode: '#10b981', isSystem: true },
+  { name: 'Lost',           code: 'LOST',           stageType: 'LOST',      displayOrder: 7, defaultProbabilityPct: 0,   colorCode: '#ef4444', isSystem: true },
+  { name: 'Cancelled',      code: 'CANCELLED',      stageType: 'CANCELLED', displayOrder: 8, defaultProbabilityPct: 0,   colorCode: '#6b7280', isSystem: true },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,7 +321,7 @@ async function seedOpportunityStages(company, createdById) {
     })
     if (!existing) {
       await prisma.opportunityStage.create({
-        data: { ...stage, companyId: company.id, isSystem: true, status: 'ACTIVE', createdById },
+        data: { ...stage, companyId: company.id, isSystem: stage.isSystem ?? false, status: 'ACTIVE', createdById },
       })
       log(`Created opportunity stage: ${stage.name}`)
     } else {
