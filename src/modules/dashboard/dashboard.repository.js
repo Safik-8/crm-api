@@ -241,6 +241,21 @@ export async function findPersonalMetrics({ companyId, employeeId, startDate, en
     ],
   };
 
+  const teamMemberRecords = ownedTeams.length > 0
+    ? await prisma.teamMember.findMany({
+        where: { teamId: { in: ownedTeams.map((t) => t.id) }, removedAt: null },
+        select: { userId: true },
+      })
+    : [];
+  const bdeUserIds = [employeeId, ...teamMemberRecords.map((m) => m.userId)];
+  const followupScopeWhere = {
+    ...(companyId && { companyId }),
+    OR: [
+      { assignedToId: { in: bdeUserIds } },
+      { createdById: employeeId },
+    ],
+  };
+
   const [
     assignedLeads, qualifiedLeads, followupsToday, pendingFollowups,
     activeOpportunities, dealsWonAgg,
@@ -248,8 +263,28 @@ export async function findPersonalMetrics({ companyId, employeeId, startDate, en
   ] = await Promise.all([
     prisma.lead.count({ where: { ...leadWhere, ...(startDate && { createdAt: dateFilter }) } }),
     prisma.lead.count({ where: { ...leadWhere, isQualified: true } }),
-    prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING", scheduledAt: { gte: todayStart, lte: todayEnd } } }),
-    prisma.followup.count({ where: { assignedToId: employeeId, status: "PENDING" } }),
+    prisma.followup.count({
+      where: {
+        AND: [
+          followupScopeWhere,
+          { status: "PENDING" },
+          { scheduledAt: { gte: todayStart, lte: todayEnd } },
+        ],
+      },
+    }),
+    prisma.followup.count({
+      where: {
+        AND: [
+          followupScopeWhere,
+          {
+            OR: [
+              { status: "MISSED" },
+              { status: "PENDING", scheduledAt: { lt: todayStart } },
+            ],
+          },
+        ],
+      },
+    }),
     prisma.opportunity.count({ where: oppWhere }),
     prisma.deal.aggregate({ where: dealWhere, _sum: { finalAmount: true }, _count: { id: true } }),
     prisma.communicationLog.count({ where: { createdById: employeeId, communicationType: "CALL", isDeleted: false, interactionDate: { gte: todayStart } } }),

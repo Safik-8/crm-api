@@ -134,33 +134,64 @@ export const fetchReminderSummary = async (actor) => {
   const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
   const todayEnd     = new Date(new Date().setHours(23, 59, 59, 999));
 
-  const baseWhere = { status: "PENDING" };
+  const scopeWhere = {};
 
   if (typeof actor === "object" && actor !== null) {
-    if (actor.companyId && actor.primaryRoleRank < 100) {
-      baseWhere.companyId = actor.companyId;
+    if (actor.companyId && (actor.primaryRoleRank ?? 0) < 100) {
+      scopeWhere.companyId = actor.companyId;
     }
-    if (actor.branchId && actor.primaryRoleRank <= 60) {
-      baseWhere.branchId = actor.branchId;
+    // Branch Manager & Branch Custom Roles (Rank 41..60)
+    if (actor.branchId && (actor.primaryRoleRank ?? 0) <= 60 && (actor.primaryRoleRank ?? 0) >= 41) {
+      scopeWhere.branchId = actor.branchId;
     }
-    if (actor.primaryRoleRank < 60 && actor.primaryRole !== "BDE") {
-      baseWhere.assignedToId = actor.id;
+    // BDE Tier (Rank 21..40 or primaryRole === "BDE")
+    if (actor.primaryRole === "BDE" || ((actor.primaryRoleRank ?? 0) >= 21 && (actor.primaryRoleRank ?? 0) <= 40)) {
+      const team = await prisma.team.findFirst({
+        where: { bdeId: actor.id, isDeleted: false },
+        include: { members: { where: { removedAt: null }, select: { userId: true } } },
+      });
+      const teamIds = team ? [actor.id, ...team.members.map((m) => m.userId)] : [actor.id];
+      scopeWhere.OR = [
+        { assignedToId: { in: teamIds } },
+        { createdById: actor.id },
+      ];
+    } else if ((actor.primaryRoleRank ?? 0) <= 20) {
+      // ISE & Personal Reps: own assigned only
+      scopeWhere.assignedToId = actor.id;
     }
   } else if (typeof actor === "number") {
-    baseWhere.assignedToId = actor;
+    scopeWhere.assignedToId = actor;
   }
 
   const [todayCount, upcomingCount, overdueCount] = await Promise.all([
-    prisma.followup.count({ where: { ...baseWhere, scheduledAt: { gte: startOfToday, lte: todayEnd } } }),
-    prisma.followup.count({ where: { ...baseWhere, scheduledAt: { gt: todayEnd } } }),
     prisma.followup.count({
       where: {
-        ...(baseWhere.companyId && { companyId: baseWhere.companyId }),
-        ...(baseWhere.branchId && { branchId: baseWhere.branchId }),
-        ...(baseWhere.assignedToId && { assignedToId: baseWhere.assignedToId }),
-        OR: [
-          { status: "MISSED" },
-          { status: "PENDING", scheduledAt: { lt: startOfToday } },
+        AND: [
+          scopeWhere,
+          { status: "PENDING" },
+          { scheduledAt: { gte: startOfToday, lte: todayEnd } },
+        ],
+      },
+    }),
+    prisma.followup.count({
+      where: {
+        AND: [
+          scopeWhere,
+          { status: "PENDING" },
+          { scheduledAt: { gt: todayEnd } },
+        ],
+      },
+    }),
+    prisma.followup.count({
+      where: {
+        AND: [
+          scopeWhere,
+          {
+            OR: [
+              { status: "MISSED" },
+              { status: "PENDING", scheduledAt: { lt: startOfToday } },
+            ],
+          },
         ],
       },
     }),
